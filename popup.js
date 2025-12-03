@@ -219,148 +219,119 @@ function checkForUpdates() {
 function checkGitHubUpdates(githubRepo, currentVersion, checkUpdateBtn, updateStatus) {
   const apiUrl = `https://api.github.com/repos/${githubRepo}/releases/latest`;
   
-  // 通过 background.js 代理请求（解决 CORS 和 403 问题）
-  chrome.runtime.sendMessage({
-    action: 'httpRequest',
+  // GitHub API 支持 CORS，可以直接使用 fetch
+  // 添加必要的请求头以避免 403 错误
+  fetch(apiUrl, {
     method: 'GET',
-    url: apiUrl,
     headers: {
       'Accept': 'application/vnd.github+json',
-      'User-Agent': 'SPX-Helper-Extension'
+      'X-GitHub-Api-Version': '2022-11-28'
     }
-  }, function(response) {
-    if (chrome.runtime.lastError) {
-      console.error('消息发送失败:', chrome.runtime.lastError);
-      updateStatus.className = 'update-status error';
-      updateStatus.innerHTML = `
-        <div class="update-info">
-          <p>无法连接到更新服务器</p>
-          <p class="update-desc" style="font-size: 11px; margin-top: 4px;">${chrome.runtime.lastError.message}</p>
-        </div>
-      `;
-      checkUpdateBtn.disabled = false;
-      checkUpdateBtn.textContent = '检查更新';
-      return;
-    }
-    
-    if (!response || !response.success) {
-      const errorMsg = response ? (response.error || '请求失败') : '请求失败';
-      const statusCode = response ? response.status : '未知';
-      console.error('GitHub API 请求失败:', errorMsg, 'Status:', statusCode);
-      console.error('响应详情:', response);
-      
-      updateStatus.className = 'update-status error';
-      updateStatus.innerHTML = `
-        <div class="update-info">
-          <p>无法连接到更新服务器</p>
-          <p class="update-desc" style="font-size: 11px; margin-top: 4px;">
-            ${errorMsg}${statusCode ? ` (${statusCode})` : ''}
-          </p>
-          ${statusCode === 403 ? '<p class="update-desc" style="font-size: 11px; margin-top: 4px; color: #666;">提示：可能是 GitHub API 速率限制，请稍后再试</p>' : ''}
-        </div>
-      `;
-      checkUpdateBtn.disabled = false;
-      checkUpdateBtn.textContent = '检查更新';
-      return;
-    }
-    
-    // 检查响应状态码
-    if (response.status !== 200) {
-      console.error('GitHub API 返回非 200 状态码:', response.status, response.statusText);
-      updateStatus.className = 'update-status error';
-      updateStatus.innerHTML = `
-        <div class="update-info">
-          <p>无法连接到更新服务器</p>
-          <p class="update-desc" style="font-size: 11px; margin-top: 4px;">
-            HTTP ${response.status}: ${response.statusText || '未知错误'}
-          </p>
-        </div>
-      `;
-      checkUpdateBtn.disabled = false;
-      checkUpdateBtn.textContent = '检查更新';
-      return;
-    }
-    
-    // 解析响应
-    try {
-      // 先检查响应体是否存在
-      if (!response.body) {
-        throw new Error('GitHub API 返回空响应');
+  })
+  .then(response => {
+    if (!response.ok) {
+      // 如果是 403，可能是速率限制或需要认证
+      if (response.status === 403) {
+        throw new Error('GitHub API 速率限制，请稍后再试');
       }
-      
-      console.log('GitHub API 响应体:', response.body);
-      const release = JSON.parse(response.body);
-      console.log('解析后的 Release 数据:', release);
-      
-      // 检查响应数据是否有效
-      if (!release) {
-        throw new Error('GitHub API 返回的数据为空');
-      }
-      
-      if (!release.tag_name) {
-        console.error('Release 数据缺少 tag_name:', release);
-        throw new Error('GitHub API 返回的数据格式不正确：缺少 tag_name');
-      }
-      
-      // 从 tag_name 提取版本号（格式可能是 "v2.6.5" 或 "2.6.5"）
-      const latestVersion = release.tag_name.replace(/^v/, '');
-      const isNewer = compareVersions(latestVersion, currentVersion) > 0;
-      
-      if (isNewer) {
-        // 有新版本，查找 zip 文件下载链接
-        const zipAsset = release.assets.find(asset => asset.name.endsWith('.zip'));
-        const downloadUrl = zipAsset ? zipAsset.browser_download_url : null;
-        
-        updateStatus.className = 'update-status update-available';
-        updateStatus.innerHTML = `
-          <div class="update-info">
-            <strong>发现新版本 v${latestVersion}</strong>
-            <p>当前版本：v${currentVersion}</p>
-            <p style="font-size: 12px; margin-top: 8px;">${release.name || release.tag_name}</p>
-            <div class="update-actions">
-              <button id="updateNowBtn" class="btn btn-primary btn-small" style="margin-top: 8px;">
-                ⬇️ 立即更新
-              </button>
-              <a href="${release.html_url}" target="_blank" class="btn btn-secondary btn-small" style="margin-top: 8px; text-decoration: none; display: inline-block;">
-                查看详情
-              </a>
-            </div>
-            <div id="updateProgress" style="display: none; margin-top: 12px; font-size: 12px;"></div>
-          </div>
-        `;
-        
-        // 绑定立即更新按钮
-        const updateNowBtn = document.getElementById('updateNowBtn');
-        if (updateNowBtn && downloadUrl) {
-          updateNowBtn.addEventListener('click', function() {
-            downloadAndInstallUpdate(downloadUrl, latestVersion, release.html_url);
-          });
-        } else if (updateNowBtn) {
-          // 如果没有找到 zip 文件，跳转到 Release 页面
-          updateNowBtn.addEventListener('click', function() {
-            chrome.tabs.create({ url: release.html_url });
-          });
-        }
-      } else {
-        // 已是最新版本
-        updateStatus.className = 'update-status up-to-date';
-        updateStatus.innerHTML = `✓ 已是最新版本 (v${currentVersion})`;
-      }
-    } catch (parseError) {
-      console.error('解析响应失败:', parseError);
-      updateStatus.className = 'update-status error';
-      updateStatus.innerHTML = `
-        <div class="update-info">
-          <p>无法解析更新信息</p>
-          <p class="update-desc" style="font-size: 11px; margin-top: 4px;">${parseError.message}</p>
-        </div>
-      `;
+      throw new Error(`GitHub API 错误: ${response.status} ${response.statusText}`);
     }
-    
+    return response.json();
+  })
+  .then(release => {
+    // 处理成功响应
+    handleReleaseResponse(release, currentVersion, checkUpdateBtn, updateStatus);
+  })
+  .catch(error => {
+    console.error('更新检查失败:', error);
+    updateStatus.className = 'update-status error';
+    updateStatus.innerHTML = `
+      <div class="update-info">
+        <p>无法连接到更新服务器</p>
+        <p class="update-desc" style="font-size: 11px; margin-top: 4px;">${error.message}</p>
+      </div>
+    `;
     checkUpdateBtn.disabled = false;
     checkUpdateBtn.textContent = '检查更新';
   });
 }
+
+// 处理 Release 响应
+function handleReleaseResponse(release, currentVersion, checkUpdateBtn, updateStatus) {
+  try {
+    // 检查响应数据是否有效
+    if (!release) {
+      throw new Error('GitHub API 返回的数据为空');
+    }
+    
+    if (!release.tag_name) {
+      console.error('Release 数据缺少 tag_name:', release);
+      throw new Error('GitHub API 返回的数据格式不正确：缺少 tag_name');
+    }
+    
+    console.log('GitHub Release 数据:', release);
+    
+    // 从 tag_name 提取版本号（格式可能是 "v2.6.5" 或 "2.6.5"）
+    const latestVersion = release.tag_name.replace(/^v/, '');
+    const isNewer = compareVersions(latestVersion, currentVersion) > 0;
+    
+    if (isNewer) {
+      // 有新版本，查找 zip 文件下载链接
+      const zipAsset = release.assets.find(asset => asset.name.endsWith('.zip'));
+      const downloadUrl = zipAsset ? zipAsset.browser_download_url : null;
+      
+      updateStatus.className = 'update-status update-available';
+      updateStatus.innerHTML = `
+        <div class="update-info">
+          <strong>发现新版本 v${latestVersion}</strong>
+          <p>当前版本：v${currentVersion}</p>
+          <p style="font-size: 12px; margin-top: 8px;">${release.name || release.tag_name}</p>
+          <div class="update-actions">
+            <button id="updateNowBtn" class="btn btn-primary btn-small" style="margin-top: 8px;">
+              ⬇️ 立即更新
+            </button>
+            <a href="${release.html_url}" target="_blank" class="btn btn-secondary btn-small" style="margin-top: 8px; text-decoration: none; display: inline-block;">
+              查看详情
+            </a>
+          </div>
+          <div id="updateProgress" style="display: none; margin-top: 12px; font-size: 12px;"></div>
+        </div>
+      `;
+      
+      // 绑定立即更新按钮
+      const updateNowBtn = document.getElementById('updateNowBtn');
+      if (updateNowBtn && downloadUrl) {
+        updateNowBtn.addEventListener('click', function() {
+          downloadAndInstallUpdate(downloadUrl, latestVersion, release.html_url);
+        });
+      } else if (updateNowBtn) {
+        // 如果没有找到 zip 文件，跳转到 Release 页面
+        updateNowBtn.addEventListener('click', function() {
+          chrome.tabs.create({ url: release.html_url });
+        });
+      }
+    } else {
+      // 已是最新版本
+      updateStatus.className = 'update-status up-to-date';
+      updateStatus.innerHTML = `✓ 已是最新版本 (v${currentVersion})`;
+    }
+    
+    checkUpdateBtn.disabled = false;
+    checkUpdateBtn.textContent = '检查更新';
+  } catch (parseError) {
+    console.error('处理 Release 响应失败:', parseError);
+    updateStatus.className = 'update-status error';
+    updateStatus.innerHTML = `
+      <div class="update-info">
+        <p>无法解析更新信息</p>
+        <p class="update-desc" style="font-size: 11px; margin-top: 4px;">${parseError.message}</p>
+      </div>
+    `;
+    checkUpdateBtn.disabled = false;
+    checkUpdateBtn.textContent = '检查更新';
+  }
+}
+
 
 // 显示手动更新说明
 function showManualUpdateInstructions(currentVersion, checkUpdateBtn, updateStatus) {
