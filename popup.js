@@ -244,13 +244,36 @@ function checkGitHubUpdates(githubRepo, currentVersion, checkUpdateBtn, updateSt
     }
     
     if (!response || !response.success) {
-      const errorMsg = response ? response.error : '请求失败';
-      console.error('GitHub API 请求失败:', errorMsg);
+      const errorMsg = response ? (response.error || '请求失败') : '请求失败';
+      const statusCode = response ? response.status : '未知';
+      console.error('GitHub API 请求失败:', errorMsg, 'Status:', statusCode);
+      console.error('响应详情:', response);
+      
       updateStatus.className = 'update-status error';
       updateStatus.innerHTML = `
         <div class="update-info">
           <p>无法连接到更新服务器</p>
-          <p class="update-desc" style="font-size: 11px; margin-top: 4px;">${errorMsg}</p>
+          <p class="update-desc" style="font-size: 11px; margin-top: 4px;">
+            ${errorMsg}${statusCode ? ` (${statusCode})` : ''}
+          </p>
+          ${statusCode === 403 ? '<p class="update-desc" style="font-size: 11px; margin-top: 4px; color: #666;">提示：可能是 GitHub API 速率限制，请稍后再试</p>' : ''}
+        </div>
+      `;
+      checkUpdateBtn.disabled = false;
+      checkUpdateBtn.textContent = '检查更新';
+      return;
+    }
+    
+    // 检查响应状态码
+    if (response.status !== 200) {
+      console.error('GitHub API 返回非 200 状态码:', response.status, response.statusText);
+      updateStatus.className = 'update-status error';
+      updateStatus.innerHTML = `
+        <div class="update-info">
+          <p>无法连接到更新服务器</p>
+          <p class="update-desc" style="font-size: 11px; margin-top: 4px;">
+            HTTP ${response.status}: ${response.statusText || '未知错误'}
+          </p>
         </div>
       `;
       checkUpdateBtn.disabled = false;
@@ -261,6 +284,13 @@ function checkGitHubUpdates(githubRepo, currentVersion, checkUpdateBtn, updateSt
     // 解析响应
     try {
       const release = JSON.parse(response.body);
+      
+      // 检查响应数据是否有效
+      if (!release || !release.tag_name) {
+        throw new Error('GitHub API 返回的数据格式不正确');
+      }
+      
+      console.log('GitHub Release 数据:', release);
       
       // 从 tag_name 提取版本号（格式可能是 "v2.6.5" 或 "2.6.5"）
       const latestVersion = release.tag_name.replace(/^v/, '');
