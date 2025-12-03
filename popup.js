@@ -272,7 +272,10 @@ function checkGitHubUpdates(githubRepo, currentVersion, checkUpdateBtn, updateSt
       const isNewer = compareVersions(latestVersion, currentVersion) > 0;
       
       if (isNewer) {
-        // 有新版本
+        // 有新版本，查找 zip 文件下载链接
+        const zipAsset = release.assets.find(asset => asset.name.endsWith('.zip'));
+        const downloadUrl = zipAsset ? zipAsset.browser_download_url : null;
+        
         updateStatus.className = 'update-status update-available';
         updateStatus.innerHTML = `
           <div class="update-info">
@@ -280,12 +283,29 @@ function checkGitHubUpdates(githubRepo, currentVersion, checkUpdateBtn, updateSt
             <p>当前版本：v${currentVersion}</p>
             <p style="font-size: 12px; margin-top: 8px;">${release.name || release.tag_name}</p>
             <div class="update-actions">
-              <a href="${release.html_url}" target="_blank" class="btn btn-primary btn-small" style="margin-top: 8px; text-decoration: none; display: inline-block;">
-                前往下载
+              <button id="updateNowBtn" class="btn btn-primary btn-small" style="margin-top: 8px;">
+                ⬇️ 立即更新
+              </button>
+              <a href="${release.html_url}" target="_blank" class="btn btn-secondary btn-small" style="margin-top: 8px; text-decoration: none; display: inline-block;">
+                查看详情
               </a>
             </div>
+            <div id="updateProgress" style="display: none; margin-top: 12px; font-size: 12px;"></div>
           </div>
         `;
+        
+        // 绑定立即更新按钮
+        const updateNowBtn = document.getElementById('updateNowBtn');
+        if (updateNowBtn && downloadUrl) {
+          updateNowBtn.addEventListener('click', function() {
+            downloadAndInstallUpdate(downloadUrl, latestVersion, release.html_url);
+          });
+        } else if (updateNowBtn) {
+          // 如果没有找到 zip 文件，跳转到 Release 页面
+          updateNowBtn.addEventListener('click', function() {
+            chrome.tabs.create({ url: release.html_url });
+          });
+        }
       } else {
         // 已是最新版本
         updateStatus.className = 'update-status up-to-date';
@@ -347,6 +367,112 @@ function compareVersions(version1, version2) {
   }
   
   return 0;
+}
+
+// 下载并安装更新
+function downloadAndInstallUpdate(downloadUrl, version, releaseUrl) {
+  const updateProgress = document.getElementById('updateProgress');
+  const updateNowBtn = document.getElementById('updateNowBtn');
+  
+  if (!updateProgress || !updateNowBtn) return;
+  
+  // 显示下载进度
+  updateProgress.style.display = 'block';
+  updateProgress.innerHTML = '📥 正在下载更新...';
+  updateNowBtn.disabled = true;
+  updateNowBtn.textContent = '下载中...';
+  
+  // 使用 Chrome Downloads API 下载文件
+  const filename = `SPX_Helper_v${version}.zip`;
+  
+  // 监听下载状态
+  const downloadListener = function(downloadId, downloadDelta) {
+    if (downloadDelta.state && downloadDelta.state.current === 'complete') {
+      // 下载完成
+      updateProgress.innerHTML = '✅ 下载完成！';
+      setTimeout(() => {
+        showInstallInstructions(version, releaseUrl);
+      }, 500);
+      chrome.downloads.onChanged.removeListener(downloadListener);
+    } else if (downloadDelta.error) {
+      // 下载失败
+      updateProgress.innerHTML = `
+        <div style="color: #dc2626;">
+          ⚠️ 下载失败：${downloadDelta.error.current || '未知错误'}<br>
+          请<a href="${downloadUrl}" target="_blank" style="color: #667eea; text-decoration: underline;">点击这里手动下载</a>
+        </div>
+      `;
+      updateNowBtn.disabled = false;
+      updateNowBtn.textContent = '⬇️ 立即更新';
+      chrome.downloads.onChanged.removeListener(downloadListener);
+    }
+  };
+  
+  chrome.downloads.onChanged.addListener(downloadListener);
+  
+  // 开始下载
+  chrome.downloads.download({
+    url: downloadUrl,
+    filename: filename,
+    saveAs: false
+  }, function(downloadId) {
+    if (chrome.runtime.lastError) {
+      // 如果 downloads API 不可用，使用链接下载
+      updateProgress.innerHTML = `
+        <div style="color: #dc2626;">
+          ⚠️ 无法自动下载，请<a href="${downloadUrl}" target="_blank" style="color: #667eea; text-decoration: underline;">点击这里手动下载</a>
+        </div>
+      `;
+      updateNowBtn.disabled = false;
+      updateNowBtn.textContent = '⬇️ 立即更新';
+      chrome.downloads.onChanged.removeListener(downloadListener);
+    } else {
+      // 下载已启动，监听器会处理完成事件
+      console.log('下载已启动，ID:', downloadId);
+    }
+  });
+}
+
+// 显示安装指引
+function showInstallInstructions(version, releaseUrl) {
+  const updateProgress = document.getElementById('updateProgress');
+  const updateNowBtn = document.getElementById('updateNowBtn');
+  
+  if (!updateProgress) return;
+  
+  updateProgress.innerHTML = `
+    <div style="background: #f0f9ff; padding: 12px; border-radius: 8px; margin-top: 8px; text-align: left;">
+      <strong style="display: block; margin-bottom: 8px; color: #1e40af;">📦 安装步骤：</strong>
+      <ol style="margin: 0; padding-left: 20px; font-size: 12px; line-height: 1.8; color: #1e40af;">
+        <li>打开 <code style="background: rgba(255,255,255,0.5); padding: 2px 6px; border-radius: 4px;">chrome://extensions/</code></li>
+        <li>开启右上角"开发者模式"</li>
+        <li>点击"加载已解压的扩展程序"</li>
+        <li>选择下载的 zip 文件解压后的文件夹</li>
+        <li>完成！扩展已更新到 v${version}</li>
+      </ol>
+      <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #bfdbfe;">
+        <button id="openExtensionsPage" class="btn btn-primary btn-small" style="font-size: 11px; padding: 4px 8px;">
+          🔗 打开扩展管理页面
+        </button>
+        <a href="${releaseUrl}" target="_blank" class="btn btn-secondary btn-small" style="font-size: 11px; padding: 4px 8px; text-decoration: none; display: inline-block; margin-left: 6px;">
+          📋 查看更新日志
+        </a>
+      </div>
+    </div>
+  `;
+  
+  if (updateNowBtn) {
+    updateNowBtn.disabled = false;
+    updateNowBtn.textContent = '✅ 下载完成';
+  }
+  
+  // 绑定打开扩展管理页面按钮
+  const openExtensionsPageBtn = document.getElementById('openExtensionsPage');
+  if (openExtensionsPageBtn) {
+    openExtensionsPageBtn.addEventListener('click', function() {
+      chrome.tabs.create({ url: 'chrome://extensions/' });
+    });
+  }
 }
 
 // 导出所有数据

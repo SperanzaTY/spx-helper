@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "SPX Helper",
-  "version": "2.6.6",
+  "version": "2.6.7",
   "description": "Shopee大数据开发助手 - 快速链接、代码片段、时区转换、SQL修正",
   "author": "tianyi.liang",
   "permissions": [
@@ -9,7 +9,8 @@
     "alarms",
     "notifications",
     "activeTab",
-    "identity"
+    "identity",
+    "downloads"
   ],
   "host_permissions": [
     "https://smart.shopee.io/*",
