@@ -261,7 +261,7 @@ function checkGitHubUpdates(githubRepo, currentVersion, checkUpdateBtn, updateSt
     // 解析响应
     try {
       const release = JSON.parse(response.body);
-    .then(release => {
+      
       // 从 tag_name 提取版本号（格式可能是 "v2.6.5" 或 "2.6.5"）
       const latestVersion = release.tag_name.replace(/^v/, '');
       const isNewer = compareVersions(latestVersion, currentVersion) > 0;
@@ -306,21 +306,20 @@ function checkGitHubUpdates(githubRepo, currentVersion, checkUpdateBtn, updateSt
         updateStatus.className = 'update-status up-to-date';
         updateStatus.innerHTML = `✓ 已是最新版本 (v${currentVersion})`;
       }
-    })
-    .catch(error => {
-      console.error('更新检查失败:', error);
+    } catch (parseError) {
+      console.error('解析响应失败:', parseError);
       updateStatus.className = 'update-status error';
       updateStatus.innerHTML = `
         <div class="update-info">
-          <p>无法连接到更新服务器</p>
-          <p class="update-desc" style="font-size: 11px; margin-top: 4px;">${error.message}</p>
+          <p>无法解析更新信息</p>
+          <p class="update-desc" style="font-size: 11px; margin-top: 4px;">${parseError.message}</p>
         </div>
       `;
-    })
-    .finally(() => {
-      checkUpdateBtn.disabled = false;
-      checkUpdateBtn.textContent = '检查更新';
-    });
+    }
+    
+    checkUpdateBtn.disabled = false;
+    checkUpdateBtn.textContent = '检查更新';
+  });
 }
 
 // 显示手动更新说明
