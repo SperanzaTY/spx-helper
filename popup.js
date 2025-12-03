@@ -165,60 +165,20 @@ function initSettings() {
     checkUpdateBtn.addEventListener('click', checkForUpdates);
   }
   
-  // 加载更新检查配置
+  // 加载更新检查配置（后台自动配置，不显示给用户）
   loadUpdateConfig();
-  
-  // 保存更新配置按钮
-  const saveUpdateConfigBtn = document.getElementById('saveUpdateConfigBtn');
-  const githubRepoInput = document.getElementById('githubRepoInput');
-  if (saveUpdateConfigBtn && githubRepoInput) {
-    saveUpdateConfigBtn.addEventListener('click', saveUpdateConfig);
-  }
 }
 
-// 加载更新检查配置
+// 加载更新检查配置（后台自动配置，不显示给用户）
 function loadUpdateConfig() {
   chrome.storage.local.get(['updateCheckConfig'], function(result) {
     const config = result.updateCheckConfig || {};
-    const githubRepoInput = document.getElementById('githubRepoInput');
     
-    // 如果没有配置，设置默认值
+    // 如果没有配置，设置默认值（写死在代码中）
     if (!config.githubRepo) {
       config.githubRepo = 'SperanzaTY/spx-helper';
       chrome.storage.local.set({ updateCheckConfig: config });
     }
-    
-    if (githubRepoInput) {
-      githubRepoInput.value = config.githubRepo || 'SperanzaTY/spx-helper';
-    }
-  });
-}
-
-// 保存更新检查配置
-function saveUpdateConfig() {
-  const githubRepoInput = document.getElementById('githubRepoInput');
-  const updateConfigStatus = document.getElementById('updateConfigStatus');
-  
-  if (!githubRepoInput || !updateConfigStatus) return;
-  
-  const repo = githubRepoInput.value.trim();
-  
-  // 验证格式
-  if (repo && !/^[\w\-\.]+\/[\w\-\.]+$/.test(repo)) {
-    updateConfigStatus.textContent = '❌ 格式错误，应为：owner/repo';
-    updateConfigStatus.style.color = '#dc2626';
-    return;
-  }
-  
-  const config = { githubRepo: repo || null };
-  
-  chrome.storage.local.set({ updateCheckConfig: config }, function() {
-    updateConfigStatus.textContent = repo ? '✓ 配置已保存' : '✓ 已清除配置';
-    updateConfigStatus.style.color = '#16a34a';
-    
-    setTimeout(() => {
-      updateConfigStatus.textContent = '';
-    }, 2000);
   });
 }
 

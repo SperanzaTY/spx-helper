@@ -25,41 +25,6 @@
           <button id="closeSettings" class="settings-close">×</button>
         </div>
         <div class="settings-body">
-          <!-- 版本信息 -->
-          <div class="setting-section">
-            <div class="setting-section-title">关于</div>
-            <div class="version-info">
-              <div class="version-item">
-                <span class="version-label">当前版本：</span>
-                <span class="version-value" id="currentVersion">-</span>
-              </div>
-              <div class="version-actions">
-                <button id="checkUpdateBtn" class="btn btn-primary btn-small">检查更新</button>
-              </div>
-              <div id="updateStatus" class="update-status" style="display: none;"></div>
-              
-              <!-- GitHub 仓库配置 -->
-              <div class="update-config" style="margin-top: 16px; padding-top: 16px; border-top: 1px solid #e5e7eb;">
-                <div class="setting-section-desc" style="margin-bottom: 8px;">
-                  配置 GitHub 仓库以启用自动更新检查（格式：owner/repo）
-                </div>
-                <div style="display: flex; gap: 8px; align-items: center;">
-                  <input 
-                    type="text" 
-                    id="githubRepoInput" 
-                    placeholder="例如: username/spx-helper"
-                    class="input-text"
-                    style="flex: 1; padding: 6px 10px; font-size: 12px;"
-                  >
-                  <button id="saveUpdateConfigBtn" class="btn btn-secondary btn-small">保存</button>
-                </div>
-                <div id="updateConfigStatus" style="margin-top: 6px; font-size: 11px; color: #666;"></div>
-              </div>
-            </div>
-          </div>
-          
-          <div class="settings-divider"></div>
-          
           <div class="setting-item">
             <div class="setting-info">
               <div class="setting-label">🪟 独立窗口模式</div>
@@ -90,6 +55,23 @@
             <div class="setting-section-desc">清除所有本地数据，此操作不可恢复</div>
             <div class="setting-actions">
               <button id="clearAllDataBtn" class="btn btn-danger btn-small">清除所有数据</button>
+            </div>
+          </div>
+          
+          <div class="settings-divider"></div>
+          
+          <!-- 版本信息 -->
+          <div class="setting-section">
+            <div class="setting-section-title">关于</div>
+            <div class="version-info">
+              <div class="version-item">
+                <span class="version-label">当前版本：</span>
+                <span class="version-value" id="currentVersion">-</span>
+              </div>
+              <div class="version-actions">
+                <button id="checkUpdateBtn" class="btn btn-primary btn-small">检查更新</button>
+              </div>
+              <div id="updateStatus" class="update-status" style="display: none;"></div>
             </div>
           </div>
         </div>
