@@ -219,9 +219,19 @@ function checkForUpdates() {
 function checkGitHubUpdates(githubRepo, currentVersion, checkUpdateBtn, updateStatus) {
   const apiUrl = `https://api.github.com/repos/${githubRepo}/releases/latest`;
   
-  fetch(apiUrl)
+  // 添加必要的请求头，避免 403 错误
+  fetch(apiUrl, {
+    headers: {
+      'Accept': 'application/vnd.github+json',
+      'User-Agent': 'SPX-Helper-Extension'
+    }
+  })
     .then(response => {
       if (!response.ok) {
+        // 如果是 403，可能是速率限制或需要认证
+        if (response.status === 403) {
+          throw new Error('GitHub API 速率限制，请稍后再试');
+        }
         throw new Error(`GitHub API 错误: ${response.status}`);
       }
       return response.json();
