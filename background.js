@@ -157,13 +157,28 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
     // Service Worker 中的 fetch 不受 CORS 限制
     const fetchOptions = {
       method: method,
-      headers: headers || {}
+      headers: {}
     };
+    
+    // 合并请求头（如果提供了的话）
+    if (headers) {
+      Object.assign(fetchOptions.headers, headers);
+    }
+    
+    // 对于 GitHub API，确保有必要的请求头
+    if (url.includes('api.github.com')) {
+      fetchOptions.headers['Accept'] = 'application/vnd.github+json';
+      fetchOptions.headers['User-Agent'] = 'SPX-Helper-Extension/1.0';
+      // 移除可能导致问题的 User-Agent（如果存在）
+      delete fetchOptions.headers['user-agent'];
+    }
     
     // 处理 body
     if (body && !['GET', 'HEAD'].includes(method)) {
       fetchOptions.body = body;
     }
+    
+    console.log('🔵 Background: Fetch 选项:', fetchOptions);
     
     // 使用 fetch 发送请求（Service Worker 中可以绕过 CORS）
     fetch(url, fetchOptions)
