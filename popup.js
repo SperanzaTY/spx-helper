@@ -233,15 +233,28 @@ function checkGitHubUpdates(githubRepo, currentVersion, checkUpdateBtn, updateSt
       return response.text().then(text => {
         console.error('❌ GitHub API 错误响应:', text);
         let errorMsg = `GitHub API 错误: ${response.status} ${response.statusText}`;
+        let isRateLimit = false;
         
         // 尝试解析错误信息
         try {
           const errorData = JSON.parse(text);
           if (errorData.message) {
             errorMsg = errorData.message;
+            // 检查是否是速率限制
+            if (errorData.message.includes('rate limit') || response.status === 403) {
+              isRateLimit = true;
+            }
           }
         } catch (e) {
-          // 不是 JSON，使用原始文本
+          // 不是 JSON，检查状态码
+          if (response.status === 403) {
+            isRateLimit = true;
+          }
+        }
+        
+        // 如果是速率限制，提供更友好的错误信息
+        if (isRateLimit) {
+          throw new Error('RATE_LIMIT');
         }
         
         throw new Error(errorMsg);
@@ -257,15 +270,32 @@ function checkGitHubUpdates(githubRepo, currentVersion, checkUpdateBtn, updateSt
   .catch(error => {
     console.error('❌ 更新检查失败:', error);
     updateStatus.className = 'update-status error';
-    updateStatus.innerHTML = `
-      <div class="update-info">
-        <p>无法连接到更新服务器</p>
-        <p class="update-desc" style="font-size: 11px; margin-top: 4px;">${error.message}</p>
-        <p class="update-desc" style="font-size: 11px; margin-top: 4px; color: #666;">
-          请检查网络连接或稍后再试
-        </p>
-      </div>
-    `;
+    
+    // 特殊处理速率限制错误
+    if (error.message === 'RATE_LIMIT' || error.message.includes('rate limit')) {
+      updateStatus.innerHTML = `
+        <div class="update-info">
+          <p>⚠️ GitHub API 速率限制</p>
+          <p class="update-desc" style="font-size: 11px; margin-top: 4px;">
+            未认证请求每小时限制 60 次，请稍后再试
+          </p>
+          <p class="update-desc" style="font-size: 11px; margin-top: 8px; color: #666;">
+            或者访问 <a href="https://github.com/${githubRepo}/releases" target="_blank" style="color: #667eea; text-decoration: underline;">GitHub Releases 页面</a> 手动检查更新
+          </p>
+        </div>
+      `;
+    } else {
+      updateStatus.innerHTML = `
+        <div class="update-info">
+          <p>无法连接到更新服务器</p>
+          <p class="update-desc" style="font-size: 11px; margin-top: 4px;">${error.message}</p>
+          <p class="update-desc" style="font-size: 11px; margin-top: 4px; color: #666;">
+            请检查网络连接或稍后再试
+          </p>
+        </div>
+      `;
+    }
+    
     checkUpdateBtn.disabled = false;
     checkUpdateBtn.textContent = '检查更新';
   });
