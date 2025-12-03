@@ -374,19 +374,32 @@ function downloadAndInstallUpdate(downloadUrl, version, releaseUrl) {
   const updateProgress = document.getElementById('updateProgress');
   const updateNowBtn = document.getElementById('updateNowBtn');
   
-  if (!updateProgress || !updateNowBtn) return;
+  if (!updateProgress || !updateNowBtn) {
+    console.error('更新进度元素未找到');
+    return;
+  }
+  
+  console.log('开始下载更新:', downloadUrl);
   
   // 显示下载进度
   updateProgress.style.display = 'block';
-  updateProgress.innerHTML = '📥 正在下载更新...';
+  updateProgress.innerHTML = '📥 正在启动下载...';
   updateNowBtn.disabled = true;
   updateNowBtn.textContent = '下载中...';
   
-  // 使用 Chrome Downloads API 下载文件
+  // 尝试使用 Chrome Downloads API
   const filename = `SPX_Helper_v${version}.zip`;
+  let currentDownloadId = null;
   
   // 监听下载状态
-  const downloadListener = function(downloadId, downloadDelta) {
+  const downloadListener = function(downloadDelta) {
+    // 只处理当前下载的状态变化
+    if (currentDownloadId !== null && downloadDelta.id !== currentDownloadId) {
+      return;
+    }
+    
+    console.log('下载状态变化:', downloadDelta);
+    
     if (downloadDelta.state && downloadDelta.state.current === 'complete') {
       // 下载完成
       updateProgress.innerHTML = '✅ 下载完成！';
@@ -396,9 +409,11 @@ function downloadAndInstallUpdate(downloadUrl, version, releaseUrl) {
       chrome.downloads.onChanged.removeListener(downloadListener);
     } else if (downloadDelta.error) {
       // 下载失败
+      const errorMsg = downloadDelta.error.current || '未知错误';
+      console.error('下载失败:', errorMsg);
       updateProgress.innerHTML = `
         <div style="color: #dc2626;">
-          ⚠️ 下载失败：${downloadDelta.error.current || '未知错误'}<br>
+          ⚠️ 下载失败：${errorMsg}<br>
           请<a href="${downloadUrl}" target="_blank" style="color: #667eea; text-decoration: underline;">点击这里手动下载</a>
         </div>
       `;
@@ -408,29 +423,75 @@ function downloadAndInstallUpdate(downloadUrl, version, releaseUrl) {
     }
   };
   
+  // 添加监听器
   chrome.downloads.onChanged.addListener(downloadListener);
   
   // 开始下载
-  chrome.downloads.download({
-    url: downloadUrl,
-    filename: filename,
-    saveAs: false
-  }, function(downloadId) {
-    if (chrome.runtime.lastError) {
-      // 如果 downloads API 不可用，使用链接下载
-      updateProgress.innerHTML = `
-        <div style="color: #dc2626;">
-          ⚠️ 无法自动下载，请<a href="${downloadUrl}" target="_blank" style="color: #667eea; text-decoration: underline;">点击这里手动下载</a>
-        </div>
-      `;
-      updateNowBtn.disabled = false;
-      updateNowBtn.textContent = '⬇️ 立即更新';
-      chrome.downloads.onChanged.removeListener(downloadListener);
-    } else {
-      // 下载已启动，监听器会处理完成事件
-      console.log('下载已启动，ID:', downloadId);
-    }
-  });
+  try {
+    chrome.downloads.download({
+      url: downloadUrl,
+      filename: filename,
+      saveAs: false
+    }, function(downloadId) {
+      if (chrome.runtime.lastError) {
+        // Downloads API 失败，使用新标签页下载
+        const errorMsg = chrome.runtime.lastError.message;
+        console.error('下载 API 错误:', errorMsg);
+        updateProgress.innerHTML = `
+          <div style="color: #92400e; background: #fef3c7; padding: 8px; border-radius: 6px;">
+            📥 正在新标签页中打开下载链接...<br>
+            <small>如果下载未开始，请<a href="${downloadUrl}" target="_blank" style="color: #667eea; text-decoration: underline;">点击这里</a></small>
+          </div>
+        `;
+        // 在新标签页打开下载链接
+        chrome.tabs.create({ url: downloadUrl });
+        // 延迟显示安装指引
+        setTimeout(() => {
+          showInstallInstructions(version, releaseUrl);
+        }, 2000);
+        updateNowBtn.disabled = false;
+        updateNowBtn.textContent = '✅ 已打开下载';
+        chrome.downloads.onChanged.removeListener(downloadListener);
+      } else if (downloadId) {
+        // 下载已启动
+        currentDownloadId = downloadId;
+        console.log('下载已启动，ID:', downloadId);
+        updateProgress.innerHTML = '📥 正在下载更新...';
+      } else {
+        // 下载 ID 为空
+        console.error('下载 ID 为空，使用备用方案');
+        updateProgress.innerHTML = `
+          <div style="color: #92400e; background: #fef3c7; padding: 8px; border-radius: 6px;">
+            📥 正在新标签页中打开下载链接...<br>
+            <small>如果下载未开始，请<a href="${downloadUrl}" target="_blank" style="color: #667eea; text-decoration: underline;">点击这里</a></small>
+          </div>
+        `;
+        chrome.tabs.create({ url: downloadUrl });
+        setTimeout(() => {
+          showInstallInstructions(version, releaseUrl);
+        }, 2000);
+        updateNowBtn.disabled = false;
+        updateNowBtn.textContent = '✅ 已打开下载';
+        chrome.downloads.onChanged.removeListener(downloadListener);
+      }
+    });
+  } catch (error) {
+    // 捕获异常，使用备用方案
+    console.error('下载异常:', error);
+    updateProgress.innerHTML = `
+      <div style="color: #92400e; background: #fef3c7; padding: 8px; border-radius: 6px;">
+        📥 正在新标签页中打开下载链接...<br>
+        <small>如果下载未开始，请<a href="${downloadUrl}" target="_blank" style="color: #667eea; text-decoration: underline;">点击这里</a></small>
+      </div>
+    `;
+    chrome.tabs.create({ url: downloadUrl });
+    setTimeout(() => {
+      showInstallInstructions(version, releaseUrl);
+    }, 2000);
+    updateNowBtn.disabled = false;
+    updateNowBtn.textContent = '✅ 已打开下载';
+    chrome.downloads.onChanged.removeListener(downloadListener);
+  }
 }
 
 // 显示安装指引
