@@ -219,36 +219,51 @@ function checkForUpdates() {
 function checkGitHubUpdates(githubRepo, currentVersion, checkUpdateBtn, updateStatus) {
   const apiUrl = `https://api.github.com/repos/${githubRepo}/releases/latest`;
   
+  console.log('🟢 开始检查更新，URL:', apiUrl);
+  
   // GitHub API 支持 CORS，可以直接使用 fetch
-  // 添加必要的请求头以避免 403 错误
-  fetch(apiUrl, {
-    method: 'GET',
-    headers: {
-      'Accept': 'application/vnd.github+json',
-      'X-GitHub-Api-Version': '2022-11-28'
-    }
-  })
+  // 不添加自定义请求头，让浏览器使用默认请求头（避免 403）
+  fetch(apiUrl)
   .then(response => {
+    console.log('🟢 GitHub API 响应状态:', response.status, response.statusText);
+    console.log('🟢 响应头:', Object.fromEntries(response.headers.entries()));
+    
     if (!response.ok) {
-      // 如果是 403，可能是速率限制或需要认证
-      if (response.status === 403) {
-        throw new Error('GitHub API 速率限制，请稍后再试');
-      }
-      throw new Error(`GitHub API 错误: ${response.status} ${response.statusText}`);
+      // 读取错误响应体
+      return response.text().then(text => {
+        console.error('❌ GitHub API 错误响应:', text);
+        let errorMsg = `GitHub API 错误: ${response.status} ${response.statusText}`;
+        
+        // 尝试解析错误信息
+        try {
+          const errorData = JSON.parse(text);
+          if (errorData.message) {
+            errorMsg = errorData.message;
+          }
+        } catch (e) {
+          // 不是 JSON，使用原始文本
+        }
+        
+        throw new Error(errorMsg);
+      });
     }
     return response.json();
   })
   .then(release => {
+    console.log('✅ GitHub API 响应成功:', release);
     // 处理成功响应
     handleReleaseResponse(release, currentVersion, checkUpdateBtn, updateStatus);
   })
   .catch(error => {
-    console.error('更新检查失败:', error);
+    console.error('❌ 更新检查失败:', error);
     updateStatus.className = 'update-status error';
     updateStatus.innerHTML = `
       <div class="update-info">
         <p>无法连接到更新服务器</p>
         <p class="update-desc" style="font-size: 11px; margin-top: 4px;">${error.message}</p>
+        <p class="update-desc" style="font-size: 11px; margin-top: 4px; color: #666;">
+          请检查网络连接或稍后再试
+        </p>
       </div>
     `;
     checkUpdateBtn.disabled = false;
