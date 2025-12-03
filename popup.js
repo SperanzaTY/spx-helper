@@ -283,14 +283,24 @@ function checkGitHubUpdates(githubRepo, currentVersion, checkUpdateBtn, updateSt
     
     // 解析响应
     try {
-      const release = JSON.parse(response.body);
-      
-      // 检查响应数据是否有效
-      if (!release || !release.tag_name) {
-        throw new Error('GitHub API 返回的数据格式不正确');
+      // 先检查响应体是否存在
+      if (!response.body) {
+        throw new Error('GitHub API 返回空响应');
       }
       
-      console.log('GitHub Release 数据:', release);
+      console.log('GitHub API 响应体:', response.body);
+      const release = JSON.parse(response.body);
+      console.log('解析后的 Release 数据:', release);
+      
+      // 检查响应数据是否有效
+      if (!release) {
+        throw new Error('GitHub API 返回的数据为空');
+      }
+      
+      if (!release.tag_name) {
+        console.error('Release 数据缺少 tag_name:', release);
+        throw new Error('GitHub API 返回的数据格式不正确：缺少 tag_name');
+      }
       
       // 从 tag_name 提取版本号（格式可能是 "v2.6.5" 或 "2.6.5"）
       const latestVersion = release.tag_name.replace(/^v/, '');
