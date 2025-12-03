@@ -144,6 +144,7 @@ checkWindowModeSetting();
 chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
   console.log('收到消息:', request);
   
+  
   // HTTP 请求代理（解决 CORS 问题）
   if (request.action === 'httpRequest') {
     const { method, url, headers, body } = request;

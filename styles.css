@@ -114,6 +114,7 @@ header {
   padding: 20px;
   text-align: center;
   flex-shrink: 0; /* 防止header被压缩 */
+  transition: padding 0.3s ease; /* 添加过渡效果 */
 }
 
 .header-main {
@@ -140,6 +141,13 @@ header h1 {
   font-size: 16px;
   cursor: pointer;
   transition: all 0.3s ease;
+}
+
+/* 简洁模式下的设置按钮居中 */
+header.compact-mode .header-btn {
+  position: static;
+  transform: none;
+  margin: 0 auto;
 }
 
 .header-btn:hover {
