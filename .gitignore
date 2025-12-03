@@ -1,0 +1,51 @@
+# 依赖
+node_modules/
+npm-debug.log
+yarn-error.log
+package-lock.json
+yarn.lock
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.sublime-project
+*.sublime-workspace
+
+# 构建输出和发布包
+dist/
+build/
+releases/
+*.crx
+*.pem
+*.zip
+SPX_Helper_v*.zip
+
+# 临时文件和测试
+tmp/
+temp/
+*.tmp
+*.log
+test.html
+*.html.backup
+
+# 截图和临时图片（保留 images/ 目录下的图标）
+image/
+
+# 测试覆盖率
+coverage/
+.nyc_output/
+
+# 环境变量
+.env
+.env.local
+
+# 密钥文件
+key.pem
+
+# Playwright
+.playwright-mcp/
+

@@ -1,0 +1,1151 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="author" content="tianyi.liang">
+  <title>SPX Helper</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="header-main">
+        <h1>⚡ SPX Helper</h1>
+        <button id="settingsBtn" class="header-btn" title="设置">⚙️</button>
+      </div>
+      <div class="subtitle">Shopee 大数据开发助手</div>
+    </header>
+    
+    <!-- 设置面板 -->
+    <div id="settingsPanel" class="settings-panel" style="display: none;">
+      <div class="settings-content">
+        <div class="settings-header">
+          <h3>⚙️ 设置</h3>
+          <button id="closeSettings" class="settings-close">×</button>
+        </div>
+        <div class="settings-body">
+          <!-- 版本信息 -->
+          <div class="setting-section">
+            <div class="setting-section-title">关于</div>
+            <div class="version-info">
+              <div class="version-item">
+                <span class="version-label">当前版本：</span>
+                <span class="version-value" id="currentVersion">-</span>
+              </div>
+              <div class="version-actions">
+                <button id="checkUpdateBtn" class="btn btn-primary btn-small">检查更新</button>
+              </div>
+              <div id="updateStatus" class="update-status" style="display: none;"></div>
+              
+              <!-- GitHub 仓库配置 -->
+              <div class="update-config" style="margin-top: 16px; padding-top: 16px; border-top: 1px solid #e5e7eb;">
+                <div class="setting-section-desc" style="margin-bottom: 8px;">
+                  配置 GitHub 仓库以启用自动更新检查（格式：owner/repo）
+                </div>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                  <input 
+                    type="text" 
+                    id="githubRepoInput" 
+                    placeholder="例如: username/spx-helper"
+                    class="input-text"
+                    style="flex: 1; padding: 6px 10px; font-size: 12px;"
+                  >
+                  <button id="saveUpdateConfigBtn" class="btn btn-secondary btn-small">保存</button>
+                </div>
+                <div id="updateConfigStatus" style="margin-top: 6px; font-size: 11px; color: #666;"></div>
+              </div>
+            </div>
+          </div>
+          
+          <div class="settings-divider"></div>
+          
+          <div class="setting-item">
+            <div class="setting-info">
+              <div class="setting-label">🪟 独立窗口模式</div>
+              <div class="setting-desc">启用后，点击扩展图标将打开独立窗口，可常驻桌面</div>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="windowModeSwitch">
+              <span class="slider"></span>
+            </label>
+          </div>
+          
+          <div class="settings-divider"></div>
+          
+          <div class="setting-section">
+            <div class="setting-section-title">💾 数据备份与恢复</div>
+            <div class="setting-section-desc">导出数据可在重装扩展后恢复，包括记事本、待办、链接等</div>
+            <div class="setting-actions">
+              <button id="exportDataBtn" class="btn btn-secondary btn-small">📤 导出数据</button>
+              <button id="importDataBtn" class="btn btn-secondary btn-small">📥 导入数据</button>
+              <input type="file" id="importDataFile" accept=".json" style="display: none;">
+            </div>
+          </div>
+          
+          <div class="settings-divider"></div>
+          
+          <div class="setting-section">
+            <div class="setting-section-title">🗑️ 清除数据</div>
+            <div class="setting-section-desc">清除所有本地数据，此操作不可恢复</div>
+            <div class="setting-actions">
+              <button id="clearAllDataBtn" class="btn btn-danger btn-small">清除所有数据</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab 导航 -->
+    <nav class="tabs">
+      <button class="tab-btn active" data-tab="calendar">📅 今日日程</button>
+      <button class="tab-btn" data-tab="links">🔗 快速链接</button>
+      <button class="tab-btn" data-tab="notes">📝 记事本</button>
+      <button class="tab-btn" data-tab="utils">🛠️ 实用工具</button>
+      <button class="tab-btn" data-tab="code-helper">💬 AI 助手</button>
+      <button class="tab-btn" data-tab="todos">✅ 待办</button>
+    </nav>
+
+    <!-- Tab 内容 -->
+    <div class="tab-content">
+      
+      <!-- 今日日程 Tab -->
+      <div id="calendar-tab" class="tab-pane active">
+        <!-- 代办事项看板（首页快速查看） -->
+        <div class="section">
+          <div class="section-header">
+            <h2>📋 今日代办</h2>
+            <button id="openTodoDetail" class="btn btn-secondary btn-small">📝 查看全部</button>
+          </div>
+          
+          <!-- 看板视图 -->
+          <div class="kanban-board-mini">
+            <div class="kanban-column kanban-mini">
+              <div class="kanban-column-header kanban-pending">
+                <span class="column-title">📝 待办</span>
+                <span class="column-count" id="miniPendingCount">0</span>
+              </div>
+              <div class="kanban-column-content" id="miniPendingTodos"></div>
+            </div>
+            
+            <div class="kanban-column kanban-mini">
+              <div class="kanban-column-header kanban-in-progress">
+                <span class="column-title">⏳ 进行中</span>
+                <span class="column-count" id="miniInProgressCount">0</span>
+              </div>
+              <div class="kanban-column-content" id="miniInProgressTodos"></div>
+            </div>
+            
+            <div class="kanban-column kanban-mini">
+              <div class="kanban-column-header kanban-completed">
+                <span class="column-title">✅ 已完成</span>
+                <span class="column-count" id="miniCompletedCount">0</span>
+              </div>
+              <div class="kanban-column-content" id="miniCompletedTodos"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 日程安排区域 -->
+        <div class="section">
+          <div class="calendar-header-bar">
+            <h2>📅 今日日程安排</h2>
+            <div>
+              <button id="configCalendar" class="btn btn-secondary btn-sm" style="margin-right: 5px;">⚙️ 配置</button>
+              <button id="refreshEvents" class="btn btn-secondary btn-sm">🔄 刷新</button>
+            </div>
+          </div>
+          
+          <div class="calendar-tool">
+            <!-- 授权区域 -->
+            <div id="calendarAuthSection" class="calendar-auth" style="display: none;">
+              <div class="auth-icon">🔐</div>
+              <h3>需要授权访问 Google Calendar</h3>
+              <p>为了显示您的日程安排，需要授权访问您的 Google Calendar</p>
+              <button id="authorizeCalendar" class="btn btn-primary">🔑 授权访问</button>
+            </div>
+            
+            <!-- 加载中 -->
+            <div id="calendarLoading" class="calendar-loading" style="display: none;">
+              <div class="loading-spinner"></div>
+              <p>正在加载今日日程...</p>
+            </div>
+            
+            <!-- 日程列表 -->
+            <div id="calendarEventsList" class="calendar-events-list">
+              <!-- 日程将在这里动态显示 -->
+            </div>
+            
+            <!-- 错误提示 -->
+            <div id="calendarError" class="calendar-error" style="display: none;">
+              <div class="error-icon">⚠️</div>
+              <p id="calendarErrorMessage"></p>
+              <button id="retryCalendar" class="btn btn-secondary">重试</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 快速链接 Tab -->
+      <div id="links-tab" class="tab-pane">
+        <div class="section">
+          <!-- DataSuite 快速入口 -->
+          <div class="datasuite-quick-section">
+            <h3>DataSuite 快速入口</h3>
+            <div class="datasuite-links">
+              <a href="https://datasuite.shopee.io/datamap" target="_blank" class="datasuite-link">
+                <span class="link-icon">🗺️</span>
+                <span class="link-text">DataMap</span>
+              </a>
+              <a href="https://datasuite.shopee.io/datahub" target="_blank" class="datasuite-link">
+                <span class="link-icon">🏛️</span>
+                <span class="link-text">DataHub</span>
+              </a>
+              <a href="https://datasuite.shopee.io/studio" target="_blank" class="datasuite-link">
+                <span class="link-icon">💻</span>
+                <span class="link-text">Studio</span>
+              </a>
+              <a href="https://datasuite.shopee.io/scheduler" target="_blank" class="datasuite-link">
+                <span class="link-icon">⏰</span>
+                <span class="link-text">Scheduler</span>
+              </a>
+              <a href="https://datasuite.shopee.io/flink" target="_blank" class="datasuite-link">
+                <span class="link-icon">⚡</span>
+                <span class="link-text">Flink</span>
+              </a>
+            </div>
+          </div>
+
+          <div class="section-header">
+            <h2>🔗 快速链接</h2>
+            <button id="addLinkCategory" class="btn btn-secondary btn-small">➕ 添加分类</button>
+          </div>
+          
+          <!-- 动态渲染的分类容器 -->
+          <div id="linksContainer"></div>
+          
+          <!-- 添加链接表单 -->
+          <div class="add-form-section">
+            <h3>➕ 添加链接</h3>
+            <div class="add-link-form">
+              <input type="text" id="linkName" placeholder="链接名称" class="input-field">
+              <input type="url" id="linkUrl" placeholder="https://..." class="input-field">
+              <select id="linkCategory" class="input-field">
+                <option value="tools">开发工具</option>
+                <option value="docs">常用文档</option>
+              </select>
+              <button id="addLink" class="btn btn-primary">添加链接</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 记事本 Tab -->
+      <div id="notes-tab" class="tab-pane">
+        <div class="section">
+          <!-- 工具栏 -->
+          <div class="notes-toolbar">
+            <div class="notes-filter"></div>
+            <div class="notes-actions">
+              <button id="addNoteBtn" class="btn btn-primary btn-small ios-btn">新建</button>
+            </div>
+          </div>
+          
+          <div id="notesList" class="notes-list"></div>
+        </div>
+      </div>
+
+      <!-- 笔记详情/编辑弹窗 -->
+      <div id="noteModal" class="modal">
+        <div class="modal-content note-modal-content">
+          <div class="modal-header">
+            <h3 id="noteModalTitle">新建笔记</h3>
+            <button class="modal-close" id="closeNoteModal">&times;</button>
+          </div>
+          
+          <!-- 详情视图 -->
+          <div id="noteDetailView" class="modal-body note-detail-view" style="display: none;">
+            <div class="note-detail-header">
+              <div class="note-detail-title" id="noteDetailTitle"></div>
+              <div class="note-detail-meta">
+                <span class="note-category" id="noteDetailCategory"></span>
+                <span class="note-date" id="noteDetailDate"></span>
+              </div>
+            </div>
+            <div class="note-detail-content" id="noteDetailContent"></div>
+            <div id="noteLinkedTodoInfo" class="note-linked-info" style="display: none;">
+              <div class="linked-icon">✓</div>
+              <span class="linked-text" id="linkedTodoText">关联待办</span>
+              <span class="linked-arrow">›</span>
+            </div>
+          </div>
+          
+          <!-- 编辑视图 -->
+          <div id="noteEditView" class="modal-body">
+            <input type="hidden" id="editNoteId">
+            <div class="form-group">
+              <label>标题</label>
+              <input type="text" id="noteTitle" placeholder="输入笔记标题" class="input-field">
+            </div>
+            <div class="form-row">
+              <div class="form-group flex-1">
+                <label>分类</label>
+                <select id="noteCategory" class="input-field">
+                  <!-- 动态生成 -->
+                </select>
+              </div>
+              <div class="form-group flex-1">
+                <label>关联待办</label>
+                <select id="noteTodoLink" class="input-field">
+                  <option value="">无</option>
+                  <!-- 动态生成待办列表 -->
+                </select>
+              </div>
+            </div>
+            <div class="form-group">
+              <label>内容</label>
+              <textarea id="noteContent" placeholder="支持 Markdown 语法" class="note-input"></textarea>
+            </div>
+          </div>
+          
+          <div class="modal-footer">
+            <div id="noteFooterLeft">
+              <button id="deleteNoteBtn" class="btn btn-danger btn-small" style="display: none;">删除</button>
+            </div>
+            <div class="modal-footer-right">
+              <button id="editNoteBtn" class="btn btn-secondary" style="display: none;">编辑</button>
+              <button id="copyNoteBtn" class="btn btn-secondary" style="display: none;">导出</button>
+              <button id="cancelNoteBtn" class="btn btn-secondary">取消</button>
+              <button id="saveNoteBtn" class="btn btn-primary">保存</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 实用工具 Tab -->
+      <div id="utils-tab" class="tab-pane">
+        <div class="section">
+          <h2>🛠️ 实用工具</h2>
+          
+          <!-- 工具选择器 - 网格图标式 -->
+          <div class="utils-grid">
+            <button class="utils-grid-btn active" data-util="timezone">
+              <span class="grid-icon">⏰</span>
+              <span class="grid-label">时区转换</span>
+            </button>
+            <button class="utils-grid-btn" data-util="json">
+              <span class="grid-icon">📋</span>
+              <span class="grid-label">JSON</span>
+            </button>
+            <button class="utils-grid-btn" data-util="sql">
+              <span class="grid-icon">🗃️</span>
+              <span class="grid-label">SQL</span>
+            </button>
+            <button class="utils-grid-btn" data-util="cron">
+              <span class="grid-icon">⏱️</span>
+              <span class="grid-label">Cron</span>
+            </button>
+            <button class="utils-grid-btn" data-util="regex">
+              <span class="grid-icon">🔍</span>
+              <span class="grid-label">正则</span>
+            </button>
+            <button class="utils-grid-btn" data-util="diff">
+              <span class="grid-icon">📝</span>
+              <span class="grid-label">文本对比</span>
+            </button>
+            <button class="utils-grid-btn" data-util="case">
+              <span class="grid-icon">🔤</span>
+              <span class="grid-label">命名转换</span>
+            </button>
+            <button class="utils-grid-btn" data-util="mermaid">
+              <span class="grid-icon">📊</span>
+              <span class="grid-label">Mermaid</span>
+            </button>
+            <button class="utils-grid-btn" data-util="http">
+              <span class="grid-icon">🌐</span>
+              <span class="grid-label">HTTP</span>
+            </button>
+          </div>
+
+          <!-- 时区转换工具 -->
+          <div id="timezone-util" class="utils-content active">
+            <h3>🕐 时间戳转换</h3>
+            
+            <div class="timezone-input">
+              <label>时间戳（秒）:</label>
+              <input type="number" id="timestampInput" placeholder="1731600000" class="input-field">
+              <button id="getCurrentTimestamp" class="btn btn-secondary">当前时间</button>
+            </div>
+
+            <div class="timezone-results" id="timezoneResults">
+              <div class="timezone-item">
+                <span class="tz-label">🇸🇬 Singapore (SG):</span>
+                <span class="tz-value" id="tz-sg">-</span>
+                <button class="btn-copy" data-tz="sg">复制</button>
+              </div>
+              <div class="timezone-item">
+                <span class="tz-label">🇻🇳 Vietnam (VN):</span>
+                <span class="tz-value" id="tz-vn">-</span>
+                <button class="btn-copy" data-tz="vn">复制</button>
+              </div>
+              <div class="timezone-item">
+                <span class="tz-label">🇮🇩 Indonesia (ID):</span>
+                <span class="tz-value" id="tz-id">-</span>
+                <button class="btn-copy" data-tz="id">复制</button>
+              </div>
+              <div class="timezone-item">
+                <span class="tz-label">🇲🇾 Malaysia (MY):</span>
+                <span class="tz-value" id="tz-my">-</span>
+                <button class="btn-copy" data-tz="my">复制</button>
+              </div>
+              <div class="timezone-item">
+                <span class="tz-label">🇵🇭 Philippines (PH):</span>
+                <span class="tz-value" id="tz-ph">-</span>
+                <button class="btn-copy" data-tz="ph">复制</button>
+              </div>
+              <div class="timezone-item">
+                <span class="tz-label">🇹🇭 Thailand (TH):</span>
+                <span class="tz-value" id="tz-th">-</span>
+                <button class="btn-copy" data-tz="th">复制</button>
+              </div>
+              <div class="timezone-item">
+                <span class="tz-label">🇨🇳 China (CN):</span>
+                <span class="tz-value" id="tz-cn">-</span>
+                <button class="btn-copy" data-tz="cn">复制</button>
+              </div>
+              <div class="timezone-item">
+                <span class="tz-label">🇧🇷 Brazil (BR):</span>
+                <span class="tz-value" id="tz-br">-</span>
+                <button class="btn-copy" data-tz="br">复制</button>
+              </div>
+            </div>
+
+          <div class="timezone-reverse">
+            <h3>反向转换（时间 → 时间戳）</h3>
+            <div class="datetime-input-group">
+              <input type="text" id="datetimeInput" class="input-field" placeholder="2025-11-14 16:30:00">
+              <div class="datetime-quick-buttons">
+                <button class="btn-quick" id="setNow">当前时间</button>
+              </div>
+            </div>
+            <select id="fromTimezone" class="input-field">
+              <option value="Asia/Singapore">Singapore (SG)</option>
+              <option value="Asia/Ho_Chi_Minh">Vietnam (VN)</option>
+              <option value="Asia/Jakarta">Indonesia (ID)</option>
+              <option value="Asia/Kuala_Lumpur">Malaysia (MY)</option>
+              <option value="Asia/Manila">Philippines (PH)</option>
+              <option value="Asia/Bangkok">Thailand (TH)</option>
+              <option value="Asia/Shanghai">China (CN)</option>
+            </select>
+            <button id="convertToTimestamp" class="btn btn-primary">转换为时间戳</button>
+            <div class="result-display" id="timestampResult"></div>
+          </div>
+          </div>
+
+          <!-- SQL 格式化工具 -->
+          <div id="sql-util" class="utils-content">
+            <h3>🗃️ SQL 格式化</h3>
+            
+            <div class="sql-tool">
+              <div class="sql-input-section">
+                <label>输入 SQL：</label>
+                <textarea id="sqlInput" class="sql-textarea" placeholder="SELECT * FROM users WHERE id = 1" rows="8"></textarea>
+              </div>
+              
+              <div class="sql-actions">
+                <button id="formatSql" class="btn btn-primary">🎨 格式化</button>
+                <button id="compactSql" class="btn btn-secondary">📦 压缩</button>
+                <button id="upperSql" class="btn btn-secondary">⬆️ 关键字大写</button>
+                <button id="lowerSql" class="btn btn-secondary">⬇️ 关键字小写</button>
+                <button id="clearSql" class="btn btn-secondary">清空</button>
+              </div>
+              
+              <div class="sql-output-section">
+                <label>格式化结果：</label>
+                <textarea id="sqlOutput" class="sql-textarea" placeholder="格式化后的 SQL 将显示在这里..." rows="8" readonly></textarea>
+                <button id="copySqlResult" class="btn btn-primary btn-small" style="margin-top: 10px;">📋 复制结果</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Cron 表达式工具 -->
+          <div id="cron-util" class="utils-content">
+            <h3>⏱️ Cron 表达式工具</h3>
+            
+            <div class="cron-tool">
+              <div class="cron-input-section">
+                <label>Cron 表达式：</label>
+                <div class="cron-input-row">
+                  <input type="text" id="cronInput" class="input-field" placeholder="0 9 * * *">
+                  <button id="parseCron" class="btn btn-primary">解析</button>
+                </div>
+              </div>
+              
+              <div id="cronResult" class="cron-result" style="display: none;">
+                <div class="cron-description" id="cronDescription"></div>
+                <div class="cron-next-runs">
+                  <label>接下来 5 次执行时间：</label>
+                  <ul id="cronNextRuns"></ul>
+                </div>
+              </div>
+              
+              <div class="cron-generator">
+                <label>快速生成：</label>
+                <div class="cron-presets">
+                  <button class="btn btn-small cron-preset" data-cron="0 * * * *">每小时</button>
+                  <button class="btn btn-small cron-preset" data-cron="0 0 * * *">每天0点</button>
+                  <button class="btn btn-small cron-preset" data-cron="0 9 * * *">每天9点</button>
+                  <button class="btn btn-small cron-preset" data-cron="0 9 * * 1">每周一9点</button>
+                  <button class="btn btn-small cron-preset" data-cron="0 0 1 * *">每月1号</button>
+                  <button class="btn btn-small cron-preset" data-cron="*/5 * * * *">每5分钟</button>
+                  <button class="btn btn-small cron-preset" data-cron="*/30 * * * *">每30分钟</button>
+                  <button class="btn btn-small cron-preset" data-cron="0 9-18 * * 1-5">工作日9-18点</button>
+                </div>
+              </div>
+              
+              <div class="cron-help">
+                <h4>💡 Cron 格式说明</h4>
+                <pre>┌───────────── 分钟 (0-59)
+│ ┌───────────── 小时 (0-23)
+│ │ ┌───────────── 日期 (1-31)
+│ │ │ ┌───────────── 月份 (1-12)
+│ │ │ │ ┌───────────── 星期 (0-7, 0和7=周日)
+│ │ │ │ │
+* * * * *</pre>
+                <div class="cron-symbols">
+                  <span><code>*</code> 任意值</span>
+                  <span><code>,</code> 多个值</span>
+                  <span><code>-</code> 范围</span>
+                  <span><code>/</code> 步长</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 正则测试器 -->
+          <div id="regex-util" class="utils-content">
+            <h3>🔍 正则表达式测试器</h3>
+            
+            <div class="regex-tool">
+              <div class="regex-input-section">
+                <label>正则表达式：</label>
+                <div class="regex-input-row">
+                  <span class="regex-delimiter">/</span>
+                  <input type="text" id="regexPattern" class="regex-pattern-input" placeholder="[a-z]+">
+                  <span class="regex-delimiter">/</span>
+                  <input type="text" id="regexFlags" class="regex-flags-input" placeholder="gi" value="g">
+                </div>
+              </div>
+              
+              <div class="regex-test-section">
+                <label>测试文本：</label>
+                <textarea id="regexTestText" class="regex-textarea" placeholder="输入要测试的文本..." rows="5"></textarea>
+              </div>
+              
+              <div class="regex-actions">
+                <button id="testRegex" class="btn btn-primary">🔍 测试匹配</button>
+                <button id="clearRegex" class="btn btn-secondary">清空</button>
+              </div>
+              
+              <div id="regexResult" class="regex-result" style="display: none;">
+                <div class="regex-match-info" id="regexMatchInfo"></div>
+                <div class="regex-matches" id="regexMatches"></div>
+                <div class="regex-highlighted" id="regexHighlighted"></div>
+              </div>
+              
+              <div class="regex-presets">
+                <h4>💡 常用正则</h4>
+                <div class="regex-preset-list">
+                  <button class="btn btn-small regex-preset-btn" data-pattern="^1[3-9]\d{9}$" data-flags="">手机号</button>
+                  <button class="btn btn-small regex-preset-btn" data-pattern="[\w.-]+@[\w.-]+\.\w+" data-flags="g">邮箱</button>
+                  <button class="btn btn-small regex-preset-btn" data-pattern="\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}" data-flags="g">IP地址</button>
+                  <button class="btn btn-small regex-preset-btn" data-pattern="https?://[^\s]+" data-flags="g">URL</button>
+                  <button class="btn btn-small regex-preset-btn" data-pattern="\d{4}-\d{2}-\d{2}" data-flags="g">日期</button>
+                  <button class="btn btn-small regex-preset-btn" data-pattern="[\u4e00-\u9fa5]+" data-flags="g">中文</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 文本差异对比 -->
+          <div id="diff-util" class="utils-content">
+            <h3>📝 文本差异对比 <span class="realtime-badge">实时对比</span></h3>
+            
+            <div class="diff-tool">
+              <div class="diff-toolbar">
+                <div class="diff-stats" id="diffStats"></div>
+                <div class="diff-actions-inline">
+                  <button id="swapDiff" class="btn btn-small btn-secondary">🔄 交换</button>
+                  <button id="clearDiff" class="btn btn-small btn-secondary">🗑️ 清空</button>
+                </div>
+              </div>
+              
+              <!-- 并排编辑+高亮视图 -->
+              <div class="diff-side-by-side">
+                <div class="diff-panel diff-panel-left">
+                  <div class="diff-panel-header">
+                    <span>📄 原始文本</span>
+                    <span class="diff-panel-info" id="diffLeftInfo"></span>
+                  </div>
+                  <div class="diff-editor-wrapper">
+                    <div id="diffHighlightLeft" class="diff-highlight-layer"></div>
+                    <textarea id="diffTextA" class="diff-editor" placeholder="输入或粘贴原始文本..." spellcheck="false"></textarea>
+                  </div>
+                </div>
+                
+                <div class="diff-panel diff-panel-right">
+                  <div class="diff-panel-header">
+                    <span>📄 对比文本</span>
+                    <span class="diff-panel-info" id="diffRightInfo"></span>
+                  </div>
+                  <div class="diff-editor-wrapper">
+                    <div id="diffHighlightRight" class="diff-highlight-layer"></div>
+                    <textarea id="diffTextB" class="diff-editor" placeholder="输入或粘贴对比文本..." spellcheck="false"></textarea>
+                  </div>
+                </div>
+              </div>
+              
+              <div class="diff-legend">
+                <span class="legend-item legend-added"><span class="legend-color"></span> 新增</span>
+                <span class="legend-item legend-removed"><span class="legend-color"></span> 删除</span>
+                <span class="legend-item legend-unchanged"><span class="legend-color"></span> 未变</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- JSON工具 -->
+          <div id="json-util" class="utils-content">
+            <h3>📋 JSON 格式化 & 验证</h3>
+            
+            <div class="json-tool">
+              <textarea id="jsonInput" class="json-textarea" placeholder="粘贴或输入JSON..." rows="10"></textarea>
+              
+              <div class="json-actions">
+                <button id="formatJson" class="btn btn-primary">格式化</button>
+                <button id="compactJson" class="btn btn-secondary">压缩</button>
+                <button id="validateJson" class="btn btn-secondary">验证</button>
+                <button id="clearJson" class="btn btn-secondary">清空</button>
+              </div>
+              
+              <div class="json-status" id="jsonStatus"></div>
+              
+              <textarea id="jsonOutput" class="json-textarea" placeholder="格式化后的JSON将显示在这里..." rows="10" readonly></textarea>
+              
+              <div class="json-info" id="jsonInfo">
+                <div class="info-item">
+                  <span class="info-label">字符数:</span>
+                  <span class="info-value" id="jsonCharCount">0</span>
+                </div>
+                <div class="info-item">
+                  <span class="info-label">层级:</span>
+                  <span class="info-value" id="jsonDepth">0</span>
+                </div>
+                <div class="info-item">
+                  <span class="info-label">对象数:</span>
+                  <span class="info-value" id="jsonObjects">0</span>
+                </div>
+                <div class="info-item">
+                  <span class="info-label">数组数:</span>
+                  <span class="info-value" id="jsonArrays">0</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 命名转换工具 -->
+          <div id="case-util" class="utils-content">
+            <h3>🔤 命名格式转换</h3>
+            
+            <div class="case-tool">
+              <div class="case-input-section">
+                <label>输入文本：</label>
+                <textarea id="caseInput" class="case-textarea" placeholder="输入需要转换的文本，支持批量转换（每行一个）" rows="6"></textarea>
+              </div>
+              
+              <div class="case-actions">
+                <button id="toCamelCase" class="btn btn-primary">驼峰命名 (camelCase)</button>
+                <button id="toPascalCase" class="btn btn-primary">帕斯卡命名 (PascalCase)</button>
+                <button id="toSnakeCase" class="btn btn-secondary">下划线命名 (snake_case)</button>
+                <button id="toKebabCase" class="btn btn-secondary">短横线命名 (kebab-case)</button>
+                <button id="toConstantCase" class="btn btn-secondary">常量命名 (CONSTANT_CASE)</button>
+                <button id="clearCase" class="btn btn-secondary">清空</button>
+              </div>
+              
+              <div class="case-output-section">
+                <label>转换结果：</label>
+                <textarea id="caseOutput" class="case-textarea" placeholder="转换后的结果将显示在这里..." rows="6" readonly></textarea>
+                <button id="copyCaseResult" class="btn btn-primary" style="margin-top: 10px;">复制结果</button>
+              </div>
+              
+              <div class="case-examples">
+                <h4>💡 示例</h4>
+                <div class="example-grid">
+                  <div class="example-item">
+                    <div class="example-label">驼峰命名:</div>
+                    <code>userName</code>, <code>firstName</code>
+                  </div>
+                  <div class="example-item">
+                    <div class="example-label">帕斯卡命名:</div>
+                    <code>UserName</code>, <code>FirstName</code>
+                  </div>
+                  <div class="example-item">
+                    <div class="example-label">下划线命名:</div>
+                    <code>user_name</code>, <code>first_name</code>
+                  </div>
+                  <div class="example-item">
+                    <div class="example-label">短横线命名:</div>
+                    <code>user-name</code>, <code>first-name</code>
+                  </div>
+                  <div class="example-item">
+                    <div class="example-label">常量命名:</div>
+                    <code>USER_NAME</code>, <code>FIRST_NAME</code>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Mermaid 图表工具 -->
+          <div id="mermaid-util" class="utils-content">
+            <h3>📊 Mermaid 图表渲染</h3>
+            
+            <div class="mermaid-tool">
+              <div class="mermaid-input-section">
+                <label>输入 Mermaid 代码：</label>
+                <textarea id="mermaidInput" class="mermaid-textarea" placeholder="graph TD
+    A[开始] --> B{判断条件}
+    B -->|是| C[执行操作A]
+    B -->|否| D[执行操作B]
+    C --> E[结束]
+    D --> E" rows="10"></textarea>
+              </div>
+              
+              <div class="mermaid-actions">
+                <button id="renderMermaid" class="btn btn-primary">🎨 渲染图表</button>
+                <button id="copyMermaidImage" class="btn btn-secondary" disabled>📋 复制图片</button>
+                <button id="downloadMermaidImage" class="btn btn-secondary" disabled>💾 下载 PNG</button>
+                <button id="downloadMermaidSvg" class="btn btn-secondary" disabled>📐 下载 SVG</button>
+                <button id="clearMermaid" class="btn btn-secondary">清空</button>
+              </div>
+              <div class="mermaid-options">
+                <div class="mermaid-quality-selector">
+                  <label>PNG 清晰度:</label>
+                  <select id="mermaidQuality">
+                    <option value="2">标准 (2x)</option>
+                    <option value="4">高清 (4x)</option>
+                    <option value="8" selected>超清 (8x)</option>
+                    <option value="16">极清 (16x)</option>
+                    <option value="32">超极清 (32x) ⚠️</option>
+                  </select>
+                </div>
+                <span class="mermaid-tip">💡 需要无限清晰？下载 SVG 矢量图</span>
+              </div>
+              
+              <div class="mermaid-status" id="mermaidStatus"></div>
+              
+              <div class="mermaid-output-section">
+                <label>渲染结果：</label>
+                <div id="mermaidOutput" class="mermaid-output">
+                  <div class="mermaid-placeholder">
+                    <span class="placeholder-icon">📊</span>
+                    <span class="placeholder-text">输入 Mermaid 代码后点击"渲染图表"</span>
+                  </div>
+                </div>
+              </div>
+              
+              <div class="mermaid-examples">
+                <h4>💡 常用示例</h4>
+                <div class="example-buttons">
+                  <button class="btn btn-small mermaid-example-btn" data-example="flowchart">流程图</button>
+                  <button class="btn btn-small mermaid-example-btn" data-example="sequence">时序图</button>
+                  <button class="btn btn-small mermaid-example-btn" data-example="class">类图</button>
+                  <button class="btn btn-small mermaid-example-btn" data-example="er">ER图</button>
+                  <button class="btn btn-small mermaid-example-btn" data-example="gantt">甘特图</button>
+                  <button class="btn btn-small mermaid-example-btn" data-example="pie">饼图</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- HTTP 请求测试工具 -->
+          <div id="http-util" class="utils-content">
+            <h3>🌐 HTTP 请求测试</h3>
+            
+            <div class="http-tool">
+              <!-- 请求方式和 URL -->
+              <div class="http-url-row">
+                <select id="httpMethod" class="http-method-select">
+                  <option value="GET">GET</option>
+                  <option value="POST">POST</option>
+                  <option value="PUT">PUT</option>
+                  <option value="DELETE">DELETE</option>
+                  <option value="PATCH">PATCH</option>
+                </select>
+                <input type="text" id="httpUrl" class="http-url-input" placeholder="https://api.example.com/endpoint">
+                <button id="sendHttpRequest" class="btn btn-primary">🚀 发送</button>
+                <button id="clearHttpConfig" class="btn btn-secondary" title="清除配置">🗑️</button>
+              </div>
+              
+              <!-- 选项卡：Headers / Body / Auth -->
+              <div class="http-tabs">
+                <button class="http-tab-btn active" data-http-tab="headers">Headers</button>
+                <button class="http-tab-btn" data-http-tab="body">Body</button>
+                <button class="http-tab-btn" data-http-tab="auth">Auth</button>
+              </div>
+              
+              <!-- Headers 面板 -->
+              <div id="http-headers-panel" class="http-panel active">
+                <div id="httpHeadersList" class="http-headers-list">
+                  <div class="http-header-row">
+                    <input type="text" class="header-key" placeholder="Header Name" value="Content-Type">
+                    <input type="text" class="header-value" placeholder="Header Value" value="application/json">
+                    <button class="btn-icon remove-header" title="删除">🗑️</button>
+                  </div>
+                </div>
+                <button id="addHttpHeader" class="btn btn-secondary btn-small">➕ 添加 Header</button>
+              </div>
+              
+              <!-- Body 面板 -->
+              <div id="http-body-panel" class="http-panel">
+                <textarea id="httpBody" class="http-body-textarea" placeholder='{"key": "value"}' rows="6"></textarea>
+              </div>
+              
+              <!-- Auth 面板 -->
+              <div id="http-auth-panel" class="http-panel">
+                <!-- ApiMart JWT 配置 -->
+                <div class="apimart-jwt-section">
+                  <div class="apimart-jwt-header">
+                    <span class="section-title">🔑 ApiMart JWT 配置</span>
+                    <button id="toggleJwtConfig" class="btn-icon" title="展开/收起配置">⚙️</button>
+                  </div>
+                  
+                  <!-- JWT 配置面板（默认收起） -->
+                  <div id="jwtConfigPanel" class="jwt-config-panel" style="display: none;">
+                    <div class="jwt-env-tabs">
+                      <button class="jwt-env-tab active" data-env="live">🟢 Live</button>
+                      <button class="jwt-env-tab" data-env="test">🟡 Test</button>
+                    </div>
+                    
+                    <div class="jwt-config-form">
+                      <div class="jwt-config-row">
+                        <label>Account：</label>
+                        <input type="text" id="jwtAccount" class="input-field" placeholder="账户名">
+                      </div>
+                      <div class="jwt-config-row">
+                        <label>Secret：</label>
+                        <input type="password" id="jwtSecret" class="input-field" placeholder="密钥">
+                        <button id="toggleSecretVisibility" class="btn-icon" title="显示/隐藏">👁️</button>
+                      </div>
+                      <div class="jwt-config-row">
+                        <label>Country（可选）：</label>
+                        <input type="text" id="jwtCountry" class="input-field" placeholder="如：SG, MY, ID 等">
+                      </div>
+                      <div class="jwt-config-actions">
+                        <button id="saveJwtConfig" class="btn btn-small btn-primary">💾 保存配置</button>
+                        <button id="resetJwtConfig" class="btn btn-small btn-secondary">🔄 重置默认</button>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <!-- 快速应用按钮 -->
+                  <div class="auth-presets">
+                    <span class="presets-label">快速应用：</span>
+                    <button id="applyJwtLive" class="btn btn-small btn-preset-live" title="使用 Live 配置生成 jwt-token">🟢 Live</button>
+                    <button id="applyJwtTest" class="btn btn-small btn-preset-test" title="使用 Test 配置生成 jwt-token">🟡 Test</button>
+                    <button id="presetClearAuth" class="btn btn-small btn-preset-secondary" title="清除所有认证配置">🧹 清除</button>
+                  </div>
+                </div>
+                
+                <div class="auth-type-row">
+                  <label>认证类型：</label>
+                  <select id="authType" class="input-field">
+                    <option value="none">无认证 (直接用 Headers)</option>
+                    <option value="bearer">Bearer Token</option>
+                    <option value="basic">Basic Auth</option>
+                    <option value="apikey">API Key (Header)</option>
+                    <option value="apikey-query">API Key (Query Param)</option>
+                    <option value="digest">Digest Auth</option>
+                    <option value="oauth1">OAuth 1.0</option>
+                    <option value="aws">AWS Signature</option>
+                  </select>
+                </div>
+                
+                <!-- Bearer Token -->
+                <div id="auth-bearer" class="auth-section" style="display: none;">
+                  <label>Token：</label>
+                  <textarea id="bearerToken" class="input-field" rows="3" placeholder="eyJhbGciOiJIUzI1NiIs..."></textarea>
+                  <div class="jwt-actions">
+                    <button id="parseJwt" class="btn btn-secondary btn-small">🔍 解析 JWT</button>
+                    <button id="generateApiMartJwt" class="btn btn-primary btn-small">🔑 生成 ApiMart Token</button>
+                  </div>
+                  <div id="jwtInfo" class="jwt-info" style="display: none;"></div>
+                </div>
+                
+                <!-- Basic Auth -->
+                <div id="auth-basic" class="auth-section" style="display: none;">
+                  <div class="auth-row">
+                    <label>用户名：</label>
+                    <input type="text" id="basicUsername" class="input-field" placeholder="username">
+                  </div>
+                  <div class="auth-row">
+                    <label>密码：</label>
+                    <input type="password" id="basicPassword" class="input-field" placeholder="password">
+                  </div>
+                </div>
+                
+                <!-- API Key (Header) -->
+                <div id="auth-apikey" class="auth-section" style="display: none;">
+                  <div class="auth-row">
+                    <label>Header 名称：</label>
+                    <input type="text" id="apiKeyName" class="input-field" placeholder="X-API-Key" value="X-API-Key">
+                  </div>
+                  <div class="auth-row">
+                    <label>API Key：</label>
+                    <input type="text" id="apiKeyValue" class="input-field" placeholder="your-api-key">
+                  </div>
+                </div>
+                
+                <!-- API Key (Query Param) -->
+                <div id="auth-apikey-query" class="auth-section" style="display: none;">
+                  <div class="auth-row">
+                    <label>参数名称：</label>
+                    <input type="text" id="apiKeyQueryName" class="input-field" placeholder="api_key" value="api_key">
+                  </div>
+                  <div class="auth-row">
+                    <label>API Key：</label>
+                    <input type="text" id="apiKeyQueryValue" class="input-field" placeholder="your-api-key">
+                  </div>
+                  <p class="auth-hint">💡 Key 会自动附加到 URL 的查询参数中</p>
+                </div>
+                
+                <!-- Digest Auth -->
+                <div id="auth-digest" class="auth-section" style="display: none;">
+                  <div class="auth-row">
+                    <label>用户名：</label>
+                    <input type="text" id="digestUsername" class="input-field" placeholder="username">
+                  </div>
+                  <div class="auth-row">
+                    <label>密码：</label>
+                    <input type="password" id="digestPassword" class="input-field" placeholder="password">
+                  </div>
+                  <p class="auth-hint">⚠️ Digest Auth 需要服务器返回 challenge，浏览器会自动处理</p>
+                </div>
+                
+                <!-- OAuth 1.0 -->
+                <div id="auth-oauth1" class="auth-section" style="display: none;">
+                  <div class="auth-row">
+                    <label>Consumer Key：</label>
+                    <input type="text" id="oauth1ConsumerKey" class="input-field" placeholder="consumer_key">
+                  </div>
+                  <div class="auth-row">
+                    <label>Consumer Secret：</label>
+                    <input type="password" id="oauth1ConsumerSecret" class="input-field" placeholder="consumer_secret">
+                  </div>
+                  <div class="auth-row">
+                    <label>Access Token：</label>
+                    <input type="text" id="oauth1AccessToken" class="input-field" placeholder="access_token">
+                  </div>
+                  <div class="auth-row">
+                    <label>Token Secret：</label>
+                    <input type="password" id="oauth1TokenSecret" class="input-field" placeholder="token_secret">
+                  </div>
+                  <div class="auth-row">
+                    <label>签名方法：</label>
+                    <select id="oauth1SignatureMethod" class="input-field">
+                      <option value="HMAC-SHA1">HMAC-SHA1</option>
+                      <option value="HMAC-SHA256">HMAC-SHA256</option>
+                      <option value="PLAINTEXT">PLAINTEXT</option>
+                    </select>
+                  </div>
+                </div>
+                
+                <!-- AWS Signature -->
+                <div id="auth-aws" class="auth-section" style="display: none;">
+                  <div class="auth-row">
+                    <label>Access Key：</label>
+                    <input type="text" id="awsAccessKey" class="input-field" placeholder="AKIAIOSFODNN7EXAMPLE">
+                  </div>
+                  <div class="auth-row">
+                    <label>Secret Key：</label>
+                    <input type="password" id="awsSecretKey" class="input-field" placeholder="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY">
+                  </div>
+                  <div class="auth-row">
+                    <label>Region：</label>
+                    <input type="text" id="awsRegion" class="input-field" placeholder="us-east-1" value="us-east-1">
+                  </div>
+                  <div class="auth-row">
+                    <label>Service：</label>
+                    <input type="text" id="awsService" class="input-field" placeholder="s3" value="execute-api">
+                  </div>
+                  <div class="auth-row">
+                    <label>Session Token（可选）：</label>
+                    <input type="text" id="awsSessionToken" class="input-field" placeholder="临时凭证的 Session Token">
+                  </div>
+                </div>
+              </div>
+              
+              <!-- 响应区域 -->
+              <div class="http-response-section">
+                <div class="http-response-header">
+                  <span>响应结果</span>
+                  <div id="httpResponseMeta" class="http-response-meta"></div>
+                </div>
+                <div id="httpResponse" class="http-response">
+                  <div class="http-response-placeholder">
+                    <span class="placeholder-icon">📡</span>
+                    <span class="placeholder-text">发送请求后在此显示响应</span>
+                  </div>
+                </div>
+                <div class="http-response-actions">
+                  <button id="copyHttpResponse" class="btn btn-secondary btn-small" disabled>📋 复制响应</button>
+                  <button id="formatHttpResponse" class="btn btn-secondary btn-small" disabled>🎨 格式化</button>
+                </div>
+              </div>
+              
+              <!-- 历史记录 -->
+              <div class="http-history-section">
+                <div class="http-history-header">
+                  <span>📜 历史记录</span>
+                  <button id="clearHttpHistory" class="btn btn-secondary btn-small">清空</button>
+                </div>
+                <div id="httpHistoryList" class="http-history-list">
+                  <div class="http-history-empty">暂无历史记录</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Code Helper Tab -->
+      <div id="code-helper-tab" class="tab-pane code-helper-container">
+        <div class="code-helper-content">
+          <!-- 聊天消息区域 -->
+          <div id="chatMessages" class="chat-messages"></div>
+
+          <!-- 输入区域 -->
+          <div class="chat-input-area">
+            <textarea id="chatInput" class="chat-input" placeholder="输入你的SQL或问题...&#10;Shift + Enter 换行，Enter 发送" rows="3"></textarea>
+            <div class="chat-actions">
+              <button id="clearChat" class="btn btn-secondary btn-small">清空对话</button>
+              <button id="sendMessage" class="btn btn-primary">发送 ↑</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 待办事项 Tab -->
+      <div id="todos-tab" class="tab-pane">
+        <div class="section">
+          <div class="todo-header">
+            <h2>✅ 待办事项</h2>
+            <button id="openAddTodoModal" class="btn btn-primary">➕ 新建任务</button>
+          </div>
+          
+          <!-- 统计看板 -->
+          <div class="todo-stats">
+            <div class="stat-card">
+              <span class="stat-number" id="todoTotal">0</span>
+              <span class="stat-label">总任务</span>
+            </div>
+            <div class="stat-card">
+              <span class="stat-number" id="todoPending">0</span>
+              <span class="stat-label">待办</span>
+            </div>
+            <div class="stat-card">
+              <span class="stat-number" id="todoInProgress">0</span>
+              <span class="stat-label">进行中</span>
+            </div>
+            <div class="stat-card">
+              <span class="stat-number" id="todoCompleted">0</span>
+              <span class="stat-label">已完成</span>
+            </div>
+          </div>
+
+          <!-- 筛选器 -->
+          <div class="todo-filters">
+            <div class="filter-group">
+              <button class="filter-btn active" data-filter="all">全部</button>
+              <button class="filter-btn" data-filter="pending">待办</button>
+              <button class="filter-btn" data-filter="in-progress">进行中</button>
+              <button class="filter-btn" data-filter="completed">已完成</button>
+            </div>
+            <input type="text" id="searchTodos" placeholder="🔍 搜索任务..." class="input-field">
+          </div>
+
+          <!-- 任务列表 -->
+          <div id="todosList" class="todos-list"></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+  
+  <!-- 任务弹窗 -->
+  <div id="todoModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 id="modalTitle">新建任务</h3>
+        <button class="modal-close" id="closeTodoModal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="editTodoId">
+        
+        <div class="form-group">
+          <label>任务标题 <span class="required">*</span></label>
+          <input type="text" id="todoTitle" placeholder="输入任务标题" class="input-field">
+        </div>
+        
+        <div class="form-group">
+          <label>任务描述</label>
+          <textarea id="todoDescription" placeholder="详细描述任务内容..." class="input-field" rows="3"></textarea>
+        </div>
+        
+        <div class="form-row">
+          <div class="form-group">
+            <label>优先级</label>
+            <select id="todoPriority" class="input-field">
+              <option value="low">🟢 低优先级</option>
+              <option value="medium" selected>🟡 中优先级</option>
+              <option value="high">🔴 高优先级</option>
+            </select>
+          </div>
+          
+          <div class="form-group">
+            <label>分类</label>
+            <select id="todoCategory" class="input-field">
+              <option value="">未分类</option>
+              <option value="development">开发任务</option>
+              <option value="debug">问题排查</option>
+              <option value="optimization">性能优化</option>
+              <option value="meeting">会议/讨论</option>
+              <option value="review">代码Review</option>
+              <option value="documentation">文档编写</option>
+              <option value="other">其他</option>
+            </select>
+          </div>
+        </div>
+        
+        <div class="form-group">
+          <label>截止日期</label>
+          <div class="date-input-group">
+            <input type="text" id="todoDueDate" class="input-field" placeholder="例如: 2025-11-20">
+            <div class="date-quick-buttons">
+              <button class="btn-quick" id="setTodayDue">今天</button>
+              <button class="btn-quick" id="setTomorrowDue">明天</button>
+              <button class="btn-quick" id="setNextWeekDue">下周</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="cancelTodo" class="btn btn-secondary">取消</button>
+        <button id="saveTodo" class="btn btn-primary">保存</button>
+      </div>
+    </div>
+  </div>
+  
+  <script src="mermaid.min.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

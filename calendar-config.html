@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="author" content="tianyi.liang">
+  <title>SPX Helper - Google Calendar 配置</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      padding: 40px 20px;
+      margin: 0;
+    }
+
+    .config-container {
+      max-width: 800px;
+      margin: 0 auto;
+      background: white;
+      border-radius: 16px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+      overflow: hidden;
+    }
+
+    .config-header {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 30px;
+      text-align: center;
+    }
+
+    .config-header h1 {
+      margin: 0 0 10px 0;
+      font-size: 28px;
+    }
+
+    .config-header p {
+      margin: 0;
+      opacity: 0.9;
+      font-size: 14px;
+    }
+
+    .config-content {
+      padding: 40px;
+    }
+
+    .step-section {
+      margin-bottom: 40px;
+      padding: 25px;
+      background: #f8f9fa;
+      border-radius: 12px;
+      border-left: 4px solid #667eea;
+    }
+
+    .step-section h2 {
+      margin: 0 0 15px 0;
+      color: #333;
+      font-size: 20px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .step-number {
+      background: #667eea;
+      color: white;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 600;
+      font-size: 16px;
+    }
+
+    .step-description {
+      color: #666;
+      margin-bottom: 20px;
+      line-height: 1.6;
+    }
+
+    .info-box {
+      background: white;
+      padding: 15px;
+      border-radius: 8px;
+      border: 1px solid #dee2e6;
+      margin: 15px 0;
+    }
+
+    .info-label {
+      font-size: 12px;
+      color: #888;
+      margin-bottom: 5px;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+
+    .info-value {
+      font-family: 'Monaco', monospace;
+      font-size: 14px;
+      color: #333;
+      background: #f8f9fa;
+      padding: 10px;
+      border-radius: 4px;
+      word-break: break-all;
+      user-select: all;
+    }
+
+    .form-group {
+      margin-bottom: 20px;
+    }
+
+    .form-group label {
+      display: block;
+      margin-bottom: 8px;
+      color: #333;
+      font-weight: 600;
+      font-size: 14px;
+    }
+
+    .form-group input {
+      width: 100%;
+      padding: 12px;
+      border: 2px solid #dee2e6;
+      border-radius: 8px;
+      font-size: 14px;
+      font-family: 'Monaco', monospace;
+      transition: border-color 0.3s;
+      box-sizing: border-box;
+    }
+
+    .form-group input:focus {
+      outline: none;
+      border-color: #667eea;
+    }
+
+    .btn {
+      padding: 12px 24px;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 20px rgba(102, 126, 234, 0.4);
+    }
+
+    .btn-secondary {
+      background: #e9ecef;
+      color: #333;
+    }
+
+    .btn-secondary:hover {
+      background: #dee2e6;
+    }
+
+    .btn-success {
+      background: #28a745;
+      color: white;
+    }
+
+    .btn-copy {
+      padding: 8px 12px;
+      font-size: 12px;
+      margin-left: 10px;
+    }
+
+    .status-message {
+      padding: 15px;
+      border-radius: 8px;
+      margin: 20px 0;
+      display: none;
+    }
+
+    .status-message.success {
+      background: #d4edda;
+      color: #155724;
+      border: 1px solid #c3e6cb;
+    }
+
+    .status-message.error {
+      background: #f8d7da;
+      color: #721c24;
+      border: 1px solid #f5c6cb;
+    }
+
+    .status-message.info {
+      background: #d1ecf1;
+      color: #0c5460;
+      border: 1px solid #bee5eb;
+    }
+
+    .external-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      color: #667eea;
+      text-decoration: none;
+      font-weight: 600;
+      transition: color 0.3s;
+    }
+
+    .external-link:hover {
+      color: #764ba2;
+    }
+
+    .steps-guide {
+      background: #fff3cd;
+      border: 1px solid #ffc107;
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 30px;
+    }
+
+    .steps-guide h3 {
+      margin: 0 0 15px 0;
+      color: #856404;
+      font-size: 18px;
+    }
+
+    .steps-guide ol {
+      margin: 0;
+      padding-left: 25px;
+    }
+
+    .steps-guide li {
+      margin-bottom: 10px;
+      color: #856404;
+      line-height: 1.6;
+    }
+
+    .button-group {
+      display: flex;
+      gap: 10px;
+      margin-top: 20px;
+    }
+
+    .config-footer {
+      background: #f8f9fa;
+      padding: 20px;
+      text-align: center;
+      color: #666;
+      font-size: 13px;
+      border-top: 1px solid #dee2e6;
+    }
+  </style>
+</head>
+<body>
+  <div class="config-container">
+    <div class="config-header">
+      <h1>📅 Google Calendar 配置</h1>
+      <p>配置 OAuth 以访问您的 Google Calendar</p>
+    </div>
+
+    <div class="config-content">
+      <!-- 配置向导 -->
+      <div class="steps-guide">
+        <h3>📋 配置向导</h3>
+        
+        <div style="margin-bottom: 15px; padding: 10px; background: #e3f2fd; border-radius: 6px; border-left: 4px solid #2196f3;">
+          <strong>💡 如果您已有 OAuth 客户端：</strong>
+          <ol style="margin: 10px 0 0 0; padding-left: 25px;">
+            <li>复制下面的扩展 ID</li>
+            <li>在 Google Cloud Console → API和服务 → 凭据 → 编辑您的 OAuth 客户端</li>
+            <li>更新"应用 ID"为下面显示的扩展 ID</li>
+            <li>将 Client ID 粘贴到下方输入框</li>
+            <li>点击保存配置</li>
+          </ol>
+        </div>
+        
+        <div style="margin-top: 15px; padding: 10px; background: #fff3cd; border-radius: 6px; border-left: 4px solid #ffc107;">
+          <strong>🆕 如果您还没有 OAuth 客户端：</strong>
+          <ol style="margin: 10px 0 0 0; padding-left: 25px;">
+            <li>记录下面显示的扩展 ID</li>
+            <li>点击按钮访问 Google Cloud Console</li>
+            <li>创建项目并启用 Calendar API</li>
+            <li>创建 OAuth 客户端 ID（使用扩展 ID）</li>
+            <li>将获取的 Client ID 填入下方表单</li>
+            <li>点击保存配置</li>
+          </ol>
+        </div>
+      </div>
+
+      <!-- 步骤 1: 扩展 ID -->
+      <div class="step-section">
+        <h2>
+          <span class="step-number">1</span>
+          扩展 ID
+        </h2>
+        <div class="step-description">
+          这是您的扩展的唯一标识符，在创建 OAuth 客户端时需要使用。
+        </div>
+        <div class="info-box">
+          <div class="info-label">Extension ID</div>
+          <div class="info-value" id="extensionId">加载中...</div>
+        </div>
+        <button class="btn btn-secondary btn-copy" id="copyExtensionIdBtn">📋 复制 ID</button>
+      </div>
+
+      <!-- 步骤 2: Google Cloud Console -->
+      <div class="step-section">
+        <h2>
+          <span class="step-number">2</span>
+          Google Cloud Console 配置
+        </h2>
+        <div class="step-description">
+          <strong>选择您的情况：</strong>
+        </div>
+        
+        <div style="background: #e3f2fd; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+          <strong>✅ 情况 A: 已有 OAuth 客户端（快速配置）</strong>
+          <p style="margin: 10px 0; color: #0c5460;">如果您已经创建了 OAuth 客户端 ID，只需要更新应用 ID：</p>
+          <ol style="margin: 0; padding-left: 20px; color: #0c5460;">
+            <li>访问 <a href="https://console.cloud.google.com/apis/credentials" target="_blank" class="external-link">凭据页面</a></li>
+            <li>找到您的 OAuth 客户端，点击编辑（✏️ 铅笔图标）</li>
+            <li>将"应用 ID"字段更新为上面显示的扩展 ID</li>
+            <li>保存更改</li>
+            <li>跳转到下方"步骤 3"输入 Client ID</li>
+          </ol>
+        </div>
+        
+        <div style="background: #fff3cd; padding: 15px; border-radius: 8px;">
+          <strong>🆕 情况 B: 首次配置（完整流程）</strong>
+          <p style="margin: 10px 0; color: #856404;">如果您还没有创建 OAuth 客户端，需要完整配置：</p>
+          <div class="button-group" style="margin-top: 10px;">
+            <button class="btn btn-primary" id="openCloudConsoleBtn">
+              🔗 打开 Cloud Console
+            </button>
+            <button class="btn btn-secondary" id="openGuideBtn">
+              📖 查看详细教程
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 步骤 3: Client ID 配置 -->
+      <div class="step-section">
+        <h2>
+          <span class="step-number">3</span>
+          输入 OAuth Client ID
+        </h2>
+        <div class="step-description">
+          将从 Google Cloud Console 获取的 Client ID 粘贴到下方。
+        </div>
+        
+        <div class="form-group">
+          <label for="clientId">Client ID *</label>
+          <input 
+            type="text" 
+            id="clientId" 
+            placeholder="123456789-abcdefg.apps.googleusercontent.com"
+            value=""
+          >
+        </div>
+
+        <div class="button-group">
+          <button class="btn btn-primary" id="saveConfigBtn">
+            💾 保存配置
+          </button>
+          <button class="btn btn-secondary" id="testAuthBtn">
+            🔑 测试授权
+          </button>
+          <button class="btn btn-secondary" id="clearConfigBtn">
+            🗑️ 清除配置
+          </button>
+        </div>
+      </div>
+
+      <!-- 状态消息 -->
+      <div id="statusMessage" class="status-message"></div>
+
+      <!-- 当前配置状态 -->
+      <div class="step-section">
+        <h2>
+          <span class="step-number">✓</span>
+          当前配置状态
+        </h2>
+        <div class="info-box">
+          <div class="info-label">Client ID</div>
+          <div class="info-value" id="currentClientId">未配置</div>
+        </div>
+        <div class="info-box">
+          <div class="info-label">配置状态</div>
+          <div class="info-value" id="configStatus">等待配置...</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="config-footer">
+      <p>SPX Helper v2.2.0 | 作者: tianyi.liang</p>
+      <p>配置完成后，返回扩展主页面即可使用日历功能</p>
+    </div>
+  </div>
+
+  <script src="calendar-config.js"></script>
+</body>
+</html>
+

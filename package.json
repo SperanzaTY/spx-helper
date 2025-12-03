@@ -1,0 +1,20 @@
+{
+  "name": "spx-helper",
+  "version": "2.0.0",
+  "description": "SPX Helper - Shopee大数据开发助手",
+  "author": "tianyi.liang",
+  "license": "MIT",
+  "scripts": {
+    "lint": "eslint *.js",
+    "format": "prettier --write \"**/*.{js,html,css,json,md}\""
+  },
+  "keywords": [
+    "chrome-extension",
+    "值班助手",
+    "工作辅助",
+    "笔记",
+    "提醒"
+  ],
+  "devDependencies": {}
+}
+
