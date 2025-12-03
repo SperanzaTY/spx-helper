@@ -148,20 +148,28 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
   if (request.action === 'httpRequest') {
     const { method, url, headers, body } = request;
     
-    console.log('代理 HTTP 请求:', method, url);
+    console.log('🔵 Background: 收到 HTTP 请求代理请求');
+    console.log('🔵 Method:', method);
+    console.log('🔵 URL:', url);
+    console.log('🔵 Headers:', headers);
     
+    // 构建 fetch 选项
+    // Service Worker 中的 fetch 不受 CORS 限制
     const fetchOptions = {
       method: method,
       headers: headers || {}
     };
     
+    // 处理 body
     if (body && !['GET', 'HEAD'].includes(method)) {
       fetchOptions.body = body;
     }
     
+    // 使用 fetch 发送请求（Service Worker 中可以绕过 CORS）
     fetch(url, fetchOptions)
       .then(async response => {
         const responseText = await response.text();
+        console.log('✅ Background: 请求成功', response.status, response.statusText);
         sendResponse({
           success: true,
           status: response.status,
@@ -171,14 +179,20 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
         });
       })
       .catch(error => {
-        console.error('HTTP 请求失败:', error);
+        console.error('❌ Background: HTTP 请求失败');
+        console.error('错误类型:', error.name);
+        console.error('错误消息:', error.message);
+        console.error('错误堆栈:', error.stack);
         sendResponse({
           success: false,
-          error: error.message
+          error: error.message || '请求失败',
+          errorType: error.name,
+          details: error.toString()
         });
       });
     
-    return true; // 保持消息通道开放
+    // 返回 true 保持消息通道开放，等待异步响应
+    return true;
   }
   
   if (request.action === 'notification') {

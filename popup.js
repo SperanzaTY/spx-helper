@@ -3702,6 +3702,11 @@ async function sendHttpRequest() {
   
   try {
     // 通过 background.js 代理请求（解决 CORS 问题）
+    console.log('🟢 Popup: 发送 HTTP 请求到 background.js');
+    console.log('🟢 Method:', method);
+    console.log('🟢 URL:', url);
+    console.log('🟢 Headers:', allHeaders);
+    
     const response = await new Promise((resolve, reject) => {
       chrome.runtime.sendMessage({
         action: 'httpRequest',
@@ -3711,11 +3716,14 @@ async function sendHttpRequest() {
         body: body
       }, response => {
         if (chrome.runtime.lastError) {
+          console.error('❌ Popup: 消息发送失败', chrome.runtime.lastError);
           reject(new Error(chrome.runtime.lastError.message));
         } else if (response && response.success) {
+          console.log('✅ Popup: 收到成功响应', response.status);
           resolve(response);
         } else {
-          reject(new Error(response ? response.error : '请求失败'));
+          console.error('❌ Popup: 请求失败', response);
+          reject(new Error(response ? (response.error || '请求失败') : '请求失败'));
         }
       });
     });
