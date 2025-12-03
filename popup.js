@@ -426,7 +426,9 @@ function downloadAndInstallUpdate(downloadUrl, version, releaseUrl) {
         showInstallInstructions(version, releaseUrl);
       }, 500);
       if (chrome.downloads && chrome.downloads.onChanged) {
+        if (chrome.downloads && chrome.downloads.onChanged) {
         chrome.downloads.onChanged.removeListener(downloadListener);
+      }
       }
     } else if (downloadDelta.error) {
       // 下载失败
@@ -441,7 +443,9 @@ function downloadAndInstallUpdate(downloadUrl, version, releaseUrl) {
       updateNowBtn.disabled = false;
       updateNowBtn.textContent = '⬇️ 立即更新';
       if (chrome.downloads && chrome.downloads.onChanged) {
+        if (chrome.downloads && chrome.downloads.onChanged) {
         chrome.downloads.onChanged.removeListener(downloadListener);
+      }
       }
     }
   };
@@ -476,7 +480,9 @@ function downloadAndInstallUpdate(downloadUrl, version, releaseUrl) {
         }, 2000);
         updateNowBtn.disabled = false;
         updateNowBtn.textContent = '✅ 已打开下载';
+        if (chrome.downloads && chrome.downloads.onChanged) {
         chrome.downloads.onChanged.removeListener(downloadListener);
+      }
       } else if (downloadId) {
         // 下载已启动
         currentDownloadId = downloadId;
@@ -498,7 +504,9 @@ function downloadAndInstallUpdate(downloadUrl, version, releaseUrl) {
         updateNowBtn.disabled = false;
         updateNowBtn.textContent = '✅ 已打开下载';
         if (chrome.downloads && chrome.downloads.onChanged) {
-          chrome.downloads.onChanged.removeListener(downloadListener);
+          if (chrome.downloads && chrome.downloads.onChanged) {
+        chrome.downloads.onChanged.removeListener(downloadListener);
+      }
         }
       }
     });
@@ -518,7 +526,9 @@ function downloadAndInstallUpdate(downloadUrl, version, releaseUrl) {
         updateNowBtn.disabled = false;
         updateNowBtn.textContent = '✅ 已打开下载';
         if (chrome.downloads && chrome.downloads.onChanged) {
-          chrome.downloads.onChanged.removeListener(downloadListener);
+          if (chrome.downloads && chrome.downloads.onChanged) {
+        chrome.downloads.onChanged.removeListener(downloadListener);
+      }
         }
   }
 }
