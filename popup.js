@@ -219,23 +219,48 @@ function checkForUpdates() {
 function checkGitHubUpdates(githubRepo, currentVersion, checkUpdateBtn, updateStatus) {
   const apiUrl = `https://api.github.com/repos/${githubRepo}/releases/latest`;
   
-  // 添加必要的请求头，避免 403 错误
-  fetch(apiUrl, {
+  // 通过 background.js 代理请求（解决 CORS 和 403 问题）
+  chrome.runtime.sendMessage({
+    action: 'httpRequest',
+    method: 'GET',
+    url: apiUrl,
     headers: {
       'Accept': 'application/vnd.github+json',
       'User-Agent': 'SPX-Helper-Extension'
     }
-  })
-    .then(response => {
-      if (!response.ok) {
-        // 如果是 403，可能是速率限制或需要认证
-        if (response.status === 403) {
-          throw new Error('GitHub API 速率限制，请稍后再试');
-        }
-        throw new Error(`GitHub API 错误: ${response.status}`);
-      }
-      return response.json();
-    })
+  }, function(response) {
+    if (chrome.runtime.lastError) {
+      console.error('消息发送失败:', chrome.runtime.lastError);
+      updateStatus.className = 'update-status error';
+      updateStatus.innerHTML = `
+        <div class="update-info">
+          <p>无法连接到更新服务器</p>
+          <p class="update-desc" style="font-size: 11px; margin-top: 4px;">${chrome.runtime.lastError.message}</p>
+        </div>
+      `;
+      checkUpdateBtn.disabled = false;
+      checkUpdateBtn.textContent = '检查更新';
+      return;
+    }
+    
+    if (!response || !response.success) {
+      const errorMsg = response ? response.error : '请求失败';
+      console.error('GitHub API 请求失败:', errorMsg);
+      updateStatus.className = 'update-status error';
+      updateStatus.innerHTML = `
+        <div class="update-info">
+          <p>无法连接到更新服务器</p>
+          <p class="update-desc" style="font-size: 11px; margin-top: 4px;">${errorMsg}</p>
+        </div>
+      `;
+      checkUpdateBtn.disabled = false;
+      checkUpdateBtn.textContent = '检查更新';
+      return;
+    }
+    
+    // 解析响应
+    try {
+      const release = JSON.parse(response.body);
     .then(release => {
       // 从 tag_name 提取版本号（格式可能是 "v2.6.5" 或 "2.6.5"）
       const latestVersion = release.tag_name.replace(/^v/, '');
