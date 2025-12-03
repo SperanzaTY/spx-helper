@@ -181,8 +181,15 @@ function loadUpdateConfig() {
   chrome.storage.local.get(['updateCheckConfig'], function(result) {
     const config = result.updateCheckConfig || {};
     const githubRepoInput = document.getElementById('githubRepoInput');
-    if (githubRepoInput && config.githubRepo) {
-      githubRepoInput.value = config.githubRepo;
+    
+    // 如果没有配置，设置默认值
+    if (!config.githubRepo) {
+      config.githubRepo = 'SperanzaTY/spx-helper';
+      chrome.storage.local.set({ updateCheckConfig: config });
+    }
+    
+    if (githubRepoInput) {
+      githubRepoInput.value = config.githubRepo || 'SperanzaTY/spx-helper';
     }
   });
 }
