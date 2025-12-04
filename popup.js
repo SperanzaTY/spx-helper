@@ -4410,6 +4410,15 @@ function displayEvents(events) {
     
     // 处理换行符
     const description = event.description ? event.description.replace(/\n/g, '<br>') : '';
+    const hasDescription = description && description.trim().length > 0;
+    // 使用事件ID或时间戳生成唯一ID
+    const eventId = `event-${event.id || index}-${startTime}-${Math.random().toString(36).substr(2, 9)}`;
+    
+    // 判断是否需要展开/收起功能
+    // 条件：有描述 且 (描述超过150字符 或 包含超过3个换行符)
+    const descriptionText = event.description || '';
+    const lineCount = (descriptionText.match(/\n/g) || []).length;
+    const needsExpand = hasDescription && (descriptionText.length > 150 || lineCount > 3);
     
     const eventHtml = `
       <div class="event-item ${isOngoing ? 'event-ongoing' : ''} ${isPast ? 'event-past' : ''}">
@@ -4419,10 +4428,21 @@ function displayEvents(events) {
             ${isOngoing ? '<span class="ongoing-indicator">🔴 进行中</span> ' : ''}
             ${escapeHtml(event.summary || '(无标题)')}
           </div>
-          ${description ? `<div class="event-description">${escapeHtml(description).replace(/&lt;br&gt;/g, '<br>')}</div>` : ''}
           ${event.location ? `<div class="event-location">📍 ${escapeHtml(event.location)}</div>` : ''}
-          ${event.hangoutLink ? `<a href="${event.hangoutLink}" target="_blank" class="event-link">🎥 加入会议</a>` : ''}
-          ${event.htmlLink ? `<a href="${event.htmlLink}" target="_blank" class="event-link">在 Calendar 中查看</a>` : ''}
+          ${needsExpand ? `
+            <div class="event-expandable-content" id="${eventId}-content" style="display: none;">
+              ${description ? `<div class="event-description">${escapeHtml(description).replace(/&lt;br&gt;/g, '<br>')}</div>` : ''}
+              ${event.hangoutLink ? `<a href="${event.hangoutLink}" target="_blank" class="event-link">🎥 加入会议</a>` : ''}
+              ${event.htmlLink ? `<a href="${event.htmlLink}" target="_blank" class="event-link">在 Calendar 中查看</a>` : ''}
+            </div>
+            <button class="event-expand-btn" data-event-id="${eventId}">
+              <span class="expand-icon">▼</span> 展开详情
+            </button>
+          ` : `
+            ${description ? `<div class="event-description">${escapeHtml(description).replace(/&lt;br&gt;/g, '<br>')}</div>` : ''}
+            ${event.hangoutLink ? `<a href="${event.hangoutLink}" target="_blank" class="event-link">🎥 加入会议</a>` : ''}
+            ${event.htmlLink ? `<a href="${event.htmlLink}" target="_blank" class="event-link">在 Calendar 中查看</a>` : ''}
+          `}
         </div>
       </div>
     `;
@@ -4463,6 +4483,25 @@ function displayEvents(events) {
   if (pastEventsHeader) {
     pastEventsHeader.addEventListener('click', togglePastEvents);
   }
+  
+  // 绑定日程详情展开/收起事件
+  document.querySelectorAll('.event-expand-btn').forEach(btn => {
+    btn.addEventListener('click', function() {
+      const eventId = this.dataset.eventId;
+      const content = document.getElementById(eventId + '-content');
+      const icon = this.querySelector('.expand-icon');
+      
+      if (content.style.display === 'none') {
+        content.style.display = 'block';
+        icon.textContent = '▲';
+        this.innerHTML = '<span class="expand-icon">▲</span> 收起详情';
+      } else {
+        content.style.display = 'none';
+        icon.textContent = '▼';
+        this.innerHTML = '<span class="expand-icon">▼</span> 展开详情';
+      }
+    });
+  });
 }
 
 // 切换已过期事件的显示/隐藏
@@ -4867,10 +4906,16 @@ async function sendMessage() {
       endpoint_deployment_key: SMART_CONFIG.endpointKey,
       user_id: SMART_CONFIG.userId,
       message: {
-        input_str: message,
-        thread_id: threadId
+        input_str: message
+        // thread_id 是可选的，如果需要保持对话上下文可以添加
+        // thread_id: threadId
       }
     };
+    
+    // 如果需要保持对话上下文，添加 thread_id
+    if (threadId) {
+      requestData.message.thread_id = threadId;
+    }
     
     console.log('📤 发送请求数据:', JSON.stringify(requestData, null, 2));
     

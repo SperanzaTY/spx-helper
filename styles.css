@@ -3244,6 +3244,19 @@ input:checked + .slider:before {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 15px;
+  width: 100%;
+  min-width: 0; /* 允许 flex 子元素正确收缩 */
+  box-sizing: border-box;
+}
+
+.calendar-header-bar h2 {
+  margin: 0;
+  word-wrap: break-word;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  max-width: 100%;
+  flex: 1;
+  min-width: 0;
 }
 
 .calendar-header-bar h2 {
@@ -3257,6 +3270,9 @@ input:checked + .slider:before {
 
 .calendar-tool {
   max-width: 100%;
+  width: 100%;
+  overflow-x: hidden; /* 防止横向滚动 */
+  box-sizing: border-box;
 }
 
 .calendar-auth {
@@ -3311,6 +3327,9 @@ input:checked + .slider:before {
 
 .calendar-events-list {
   min-height: 200px;
+  width: 100%;
+  overflow-x: hidden; /* 防止横向滚动 */
+  box-sizing: border-box;
 }
 
 .event-item {
@@ -3323,6 +3342,10 @@ input:checked + .slider:before {
   border-radius: 8px;
   box-shadow: 0 2px 4px rgba(0,0,0,0.05);
   transition: all 0.2s;
+  width: 100%;
+  min-width: 0; /* 允许 flex 子元素正确收缩 */
+  box-sizing: border-box;
+  overflow: hidden; /* 防止内容溢出 */
 }
 
 .event-item:hover {
@@ -3344,16 +3367,22 @@ input:checked + .slider:before {
 }
 
 .event-time-badge {
-  min-width: 100px;
-  padding: 8px 12px;
+  width: 110px; /* 固定宽度，确保时间完整显示 */
+  min-width: 110px;
+  max-width: 110px;
+  padding: 8px 10px;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: white;
   border-radius: 6px;
   text-align: center;
   margin-right: 15px;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
+  flex-shrink: 0; /* 防止时间徽章被压缩 */
+  box-sizing: border-box;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .event-time-badge.ongoing {
@@ -3470,6 +3499,10 @@ input:checked + .slider:before {
 
 .event-details {
   flex: 1;
+  min-width: 0; /* 允许 flex 子元素正确收缩 */
+  max-width: calc(100% - 125px); /* 减去时间徽章宽度和间距 */
+  overflow: hidden; /* 防止内容溢出 */
+  box-sizing: border-box;
 }
 
 .event-title {
@@ -3477,6 +3510,11 @@ input:checked + .slider:before {
   font-weight: 600;
   color: #333;
   margin: 0 0 5px 0;
+  word-wrap: break-word;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .event-description {
@@ -3484,6 +3522,11 @@ input:checked + .slider:before {
   color: #666;
   margin: 0 0 5px 0;
   line-height: 1.5;
+  word-wrap: break-word;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .event-location {
@@ -3492,6 +3535,53 @@ input:checked + .slider:before {
   display: flex;
   align-items: center;
   gap: 5px;
+  word-wrap: break-word;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  max-width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 8px; /* 确保地点和展开按钮之间有间距 */
+}
+
+.event-expandable-content {
+  margin-top: 8px;
+  animation: fadeIn 0.3s ease-out;
+}
+
+.event-expand-btn {
+  margin-top: 8px;
+  padding: 0;
+  background: none;
+  border: none;
+  font-size: 12px;
+  color: #667eea;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.event-expand-btn:hover {
+  color: #764ba2;
+  text-decoration: underline;
+}
+
+.event-expand-btn:active {
+  color: #5568d3;
+}
+
+.expand-icon {
+  font-size: 10px;
+  transition: transform 0.2s ease;
+  display: inline-block;
+  line-height: 1;
+}
+
+.event-expand-btn:hover .expand-icon {
+  transform: translateY(1px);
 }
 
 .event-link {
@@ -3572,10 +3662,13 @@ input:checked + .slider:before {
 .chat-messages {
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden; /* 防止横向滚动 */
   padding: 15px;
   background: linear-gradient(to bottom, #f8f9fa 0%, #f0f2f5 100%);
   border-radius: 8px;
   min-height: 0; /* 重要：允许flex子元素正确收缩 */
+  width: 100%; /* 确保宽度不超过父容器 */
+  box-sizing: border-box;
 }
 
 /* 美化聊天区域滚动条 */
@@ -3602,6 +3695,9 @@ input:checked + .slider:before {
   margin-bottom: 20px;
   animation: fadeIn 0.3s ease-out;
   align-items: flex-start;
+  width: 100%;
+  min-width: 0; /* 允许 flex 子元素正确收缩 */
+  box-sizing: border-box;
 }
 
 @keyframes fadeIn {
@@ -3629,6 +3725,8 @@ input:checked + .slider:before {
 .message-content {
   flex: 1;
   max-width: 85%;
+  min-width: 0; /* 允许 flex 子元素正确收缩 */
+  overflow: hidden; /* 防止内容溢出 */
 }
 
 .message-text {
@@ -3640,7 +3738,11 @@ input:checked + .slider:before {
   color: #333;
   white-space: pre-wrap;
   word-wrap: break-word;
+  word-break: break-word; /* 强制长单词换行 */
+  overflow-wrap: break-word; /* 现代浏览器支持 */
+  max-width: 100%; /* 确保不超过容器宽度 */
   box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+  box-sizing: border-box; /* 包含 padding 在宽度计算中 */
 }
 
 .chat-message.user .message-text {
@@ -3665,11 +3767,17 @@ input:checked + .slider:before {
   padding: 12px;
   border-radius: 8px;
   overflow-x: auto;
+  overflow-y: hidden;
   margin: 10px 0;
   font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
   font-size: 13px;
   line-height: 1.5;
   box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  max-width: 100%;
+  box-sizing: border-box;
+  white-space: pre;
+  word-wrap: normal;
+  word-break: normal;
 }
 
 .message-text code {
