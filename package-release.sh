@@ -105,3 +105,5 @@ echo "📍 位置: /Users/tianyi.liang/Cursor/SPX_Helper/${PACKAGE_NAME}"
 echo ""
 echo "🚀 可以上传到 GitHub Releases 了！"
 
+
+

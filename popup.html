@@ -348,6 +348,10 @@
               <span class="grid-icon">🌐</span>
               <span class="grid-label">HTTP</span>
             </button>
+            <button class="utils-grid-btn" data-util="decision">
+              <span class="grid-icon">🎡</span>
+              <span class="grid-label">Roll</span>
+            </button>
           </div>
 
           <!-- 时区转换工具 -->
@@ -994,6 +998,46 @@
                 <div id="httpHistoryList" class="http-history-list">
                   <div class="http-history-empty">暂无历史记录</div>
                 </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 转盘抽奖工具 -->
+          <div id="decision-util" class="utils-content">
+            <h3>🎡 Roll</h3>
+            
+            <div class="decision-wheel-tool">
+              <div id="wheelOptionsList" class="weight-options-list">
+                <!-- 选项列表将动态生成 -->
+              </div>
+              
+              <div class="wheel-container-wrapper">
+                <div class="wheel-container" id="wheelContainer">
+                  <canvas id="wheelCanvas" width="300" height="300"></canvas>
+                  <div class="wheel-pointer"></div>
+                </div>
+              </div>
+              
+              <div class="decision-actions">
+                <button id="addWheelOptionBtn" class="btn btn-secondary">➕ 添加选项</button>
+                <button id="spinWheelBtn" class="btn btn-primary">🎯 开始旋转</button>
+                <button id="clearWheelOptionsBtn" class="btn btn-secondary">🗑️ 清空</button>
+              </div>
+              
+              <div class="decision-option-toggle">
+                <label class="toggle-label">
+                  <input type="checkbox" id="wheelEnableWeight">
+                  <span>⚖️ 启用权重分配</span>
+                </label>
+              </div>
+              
+              <div class="decision-history-section">
+                <h4>📚 已保存的配置</h4>
+                <div id="wheelHistoryList" class="history-list"></div>
+              </div>
+              
+              <div class="decision-actions-bottom">
+                <button id="saveWheelChoiceBtn" class="btn btn-secondary">💾 保存配置</button>
               </div>
             </div>
           </div>

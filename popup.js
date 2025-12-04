@@ -19,6 +19,7 @@ document.addEventListener('DOMContentLoaded', function() {
   initCaseTool();
   initMermaidTool();
   initHttpTool();
+  initDecisionHelper();
   initCalendarTool();
   initCodeHelper();
   initTodos();
@@ -356,51 +357,65 @@ function renderLinkCategories(categories, allLinks) {
   const container = document.getElementById('linksContainer');
   if (!container) return;
   
-  // 按order排序
-  const sortedCategories = [...categories].sort((a, b) => a.order - b.order);
-  
-  container.innerHTML = sortedCategories.map((cat, catIndex) => {
-    const links = allLinks.filter(link => link.category === cat.id)
-      .sort((a, b) => (a.order || 0) - (b.order || 0)); // 按order排序链接
+  // 加载分类展开/收起状态
+  chrome.storage.local.get(['categoryExpanded'], function(result) {
+    const categoryExpanded = result.categoryExpanded || {};
     
-    const linksHtml = links.length > 0 
-      ? links.map((link, linkIndex) => `
-          <div class="link-card" data-url="${link.url}">
-            <div class="link-content">
-              <div class="link-name">${escapeHtml(link.name)}</div>
-              <div class="link-url">${escapeHtml(link.url)}</div>
+    // 按order排序
+    const sortedCategories = [...categories].sort((a, b) => a.order - b.order);
+    
+    container.innerHTML = sortedCategories.map((cat, catIndex) => {
+      const links = allLinks.filter(link => link.category === cat.id)
+        .sort((a, b) => (a.order || 0) - (b.order || 0)); // 按order排序链接
+      
+      // 检查该分类是否展开（默认展开，如果之前收起过则收起）
+      const isExpanded = categoryExpanded[cat.id] !== undefined ? categoryExpanded[cat.id] : true;
+      
+      const linksHtml = links.length > 0 
+        ? links.map((link, linkIndex) => `
+            <div class="link-card" data-url="${link.url}">
+              <div class="link-content">
+                <div class="link-name">${escapeHtml(link.name)}</div>
+                <div class="link-url">${escapeHtml(link.url)}</div>
+              </div>
+              <div class="link-actions">
+                <button class="btn-icon move-link-up" data-id="${link.id}" data-category="${cat.id}" ${linkIndex === 0 ? 'disabled' : ''} title="上移">⬆️</button>
+                <button class="btn-icon move-link-down" data-id="${link.id}" data-category="${cat.id}" ${linkIndex === links.length - 1 ? 'disabled' : ''} title="下移">⬇️</button>
+                <button class="btn-icon edit-link-btn" data-id="${link.id}" title="编辑">✏️</button>
+                <button class="btn-icon delete-link-btn" data-id="${link.id}" title="删除">🗑️</button>
+              </div>
             </div>
-            <div class="link-actions">
-              <button class="btn-icon move-link-up" data-id="${link.id}" data-category="${cat.id}" ${linkIndex === 0 ? 'disabled' : ''} title="上移">⬆️</button>
-              <button class="btn-icon move-link-down" data-id="${link.id}" data-category="${cat.id}" ${linkIndex === links.length - 1 ? 'disabled' : ''} title="下移">⬇️</button>
-              <button class="btn-icon edit-link-btn" data-id="${link.id}" title="编辑">✏️</button>
-              <button class="btn-icon delete-link-btn" data-id="${link.id}" title="删除">🗑️</button>
+          `).join('')
+        : '<div class="empty-state"><div class="empty-state-icon">🔗</div><div class="empty-state-text">暂无链接</div></div>';
+      
+      return `
+        <div class="category-section">
+          <div class="category-header" data-category-id="${cat.id}">
+            <div class="category-title-wrapper">
+              <button class="category-toggle-btn" data-category-id="${cat.id}" title="${isExpanded ? '收起' : '展开'}">
+                <span class="toggle-icon">${isExpanded ? '▼' : '▶'}</span>
+              </button>
+              <h3>${escapeHtml(cat.name)}</h3>
+            </div>
+            <div class="category-actions">
+              <button class="btn-icon move-category-up" data-id="${cat.id}" ${catIndex === 0 ? 'disabled' : ''} title="上移分类">⬆️</button>
+              <button class="btn-icon move-category-down" data-id="${cat.id}" ${catIndex === sortedCategories.length - 1 ? 'disabled' : ''} title="下移分类">⬇️</button>
+              <button class="btn-icon edit-category-btn" data-id="${cat.id}" title="编辑分类">✏️</button>
+              <button class="btn-icon delete-category-btn" data-id="${cat.id}" title="删除分类">🗑️</button>
             </div>
           </div>
-        `).join('')
-      : '<div class="empty-state"><div class="empty-state-icon">🔗</div><div class="empty-state-text">暂无链接</div></div>';
-    
-    return `
-      <div class="category-section">
-        <div class="category-header">
-          <h3>${escapeHtml(cat.name)}</h3>
-          <div class="category-actions">
-            <button class="btn-icon move-category-up" data-id="${cat.id}" ${catIndex === 0 ? 'disabled' : ''} title="上移分类">⬆️</button>
-            <button class="btn-icon move-category-down" data-id="${cat.id}" ${catIndex === sortedCategories.length - 1 ? 'disabled' : ''} title="下移分类">⬇️</button>
-            <button class="btn-icon edit-category-btn" data-id="${cat.id}" title="编辑分类">✏️</button>
-            <button class="btn-icon delete-category-btn" data-id="${cat.id}" title="删除分类">🗑️</button>
+          <div class="links-grid category-content" id="${cat.id}Links" style="display: ${isExpanded ? 'flex' : 'none'};">
+            ${linksHtml}
           </div>
         </div>
-        <div class="links-grid" id="${cat.id}Links">
-          ${linksHtml}
-        </div>
-      </div>
-    `;
-  }).join('');
-  
-  // 重新绑定所有事件
-  bindLinkEvents();
-  bindCategoryEvents();
+      `;
+    }).join('');
+    
+    // 重新绑定所有事件
+    bindLinkEvents();
+    bindCategoryEvents();
+    bindCategoryToggle();
+  });
 }
 
 function bindLinkEvents() {
@@ -449,6 +464,58 @@ function bindLinkEvents() {
         deleteLink(parseInt(this.dataset.id));
       }
     });
+  });
+}
+
+function bindCategoryToggle() {
+  // 绑定分类展开/收起按钮
+  document.querySelectorAll('.category-toggle-btn').forEach(btn => {
+    btn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      const categoryId = this.dataset.categoryId;
+      toggleCategory(categoryId);
+    });
+  });
+  
+  // 点击分类标题也可以展开/收起
+  document.querySelectorAll('.category-header').forEach(header => {
+    header.addEventListener('click', function(e) {
+      // 如果点击的是按钮或操作按钮，不触发
+      if (e.target.closest('.category-actions') || e.target.closest('.category-toggle-btn')) {
+        return;
+      }
+      const categoryId = this.dataset.categoryId;
+      if (categoryId) {
+        toggleCategory(categoryId);
+      }
+    });
+  });
+}
+
+function toggleCategory(categoryId) {
+  const content = document.getElementById(`${categoryId}Links`);
+  const toggleBtn = document.querySelector(`.category-toggle-btn[data-category-id="${categoryId}"]`);
+  const toggleIcon = toggleBtn ? toggleBtn.querySelector('.toggle-icon') : null;
+  
+  if (!content) return;
+  
+  const isExpanded = content.style.display !== 'none';
+  const newExpanded = !isExpanded;
+  
+  // 更新显示状态
+  content.style.display = newExpanded ? 'flex' : 'none';
+  if (toggleIcon) {
+    toggleIcon.textContent = newExpanded ? '▼' : '▶';
+  }
+  if (toggleBtn) {
+    toggleBtn.title = newExpanded ? '收起' : '展开';
+  }
+  
+  // 保存状态
+  chrome.storage.local.get(['categoryExpanded'], function(result) {
+    const categoryExpanded = result.categoryExpanded || {};
+    categoryExpanded[categoryId] = newExpanded;
+    chrome.storage.local.set({ categoryExpanded: categoryExpanded });
   });
 }
 
@@ -4174,6 +4241,437 @@ function clearHttpConfig() {
     // 清除存储的配置
     chrome.storage.local.remove('httpConfig');
   }
+}
+
+// ===== 转盘抽奖工具 =====
+let wheelCanvas = null;
+let wheelCtx = null;
+let wheelOptions = [];
+let wheelWeights = [];
+let wheelRotation = 0;
+let isSpinning = false;
+
+function initDecisionHelper() {
+  initWheelMode();
+}
+
+function initWheelMode() {
+  const spinBtn = document.getElementById('spinWheelBtn');
+  const clearBtn = document.getElementById('clearWheelOptionsBtn');
+  const addBtn = document.getElementById('addWheelOptionBtn');
+  const saveBtn = document.getElementById('saveWheelChoiceBtn');
+  const enableWeightCheckbox = document.getElementById('wheelEnableWeight');
+  const optionsListDiv = document.getElementById('wheelOptionsList');
+  
+  if (!optionsListDiv) return;
+  
+  if (enableWeightCheckbox) {
+    enableWeightCheckbox.addEventListener('change', function() {
+      updateWheelOptionsWeightDisplay();
+      initWheel();
+    });
+  }
+  
+  if (spinBtn) spinBtn.addEventListener('click', spinWheel);
+  if (addBtn) addBtn.addEventListener('click', () => addWheelOption());
+  if (clearBtn) clearBtn.addEventListener('click', () => {
+    if (optionsListDiv) optionsListDiv.innerHTML = '';
+    wheelWeights = [];
+    initWheel();
+  });
+  if (saveBtn) saveBtn.addEventListener('click', saveWheelChoice);
+  
+  addWheelOption();
+  loadWheelHistory();
+  initWheel();
+}
+
+function addWheelOption() {
+  const optionsListDiv = document.getElementById('wheelOptionsList');
+  if (!optionsListDiv) return;
+  
+  const enableWeightCheckbox = document.getElementById('wheelEnableWeight');
+  const useWeight = enableWeightCheckbox && enableWeightCheckbox.checked;
+  
+  const item = document.createElement('div');
+  item.className = 'weight-option-item';
+  
+  if (useWeight) {
+    item.innerHTML = `
+      <input type="text" class="weight-option-input" placeholder="选项名称">
+      <div class="weight-controls">
+        <label>权重:</label>
+        <input type="range" class="weight-slider" min="1" max="10" value="5">
+        <span class="weight-value">5</span>
+      </div>
+      <button class="btn-icon remove-weight-option">🗑️</button>
+    `;
+    
+    const slider = item.querySelector('.weight-slider');
+    const valueSpan = item.querySelector('.weight-value');
+    slider.addEventListener('input', function() {
+      valueSpan.textContent = this.value;
+      initWheel();
+    });
+  } else {
+    item.innerHTML = `
+      <input type="text" class="weight-option-input" placeholder="选项名称" style="flex: 1;">
+      <button class="btn-icon remove-weight-option">🗑️</button>
+    `;
+  }
+  
+  item.querySelector('.remove-weight-option').addEventListener('click', function() {
+    item.remove();
+    initWheel();
+  });
+  
+  const input = item.querySelector('.weight-option-input');
+  input.addEventListener('input', function() {
+    initWheel();
+  });
+  
+  optionsListDiv.appendChild(item);
+}
+
+function updateWheelOptionsWeightDisplay() {
+  const optionsListDiv = document.getElementById('wheelOptionsList');
+  const enableWeightCheckbox = document.getElementById('wheelEnableWeight');
+  if (!optionsListDiv || !enableWeightCheckbox) return;
+  
+  const useWeight = enableWeightCheckbox.checked;
+  const items = optionsListDiv.querySelectorAll('.weight-option-item');
+  
+  items.forEach(item => {
+    const input = item.querySelector('.weight-option-input');
+    const text = input ? input.value : '';
+    
+    if (useWeight) {
+      if (!item.querySelector('.weight-controls')) {
+        item.innerHTML = `
+          <input type="text" class="weight-option-input" value="${escapeHtml(text)}" placeholder="选项名称">
+          <div class="weight-controls">
+            <label>权重:</label>
+            <input type="range" class="weight-slider" min="1" max="10" value="5">
+            <span class="weight-value">5</span>
+          </div>
+          <button class="btn-icon remove-weight-option">🗑️</button>
+        `;
+        
+        const slider = item.querySelector('.weight-slider');
+        const valueSpan = item.querySelector('.weight-value');
+        slider.addEventListener('input', function() {
+          valueSpan.textContent = this.value;
+          initWheel();
+        });
+        
+        item.querySelector('.remove-weight-option').addEventListener('click', function() {
+          item.remove();
+          initWheel();
+        });
+        
+        const inputEl = item.querySelector('.weight-option-input');
+        inputEl.addEventListener('input', function() {
+          initWheel();
+        });
+      }
+    } else {
+      item.innerHTML = `
+        <input type="text" class="weight-option-input" value="${escapeHtml(text)}" placeholder="选项名称" style="flex: 1;">
+        <button class="btn-icon remove-weight-option">🗑️</button>
+      `;
+      
+      item.querySelector('.remove-weight-option').addEventListener('click', function() {
+        item.remove();
+        initWheel();
+      });
+      
+      const inputEl = item.querySelector('.weight-option-input');
+      inputEl.addEventListener('input', function() {
+        initWheel();
+      });
+    }
+  });
+}
+
+function initWheel() {
+  const canvas = document.getElementById('wheelCanvas');
+  if (!canvas) return;
+  
+  wheelCanvas = canvas;
+  wheelCtx = canvas.getContext('2d');
+  
+  drawWheel();
+}
+
+function drawWheel() {
+  if (!wheelCtx || !wheelCanvas) return;
+  
+  const centerX = wheelCanvas.width / 2;
+  const centerY = wheelCanvas.height / 2;
+  const radius = Math.min(centerX, centerY) - 20;
+  
+  wheelCtx.clearRect(0, 0, wheelCanvas.width, wheelCanvas.height);
+  
+  const enableWeightCheckbox = document.getElementById('wheelEnableWeight');
+  const useWeight = enableWeightCheckbox && enableWeightCheckbox.checked;
+  const optionsListDiv = document.getElementById('wheelOptionsList');
+  
+  let options = [];
+  let weights = [];
+  
+  if (optionsListDiv) {
+    const items = optionsListDiv.querySelectorAll('.weight-option-item');
+    items.forEach(item => {
+      const input = item.querySelector('.weight-option-input');
+      const text = input.value.trim();
+      if (text) {
+        options.push(text);
+        if (useWeight) {
+          const slider = item.querySelector('.weight-slider');
+          const weight = slider ? parseInt(slider.value) : 1;
+          weights.push(weight);
+        } else {
+          weights.push(1);
+        }
+      }
+    });
+  }
+  
+  if (options.length === 0) {
+    wheelCtx.fillStyle = '#f0f0f0';
+    wheelCtx.beginPath();
+    wheelCtx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+    wheelCtx.fill();
+    
+    wheelCtx.fillStyle = '#999';
+    wheelCtx.font = '14px Arial';
+    wheelCtx.textAlign = 'center';
+    wheelCtx.fillText('添加选项', centerX, centerY);
+    wheelOptions = [];
+    wheelWeights = [];
+    return;
+  }
+  
+  const totalWeight = weights.reduce((sum, w) => sum + w, 0);
+  const colors = ['#667eea', '#764ba2', '#9f7aea', '#b794f6', '#c084fc'];
+  
+  let currentAngle = wheelRotation;
+  
+  options.forEach((option, index) => {
+    const weight = weights[index];
+    const anglePerOption = (weight / totalWeight) * Math.PI * 2;
+    const startAngle = currentAngle;
+    const endAngle = currentAngle + anglePerOption;
+    
+    wheelCtx.fillStyle = colors[index % colors.length];
+    wheelCtx.beginPath();
+    wheelCtx.moveTo(centerX, centerY);
+    wheelCtx.arc(centerX, centerY, radius, startAngle, endAngle);
+    wheelCtx.closePath();
+    wheelCtx.fill();
+    
+    wheelCtx.save();
+    wheelCtx.translate(centerX, centerY);
+    wheelCtx.rotate(startAngle + anglePerOption / 2);
+    wheelCtx.fillStyle = 'white';
+    wheelCtx.font = 'bold 12px Arial';
+    wheelCtx.textAlign = 'center';
+    wheelCtx.fillText(option.length > 8 ? option.substring(0, 8) + '...' : option, radius * 0.7, 5);
+    wheelCtx.restore();
+    
+    currentAngle = endAngle;
+  });
+  
+  wheelOptions = options;
+  wheelWeights = weights;
+  
+  wheelCtx.fillStyle = 'white';
+  wheelCtx.beginPath();
+  wheelCtx.arc(centerX, centerY, 20, 0, Math.PI * 2);
+  wheelCtx.fill();
+}
+
+function spinWheel() {
+  if (isSpinning || wheelOptions.length === 0) return;
+  
+  isSpinning = true;
+  const spinBtn = document.getElementById('spinWheelBtn');
+  if (spinBtn) spinBtn.disabled = true;
+  
+  const spins = 5 + Math.random() * 3;
+  const randomAngle = Math.random() * Math.PI * 2;
+  const targetRotation = wheelRotation + spins * Math.PI * 2 + randomAngle;
+  
+  const startRotation = wheelRotation;
+  const duration = 2000;
+  const startTime = Date.now();
+  
+  function animate() {
+    const elapsed = Date.now() - startTime;
+    const progress = Math.min(elapsed / duration, 1);
+    
+    const easeOut = 1 - Math.pow(1 - progress, 3);
+    wheelRotation = startRotation + (targetRotation - startRotation) * easeOut;
+    
+    drawWheel();
+    
+    if (progress < 1) {
+      requestAnimationFrame(animate);
+    } else {
+      isSpinning = false;
+      if (spinBtn) spinBtn.disabled = false;
+    }
+  }
+  
+  animate();
+}
+
+function saveWheelChoice() {
+  const optionsListDiv = document.getElementById('wheelOptionsList');
+  const enableWeightCheckbox = document.getElementById('wheelEnableWeight');
+  if (!optionsListDiv || !enableWeightCheckbox) return;
+
+  const useWeight = enableWeightCheckbox.checked;
+  const options = [];
+  optionsListDiv.querySelectorAll('.weight-option-item').forEach(item => {
+    const input = item.querySelector('.weight-option-input');
+    const text = input.value.trim();
+    if (text) {
+      const weight = useWeight ? parseInt(item.querySelector('.weight-slider').value) : 1;
+      options.push({ text, weight });
+    }
+  });
+
+  if (options.length === 0) {
+    alert('请至少添加一个选项！');
+    return;
+  }
+
+  const choiceName = prompt('请输入配置名称：', `转盘配置 ${new Date().toLocaleString()}`);
+  if (!choiceName) return;
+
+  chrome.storage.local.get(['decisionHelper'], function(result) {
+    const helper = result.decisionHelper || {};
+    const wheelChoices = helper.wheelChoices || [];
+    
+    wheelChoices.push({
+      id: Date.now(),
+      name: choiceName,
+      options: options,
+      useWeight: useWeight
+    });
+
+    chrome.storage.local.set({
+      decisionHelper: {
+        ...helper,
+        wheelChoices: wheelChoices
+      }
+    }, function() {
+      alert('配置保存成功！');
+      loadWheelHistory();
+    });
+  });
+}
+
+function loadWheelHistory() {
+  const historyList = document.getElementById('wheelHistoryList');
+  if (!historyList) return;
+
+  chrome.storage.local.get(['decisionHelper'], function(result) {
+    const helper = result.decisionHelper || {};
+    const wheelChoices = helper.wheelChoices || [];
+
+    if (wheelChoices.length === 0) {
+      historyList.innerHTML = '<div class="history-empty">暂无保存的配置</div>';
+      return;
+    }
+
+    historyList.innerHTML = wheelChoices.map(choice => `
+      <div class="history-item">
+        <span class="history-name">${escapeHtml(choice.name)}</span>
+        <span class="history-options">${choice.options.length}个选项${choice.useWeight ? ' (带权重)' : ''}</span>
+        <div class="history-actions">
+          <button class="btn-icon load-history" data-id="${choice.id}" title="加载配置">📥</button>
+          <button class="btn-icon delete-history" data-id="${choice.id}" title="删除配置">🗑️</button>
+        </div>
+      </div>
+    `).join('');
+
+    historyList.querySelectorAll('.load-history').forEach(btn => {
+      btn.addEventListener('click', function() {
+        const id = parseInt(this.dataset.id);
+        const choice = wheelChoices.find(c => c.id === id);
+        if (!choice) return;
+
+        const optionsListDiv = document.getElementById('wheelOptionsList');
+        const enableWeightCheckbox = document.getElementById('wheelEnableWeight');
+        if (!optionsListDiv || !enableWeightCheckbox) return;
+
+        optionsListDiv.innerHTML = '';
+        enableWeightCheckbox.checked = choice.useWeight;
+
+        choice.options.forEach(opt => {
+          const item = document.createElement('div');
+          item.className = 'weight-option-item';
+          
+          if (choice.useWeight && opt.weight) {
+            item.innerHTML = `
+              <input type="text" class="weight-option-input" value="${escapeHtml(opt.text)}" placeholder="选项名称">
+              <div class="weight-controls">
+                <label>权重:</label>
+                <input type="range" class="weight-slider" min="1" max="10" value="${opt.weight}">
+                <span class="weight-value">${opt.weight}</span>
+              </div>
+              <button class="btn-icon remove-weight-option">🗑️</button>
+            `;
+            
+            const slider = item.querySelector('.weight-slider');
+            const valueSpan = item.querySelector('.weight-value');
+            slider.addEventListener('input', function() {
+              valueSpan.textContent = this.value;
+              initWheel();
+            });
+          } else {
+            item.innerHTML = `
+              <input type="text" class="weight-option-input" value="${escapeHtml(opt.text || opt)}" placeholder="选项名称" style="flex: 1;">
+              <button class="btn-icon remove-weight-option">🗑️</button>
+            `;
+          }
+          
+          item.querySelector('.remove-weight-option').addEventListener('click', function() {
+            item.remove();
+            initWheel();
+          });
+          
+          const inputEl = item.querySelector('.weight-option-input');
+          inputEl.addEventListener('input', function() {
+            initWheel();
+          });
+          
+          optionsListDiv.appendChild(item);
+        });
+        
+        updateWheelOptionsWeightDisplay();
+        initWheel();
+      });
+    });
+    
+    historyList.querySelectorAll('.delete-history').forEach(btn => {
+      btn.addEventListener('click', function() {
+        if (!confirm('确定要删除这个配置吗？')) return;
+        const id = parseInt(this.dataset.id);
+        const newChoices = wheelChoices.filter(c => c.id !== id);
+        chrome.storage.local.set({
+          decisionHelper: {
+            ...helper,
+            wheelChoices: newChoices
+          }
+        }, function() {
+          loadWheelHistory();
+        });
+      });
+    });
+  });
 }
 
 // ===== 今日日程工具 =====
