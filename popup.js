@@ -21,6 +21,7 @@ document.addEventListener('DOMContentLoaded', function() {
   initHttpTool();
   initDecisionHelper();
   initCalendarTool();
+  initGmailTool();
   initCodeHelper();
   initTodos();
   
@@ -6064,5 +6065,922 @@ function renderMiniColumn(containerId, todos) {
 chrome.storage.onChanged.addListener((changes, namespace) => {
   if (namespace === 'local' && changes.todos) {
     loadMiniTodoBoard();
+  }
+});
+
+// ===== Gmail 邮件模块 =====
+let gmailAccessToken = null;
+let currentGmailFilter = 'all';
+let gmailMessages = [];
+let gmailBlockedSenders = []; // 存储屏蔽的发件人列表
+
+function initGmailTool() {
+  // 加载屏蔽列表
+  loadBlockedSenders();
+  
+  // 绑定事件
+  const authorizeBtn = document.getElementById('authorizeGmailBtn');
+  const refreshBtn = document.getElementById('refreshGmailBtn');
+  const retryBtn = document.getElementById('retryGmail');
+  const searchInput = document.getElementById('searchGmail');
+  const filterSettingsBtn = document.getElementById('gmailFilterSettingsBtn');
+  const closeFilterModal = document.getElementById('closeGmailFilterModal');
+  const addFilterBtn = document.getElementById('addFilterBtn');
+  
+  if (authorizeBtn) {
+    authorizeBtn.addEventListener('click', authorizeGmail);
+  }
+  
+  if (refreshBtn) {
+    refreshBtn.addEventListener('click', loadGmailMessages);
+  }
+  
+  if (retryBtn) {
+    retryBtn.addEventListener('click', loadGmailMessages);
+  }
+  
+  if (searchInput) {
+    searchInput.addEventListener('input', filterGmailMessages);
+  }
+  
+  if (filterSettingsBtn) {
+    filterSettingsBtn.addEventListener('click', openFilterSettings);
+  }
+  
+  if (closeFilterModal) {
+    closeFilterModal.addEventListener('click', closeFilterSettings);
+  }
+  
+  if (addFilterBtn) {
+    addFilterBtn.addEventListener('click', addBlockedSender);
+  }
+  
+  // 回车添加
+  const filterEmailInput = document.getElementById('filterEmailInput');
+  if (filterEmailInput) {
+    filterEmailInput.addEventListener('keypress', function(e) {
+      if (e.key === 'Enter') {
+        addBlockedSender();
+      }
+    });
+  }
+  
+  // 绑定筛选按钮
+  const filterBtns = document.querySelectorAll('#gmailFilters .filter-btn');
+  filterBtns.forEach(btn => {
+    btn.addEventListener('click', function() {
+      filterBtns.forEach(b => b.classList.remove('active'));
+      this.classList.add('active');
+      currentGmailFilter = this.dataset.filter;
+      filterGmailMessages();
+    });
+  });
+  
+  // 初始化时检查授权状态
+  checkGmailAuth();
+}
+
+async function checkGmailAuth() {
+  try {
+    // 尝试获取已有的 token
+    if (chrome.identity && chrome.identity.getAuthToken) {
+      chrome.identity.getAuthToken({ interactive: false }, function(token) {
+        if (chrome.runtime.lastError || !token) {
+          showGmailAuthSection();
+        } else {
+          gmailAccessToken = token;
+          loadGmailMessages();
+        }
+      });
+    } else {
+      showGmailAuthSection();
+    }
+  } catch (error) {
+    console.error('Gmail 授权检查失败:', error);
+    showGmailAuthSection();
+  }
+}
+
+function showGmailAuthSection() {
+  document.getElementById('gmailAuthSection').style.display = 'block';
+  document.getElementById('gmailLoading').style.display = 'none';
+  document.getElementById('gmailStats').style.display = 'none';
+  document.getElementById('gmailFilters').style.display = 'none';
+  document.getElementById('gmailList').style.display = 'none';
+  document.getElementById('gmailError').style.display = 'none';
+}
+
+function showGmailLoading() {
+  document.getElementById('gmailAuthSection').style.display = 'none';
+  document.getElementById('gmailLoading').style.display = 'block';
+  document.getElementById('gmailStats').style.display = 'none';
+  document.getElementById('gmailFilters').style.display = 'none';
+  document.getElementById('gmailList').style.display = 'none';
+  document.getElementById('gmailError').style.display = 'none';
+}
+
+function showGmailContent() {
+  document.getElementById('gmailAuthSection').style.display = 'none';
+  document.getElementById('gmailLoading').style.display = 'none';
+  document.getElementById('gmailStats').style.display = 'grid';
+  document.getElementById('gmailFilters').style.display = 'flex';
+  document.getElementById('gmailList').style.display = 'block';
+  document.getElementById('gmailError').style.display = 'none';
+  document.getElementById('gmailFilterSettingsBtn').style.display = 'inline-block';
+}
+
+function showGmailError(message) {
+  document.getElementById('gmailAuthSection').style.display = 'none';
+  document.getElementById('gmailLoading').style.display = 'none';
+  document.getElementById('gmailStats').style.display = 'none';
+  document.getElementById('gmailFilters').style.display = 'none';
+  document.getElementById('gmailList').style.display = 'none';
+  document.getElementById('gmailError').style.display = 'block';
+  document.getElementById('gmailErrorMessage').textContent = message;
+}
+
+async function authorizeGmail() {
+  try {
+    if (!chrome.identity || !chrome.identity.getAuthToken) {
+      showGmailError('当前浏览器不支持 Google 授权功能');
+      return;
+    }
+    
+    showGmailLoading();
+    
+    chrome.identity.getAuthToken({ interactive: true }, function(token) {
+      if (chrome.runtime.lastError) {
+        console.error('Gmail 授权失败:', chrome.runtime.lastError);
+        showGmailError('授权失败: ' + chrome.runtime.lastError.message);
+        return;
+      }
+      
+      gmailAccessToken = token;
+      loadGmailMessages();
+    });
+  } catch (error) {
+    console.error('Gmail 授权失败:', error);
+    showGmailError('授权失败: ' + error.message);
+  }
+}
+
+async function loadGmailMessages() {
+  if (!gmailAccessToken) {
+    showGmailAuthSection();
+    return;
+  }
+  
+  try {
+    showGmailLoading();
+    
+    // 使用 Gmail 搜索语法的相对日期，更稳定
+    // newer_than:3d 表示最近3天
+    // maxResults=500 获取更多邮件（Gmail API 最大支持 500）
+    const response = await fetch(
+      'https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=500&labelIds=INBOX&q=newer_than:3d',
+      {
+        headers: {
+          'Authorization': `Bearer ${gmailAccessToken}`
+        }
+      }
+    );
+    
+    if (!response.ok) {
+      if (response.status === 401) {
+        // Token 过期，重新授权
+        gmailAccessToken = null;
+        if (chrome.identity && chrome.identity.removeCachedAuthToken) {
+          chrome.identity.removeCachedAuthToken({ token: gmailAccessToken }, () => {
+            showGmailAuthSection();
+          });
+        } else {
+          showGmailAuthSection();
+        }
+        return;
+      }
+      throw new Error(`API错误: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    const messageIds = (data.messages || []).map(m => m.id);
+    
+    if (messageIds.length === 0) {
+      gmailMessages = [];
+      updateGmailStats();
+      showGmailContent();
+      filterGmailMessages();
+      return;
+    }
+    
+    // 批量获取邮件详情
+    // 为了性能，分批次获取，每批 20 封
+    const batchSize = 20;
+    const batches = [];
+    
+    for (let i = 0; i < messageIds.length; i += batchSize) {
+      const batchIds = messageIds.slice(i, i + batchSize);
+      batches.push(batchIds);
+    }
+    
+    console.log(`正在加载 ${messageIds.length} 封邮件，分 ${batches.length} 批次...`);
+    
+    // 并发获取所有批次
+    const allMessages = [];
+    for (const batchIds of batches) {
+      const detailPromises = batchIds.map(id => 
+        fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}?format=metadata`, {
+          headers: {
+            'Authorization': `Bearer ${gmailAccessToken}`
+          }
+        }).then(r => r.json())
+      );
+      
+      const batchMessages = await Promise.all(detailPromises);
+      allMessages.push(...batchMessages);
+    }
+    
+    gmailMessages = allMessages;
+    
+    console.log(`成功加载 ${gmailMessages.length} 封邮件`);
+    
+    updateGmailStats();
+    showGmailContent();
+    // 应用当前筛选器，而不是显示全部
+    filterGmailMessages();
+    
+  } catch (error) {
+    console.error('加载邮件失败:', error);
+    showGmailError('加载邮件失败: ' + error.message);
+  }
+}
+
+function updateGmailStats() {
+  const unreadCount = gmailMessages.filter(m => 
+    m.labelIds && m.labelIds.includes('UNREAD')
+  ).length;
+  
+  const starredCount = gmailMessages.filter(m => 
+    m.labelIds && m.labelIds.includes('STARRED')
+  ).length;
+  
+  document.getElementById('gmailUnreadCount').textContent = unreadCount;
+  document.getElementById('gmailTotalCount').textContent = gmailMessages.length;
+  document.getElementById('gmailStarredCount').textContent = starredCount;
+}
+
+function filterGmailMessages() {
+  let filtered = [...gmailMessages];
+  
+  // 首先应用屏蔽规则
+  filtered = filtered.filter(m => {
+    const from = getHeader(m, 'From');
+    return !isEmailBlocked(from);
+  });
+  
+  // 按筛选器过滤
+  if (currentGmailFilter === 'unread') {
+    filtered = filtered.filter(m => m.labelIds && m.labelIds.includes('UNREAD'));
+  } else if (currentGmailFilter === 'starred') {
+    filtered = filtered.filter(m => m.labelIds && m.labelIds.includes('STARRED'));
+  } else if (currentGmailFilter === 'important') {
+    filtered = filtered.filter(m => m.labelIds && m.labelIds.includes('IMPORTANT'));
+  }
+  
+  // 按搜索关键词过滤
+  const searchInput = document.getElementById('searchGmail');
+  if (searchInput && searchInput.value.trim()) {
+    const keyword = searchInput.value.toLowerCase();
+    filtered = filtered.filter(m => {
+      const subject = getHeader(m, 'Subject').toLowerCase();
+      const from = getHeader(m, 'From').toLowerCase();
+      return subject.includes(keyword) || from.includes(keyword);
+    });
+  }
+  
+  renderGmailMessages(filtered);
+}
+
+function renderGmailMessages(messages) {
+  const listDiv = document.getElementById('gmailList');
+  
+  if (!messages || messages.length === 0) {
+    listDiv.innerHTML = `
+      <div class="gmail-empty">
+        <div class="gmail-empty-icon">📭</div>
+        <div class="gmail-empty-text">没有找到邮件</div>
+      </div>
+    `;
+    return;
+  }
+  
+  listDiv.innerHTML = messages.map(msg => {
+    const isUnread = msg.labelIds && msg.labelIds.includes('UNREAD');
+    const isStarred = msg.labelIds && msg.labelIds.includes('STARRED');
+    const isImportant = msg.labelIds && msg.labelIds.includes('IMPORTANT');
+    
+    const from = getHeader(msg, 'From');
+    const subject = getHeader(msg, 'Subject') || '(无主题)';
+    const date = new Date(parseInt(msg.internalDate));
+    const dateStr = formatGmailDate(date);
+    const snippet = msg.snippet || '';
+    
+    return `
+      <div class="gmail-item ${isUnread ? 'unread' : ''}" data-id="${msg.id}">
+        <div class="gmail-item-header">
+          <div class="gmail-item-from">${escapeHtml(from)}</div>
+          <div class="gmail-item-date">${dateStr}</div>
+        </div>
+        <div class="gmail-item-subject">${escapeHtml(subject)}</div>
+        <div class="gmail-item-snippet">${escapeHtml(snippet)}</div>
+        ${(isStarred || isImportant) ? `
+          <div class="gmail-item-labels">
+            ${isStarred ? '<span class="gmail-label starred">⭐ 星标</span>' : ''}
+            ${isImportant ? '<span class="gmail-label important">🔴 重要</span>' : ''}
+          </div>
+        ` : ''}
+        <div class="gmail-item-actions">
+          <button class="gmail-action-btn gmail-open-btn" data-message-id="${msg.id}">📧 打开</button>
+          ${isUnread ? `<button class="gmail-action-btn gmail-read-btn" data-message-id="${msg.id}">✓ 标记已读</button>` : ''}
+          <button class="gmail-action-btn gmail-star-btn" data-message-id="${msg.id}" data-starred="${isStarred}">
+            ${isStarred ? '⭐ 取消星标' : '☆ 加星标'}
+          </button>
+          <button class="gmail-action-btn gmail-important-btn" data-message-id="${msg.id}" data-important="${isImportant}">
+            ${isImportant ? '🔴 取消重要' : '⚪ 标记重要'}
+          </button>
+        </div>
+      </div>
+    `;
+  }).join('');
+  
+  // 绑定邮件卡片点击事件（点击查看详情）
+  listDiv.querySelectorAll('.gmail-item').forEach(item => {
+    item.addEventListener('click', function(e) {
+      // 如果点击的是按钮，不触发详情查看
+      if (e.target.classList.contains('gmail-action-btn') || 
+          e.target.closest('.gmail-action-btn')) {
+        return;
+      }
+      const messageId = this.dataset.id;
+      showGmailDetail(messageId);
+    });
+  });
+  
+  // 使用事件委托绑定按钮点击事件
+  listDiv.querySelectorAll('.gmail-open-btn').forEach(btn => {
+    btn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      const messageId = this.dataset.messageId;
+      openGmailInBrowser(messageId);
+    });
+  });
+  
+  listDiv.querySelectorAll('.gmail-read-btn').forEach(btn => {
+    btn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      const messageId = this.dataset.messageId;
+      markGmailAsRead(messageId);
+    });
+  });
+  
+  listDiv.querySelectorAll('.gmail-star-btn').forEach(btn => {
+    btn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      const messageId = this.dataset.messageId;
+      const isStarred = this.dataset.starred === 'true';
+      toggleGmailStar(messageId, isStarred);
+    });
+  });
+  
+  listDiv.querySelectorAll('.gmail-important-btn').forEach(btn => {
+    btn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      const messageId = this.dataset.messageId;
+      const isImportant = this.dataset.important === 'true';
+      toggleGmailImportant(messageId, isImportant);
+    });
+  });
+}
+
+function getHeader(message, headerName) {
+  if (!message.payload || !message.payload.headers) return '';
+  const header = message.payload.headers.find(h => h.name === headerName);
+  return header ? header.value : '';
+}
+
+function formatGmailDate(date) {
+  const now = new Date();
+  const diff = now - date;
+  const minutes = Math.floor(diff / 60000);
+  const hours = Math.floor(diff / 3600000);
+  const days = Math.floor(diff / 86400000);
+  
+  if (minutes < 1) return '刚刚';
+  if (minutes < 60) return `${minutes}分钟前`;
+  if (hours < 24) return `${hours}小时前`;
+  if (days < 7) return `${days}天前`;
+  
+  return date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
+}
+
+function openGmailInBrowser(messageId) {
+  const url = `https://mail.google.com/mail/u/0/#inbox/${messageId}`;
+  window.open(url, '_blank');
+}
+
+async function markGmailAsRead(messageId) {
+  try {
+    // 禁用按钮，显示加载状态
+    const btn = document.querySelector(`.gmail-read-btn[data-message-id="${messageId}"]`);
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = '⏳ 处理中...';
+    }
+    
+    const response = await fetch(
+      `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}/modify`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${gmailAccessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          removeLabelIds: ['UNREAD']
+        })
+      }
+    );
+    
+    if (response.ok) {
+      console.log('邮件已标记为已读:', messageId);
+      // 刷新邮件列表
+      await loadGmailMessages();
+    } else {
+      const errorData = await response.json();
+      console.error('标记已读失败:', errorData);
+      alert('标记已读失败: ' + (errorData.error?.message || '请求失败'));
+      // 恢复按钮
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = '✓ 标记已读';
+      }
+    }
+  } catch (error) {
+    console.error('标记已读失败:', error);
+    alert('标记已读失败: ' + error.message);
+    // 恢复按钮
+    const btn = document.querySelector(`.gmail-read-btn[data-message-id="${messageId}"]`);
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = '✓ 标记已读';
+    }
+  }
+}
+
+async function toggleGmailStar(messageId, currentlyStarred) {
+  try {
+    // 禁用按钮，显示加载状态
+    const btn = document.querySelector(`.gmail-star-btn[data-message-id="${messageId}"]`);
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = '⏳ 处理中...';
+    }
+    
+    const response = await fetch(
+      `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}/modify`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${gmailAccessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(currentlyStarred ? {
+          removeLabelIds: ['STARRED']
+        } : {
+          addLabelIds: ['STARRED']
+        })
+      }
+    );
+    
+    if (response.ok) {
+      console.log(currentlyStarred ? '已取消星标' : '已加星标', messageId);
+      // 刷新邮件列表
+      await loadGmailMessages();
+    } else {
+      const errorData = await response.json();
+      console.error('操作失败:', errorData);
+      alert('操作失败: ' + (errorData.error?.message || '请求失败'));
+      // 恢复按钮
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = currentlyStarred ? '⭐ 取消星标' : '☆ 加星标';
+      }
+    }
+  } catch (error) {
+    console.error('操作失败:', error);
+    alert('操作失败: ' + error.message);
+    // 恢复按钮
+    const btn = document.querySelector(`.gmail-star-btn[data-message-id="${messageId}"]`);
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = currentlyStarred ? '⭐ 取消星标' : '☆ 加星标';
+    }
+  }
+}
+
+async function toggleGmailImportant(messageId, currentlyImportant) {
+  try {
+    // 禁用按钮，显示加载状态
+    const btn = document.querySelector(`.gmail-important-btn[data-message-id="${messageId}"]`);
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = '⏳ 处理中...';
+    }
+    
+    const response = await fetch(
+      `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}/modify`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${gmailAccessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(currentlyImportant ? {
+          removeLabelIds: ['IMPORTANT']
+        } : {
+          addLabelIds: ['IMPORTANT']
+        })
+      }
+    );
+    
+    if (response.ok) {
+      console.log(currentlyImportant ? '已取消重要' : '已标记重要', messageId);
+      // 刷新邮件列表
+      await loadGmailMessages();
+    } else {
+      const errorData = await response.json();
+      console.error('操作失败:', errorData);
+      alert('操作失败: ' + (errorData.error?.message || '请求失败'));
+      // 恢复按钮
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = currentlyImportant ? '🔴 取消重要' : '⚪ 标记重要';
+      }
+    }
+  } catch (error) {
+    console.error('操作失败:', error);
+    alert('操作失败: ' + error.message);
+    // 恢复按钮
+    const btn = document.querySelector(`.gmail-important-btn[data-message-id="${messageId}"]`);
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = currentlyImportant ? '🔴 取消重要' : '⚪ 标记重要';
+    }
+  }
+}
+
+// 静默标记已读（打开详情时自动调用，不显示UI反馈）
+async function markGmailAsReadSilently(messageId) {
+  try {
+    const response = await fetch(
+      `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}/modify`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${gmailAccessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          removeLabelIds: ['UNREAD']
+        })
+      }
+    );
+    
+    if (response.ok) {
+      console.log('邮件已自动标记为已读:', messageId);
+      // 静默刷新邮件列表，更新未读状态
+      await loadGmailMessages();
+    } else {
+      console.warn('自动标记已读失败，但不影响查看');
+    }
+  } catch (error) {
+    console.error('自动标记已读失败:', error);
+    // 失败不提示用户，不影响查看体验
+  }
+}
+
+// ===== Gmail 邮件过滤功能 =====
+
+// 加载屏蔽发件人列表
+function loadBlockedSenders() {
+  chrome.storage.local.get(['gmailBlockedSenders'], function(result) {
+    gmailBlockedSenders = result.gmailBlockedSenders || [];
+  });
+}
+
+// 保存屏蔽发件人列表
+function saveBlockedSenders() {
+  chrome.storage.local.set({ gmailBlockedSenders: gmailBlockedSenders });
+}
+
+// 打开过滤设置弹窗
+function openFilterSettings() {
+  renderBlockedSendersList();
+  document.getElementById('gmailFilterModal').style.display = 'flex';
+}
+
+// 关闭过滤设置弹窗
+function closeFilterSettings() {
+  document.getElementById('gmailFilterModal').style.display = 'none';
+  document.getElementById('filterEmailInput').value = '';
+}
+
+// 渲染屏蔽列表
+function renderBlockedSendersList() {
+  const listDiv = document.getElementById('filterList');
+  
+  if (gmailBlockedSenders.length === 0) {
+    listDiv.innerHTML = '<div class="filter-empty">暂无屏蔽规则，添加后将自动隐藏匹配的邮件</div>';
+    return;
+  }
+  
+  listDiv.innerHTML = gmailBlockedSenders.map((email, index) => `
+    <div class="filter-item">
+      <div class="filter-item-email">${escapeHtml(email)}</div>
+      <div class="filter-item-actions">
+        <button class="filter-remove-btn" data-index="${index}">🗑️ 删除</button>
+      </div>
+    </div>
+  `).join('');
+  
+  // 绑定删除事件
+  listDiv.querySelectorAll('.filter-remove-btn').forEach(btn => {
+    btn.addEventListener('click', function() {
+      const index = parseInt(this.dataset.index);
+      removeBlockedSender(index);
+    });
+  });
+}
+
+// 添加屏蔽发件人
+function addBlockedSender() {
+  const input = document.getElementById('filterEmailInput');
+  const email = input.value.trim();
+  
+  if (!email) {
+    alert('请输入邮箱地址或匹配规则');
+    return;
+  }
+  
+  // 检查是否已存在
+  if (gmailBlockedSenders.includes(email)) {
+    alert('该规则已存在');
+    return;
+  }
+  
+  // 添加到列表
+  gmailBlockedSenders.push(email);
+  saveBlockedSenders();
+  
+  // 清空输入框
+  input.value = '';
+  
+  // 重新渲染列表
+  renderBlockedSendersList();
+  
+  // 刷新邮件列表
+  filterGmailMessages();
+}
+
+// 删除屏蔽发件人
+function removeBlockedSender(index) {
+  if (confirm('确定要删除这条屏蔽规则吗？')) {
+    gmailBlockedSenders.splice(index, 1);
+    saveBlockedSenders();
+    renderBlockedSendersList();
+    
+    // 刷新邮件列表
+    filterGmailMessages();
+  }
+}
+
+// 检查邮件是否被屏蔽
+function isEmailBlocked(from) {
+  if (!from) return false;
+  
+  const fromLower = from.toLowerCase();
+  
+  return gmailBlockedSenders.some(rule => {
+    const ruleLower = rule.toLowerCase();
+    
+    // 支持多种匹配方式
+    if (ruleLower.startsWith('@')) {
+      // 域名匹配：@example.com
+      return fromLower.includes(ruleLower);
+    } else if (ruleLower.endsWith('@')) {
+      // 前缀匹配：noreply@
+      return fromLower.includes(ruleLower);
+    } else if (ruleLower.includes('@')) {
+      // 完整邮箱匹配
+      return fromLower.includes(ruleLower);
+    } else {
+      // 部分匹配
+      return fromLower.includes(ruleLower);
+    }
+  });
+}
+
+// ===== Gmail 邮件详情查看 =====
+
+async function showGmailDetail(messageId) {
+  const modal = document.getElementById('gmailDetailModal');
+  const loadingDiv = document.getElementById('gmailDetailLoading');
+  const contentDiv = document.getElementById('gmailDetailContent');
+  
+  // 显示弹窗和加载状态
+  modal.style.display = 'flex';
+  loadingDiv.style.display = 'block';
+  contentDiv.innerHTML = '';
+  
+  try {
+    // 获取完整的邮件详情
+    const response = await fetch(
+      `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}?format=full`,
+      {
+        headers: {
+          'Authorization': `Bearer ${gmailAccessToken}`
+        }
+      }
+    );
+    
+    if (!response.ok) {
+      throw new Error(`获取邮件详情失败: ${response.status}`);
+    }
+    
+    const message = await response.json();
+    
+    // 隐藏加载状态
+    loadingDiv.style.display = 'none';
+    
+    // 渲染邮件详情
+    renderGmailDetail(message);
+    
+    // 如果是未读邮件，自动标记为已读
+    const isUnread = message.labelIds && message.labelIds.includes('UNREAD');
+    if (isUnread) {
+      // 异步标记为已读，不阻塞界面
+      markGmailAsReadSilently(messageId);
+    }
+    
+  } catch (error) {
+    console.error('加载邮件详情失败:', error);
+    loadingDiv.style.display = 'none';
+    contentDiv.innerHTML = `
+      <div class="calendar-error">
+        <div class="error-icon">⚠️</div>
+        <p>加载邮件详情失败: ${error.message}</p>
+      </div>
+    `;
+  }
+}
+
+function renderGmailDetail(message) {
+  const contentDiv = document.getElementById('gmailDetailContent');
+  
+  const from = getHeader(message, 'From');
+  const to = getHeader(message, 'To');
+  const subject = getHeader(message, 'Subject') || '(无主题)';
+  const date = new Date(parseInt(message.internalDate));
+  const dateStr = date.toLocaleString('zh-CN');
+  
+  const isUnread = message.labelIds && message.labelIds.includes('UNREAD');
+  const isStarred = message.labelIds && message.labelIds.includes('STARRED');
+  const isImportant = message.labelIds && message.labelIds.includes('IMPORTANT');
+  
+  // 获取邮件正文
+  let body = '';
+  if (message.payload) {
+    body = extractEmailBody(message.payload);
+  }
+  
+  contentDiv.innerHTML = `
+    <div class="gmail-detail-header">
+      <div class="gmail-detail-subject">${escapeHtml(subject)}</div>
+      ${(isUnread || isStarred || isImportant) ? `
+        <div class="gmail-detail-labels-list">
+          ${isUnread ? '<span class="gmail-label">📬 未读</span>' : ''}
+          ${isStarred ? '<span class="gmail-label starred">⭐ 星标</span>' : ''}
+          ${isImportant ? '<span class="gmail-label important">🔴 重要</span>' : ''}
+        </div>
+      ` : ''}
+    </div>
+    
+    <div class="gmail-detail-meta">
+      <div class="gmail-detail-meta-row">
+        <div class="gmail-detail-label">发件人：</div>
+        <div class="gmail-detail-value">${escapeHtml(from)}</div>
+      </div>
+      <div class="gmail-detail-meta-row">
+        <div class="gmail-detail-label">收件人：</div>
+        <div class="gmail-detail-value">${escapeHtml(to)}</div>
+      </div>
+      <div class="gmail-detail-meta-row">
+        <div class="gmail-detail-label">时间：</div>
+        <div class="gmail-detail-value">${dateStr}</div>
+      </div>
+    </div>
+    
+    <div class="gmail-detail-body">
+      <div class="gmail-detail-body-content">${body || message.snippet || '(无内容)'}</div>
+    </div>
+    
+    <div class="gmail-detail-actions">
+      <button class="btn btn-primary gmail-detail-open-btn" data-message-id="${message.id}">
+        📧 在 Gmail 中打开
+      </button>
+      <button class="btn btn-secondary gmail-detail-close-btn">
+        关闭
+      </button>
+    </div>
+  `;
+  
+  // 绑定按钮事件
+  const openBtn = contentDiv.querySelector('.gmail-detail-open-btn');
+  if (openBtn) {
+    openBtn.addEventListener('click', function() {
+      const messageId = this.dataset.messageId;
+      openGmailInBrowser(messageId);
+    });
+  }
+  
+  const closeBtn = contentDiv.querySelector('.gmail-detail-close-btn');
+  if (closeBtn) {
+    closeBtn.addEventListener('click', closeGmailDetailModal);
+  }
+}
+
+// 提取邮件正文
+function extractEmailBody(payload) {
+  if (!payload) return '';
+  
+  // 尝试获取 text/plain 部分
+  if (payload.body && payload.body.data) {
+    return decodeBase64(payload.body.data);
+  }
+  
+  // 递归查找 parts
+  if (payload.parts) {
+    for (const part of payload.parts) {
+      if (part.mimeType === 'text/plain' && part.body && part.body.data) {
+        return decodeBase64(part.body.data);
+      }
+      
+      // 递归查找子部分
+      if (part.parts) {
+        const body = extractEmailBody(part);
+        if (body) return body;
+      }
+    }
+    
+    // 如果没有 text/plain，尝试 text/html
+    for (const part of payload.parts) {
+      if (part.mimeType === 'text/html' && part.body && part.body.data) {
+        const html = decodeBase64(part.body.data);
+        // 简单去除 HTML 标签
+        return html.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ');
+      }
+    }
+  }
+  
+  return '';
+}
+
+// Base64 URL-safe 解码
+function decodeBase64(str) {
+  try {
+    // 替换 URL-safe 字符
+    str = str.replace(/-/g, '+').replace(/_/g, '/');
+    // 补齐 padding
+    while (str.length % 4) {
+      str += '=';
+    }
+    return decodeURIComponent(escape(atob(str)));
+  } catch (e) {
+    console.error('Base64 解码失败:', e);
+    return '(无法解码邮件内容)';
+  }
+}
+
+// 关闭详情弹窗
+function closeGmailDetailModal() {
+  document.getElementById('gmailDetailModal').style.display = 'none';
+}
+
+// 绑定关闭按钮
+document.getElementById('closeGmailDetail')?.addEventListener('click', closeGmailDetailModal);
+
+// 点击弹窗外部关闭
+document.getElementById('gmailDetailModal')?.addEventListener('click', function(e) {
+  if (e.target === this) {
+    closeGmailDetailModal();
   }
 });

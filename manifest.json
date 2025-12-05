@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "SPX Helper",
-  "version": "2.6.8",
+  "version": "2.7.0",
   "description": "Shopee大数据开发助手 - 快速链接、代码片段、时区转换、SQL修正",
   "author": "tianyi.liang",
   "permissions": [
@@ -37,7 +37,9 @@
   "oauth2": {
     "client_id": "72278918032-km42j88dalsp3ojcnrm4ug8novn2610a.apps.googleusercontent.com",
     "scopes": [
-      "https://www.googleapis.com/auth/calendar.readonly"
+      "https://www.googleapis.com/auth/calendar.readonly",
+      "https://www.googleapis.com/auth/gmail.readonly",
+      "https://www.googleapis.com/auth/gmail.modify"
     ]
   },
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAun5EUodtoWG3PyP0Lw9y6CCMCQvBSjA+ZKEL0rZQ0sDgaAvMZHDp1JFYog6zDmzw8Yf6k7ZtJqV0Zz1CmohnFO9+6EY0+eT89g1kk6uTQlwc39kkFPub+q3CnMmvaiB+8cCKR7CGReZScV+UtmpyVxI61w6uz6yY04Bun3Ro9RwRyx8GytHerQO3Y87R+Y0sr3TE9PjYThMGe0DP0YefZLWZ357IQON8EwiqyuLITU62Q/oZR1HkfNWZkstt9rm1itcSeMPLc5msYOkQdnyX9omvVtt9TSofpkPFpL0/OXE6D2RG7iDCOlAAYQ3ET8Ur/YFPyT3bzejLs6I6XLTDUQIDAQAB"

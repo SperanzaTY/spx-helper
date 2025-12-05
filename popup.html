@@ -82,6 +82,7 @@
     <!-- Tab 导航 -->
     <nav class="tabs">
       <button class="tab-btn active" data-tab="calendar">📅 今日日程</button>
+      <button class="tab-btn" data-tab="gmail">📬 邮件</button>
       <button class="tab-btn" data-tab="links">🔗 快速链接</button>
       <button class="tab-btn" data-tab="notes">📝 记事本</button>
       <button class="tab-btn" data-tab="utils">🛠️ 实用工具</button>
@@ -164,6 +165,95 @@
               <div class="error-icon">⚠️</div>
               <p id="calendarErrorMessage"></p>
               <button id="retryCalendar" class="btn btn-secondary">重试</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Gmail 邮件 Tab -->
+      <div id="gmail-tab" class="tab-pane">
+        <div class="section">
+          <div class="section-header">
+            <h2>📬 Gmail 邮件</h2>
+            <div class="section-header-actions">
+              <button id="gmailFilterSettingsBtn" class="btn btn-secondary btn-small" style="display: none;">🔧 过滤设置</button>
+              <button id="refreshGmailBtn" class="btn btn-secondary btn-small">🔄 刷新</button>
+            </div>
+          </div>
+
+          <!-- Gmail 授权区域 -->
+          <div id="gmailAuthSection" style="display: none;">
+            <div class="calendar-auth">
+              <div class="auth-icon">🔐</div>
+              <h3>连接 Gmail</h3>
+              <p>点击下方按钮授权访问您的 Gmail 邮件</p>
+              <button id="authorizeGmailBtn" class="btn btn-primary">🔑 授权 Gmail 访问</button>
+            </div>
+          </div>
+
+          <!-- Gmail 加载状态 -->
+          <div id="gmailLoading" style="display: none;">
+            <div class="calendar-loading">
+              <div class="loading-spinner"></div>
+              <p>正在加载邮件...</p>
+            </div>
+          </div>
+
+          <!-- Gmail 统计卡片 -->
+          <div id="gmailStats" class="gmail-stats" style="display: none;">
+            <div class="stat-card">
+              <span class="stat-number" id="gmailUnreadCount">0</span>
+              <span class="stat-label">未读邮件</span>
+            </div>
+            <div class="stat-card">
+              <span class="stat-number" id="gmailTotalCount">0</span>
+              <span class="stat-label">最近3天</span>
+            </div>
+            <div class="stat-card">
+              <span class="stat-number" id="gmailStarredCount">0</span>
+              <span class="stat-label">加星标</span>
+            </div>
+          </div>
+
+          <!-- 邮件筛选器 -->
+          <div id="gmailFilters" class="gmail-filters" style="display: none;">
+            <div class="filter-group">
+              <button class="filter-btn active" data-filter="all">全部</button>
+              <button class="filter-btn" data-filter="unread">未读</button>
+              <button class="filter-btn" data-filter="starred">星标</button>
+              <button class="filter-btn" data-filter="important">重要</button>
+            </div>
+            <input type="text" id="searchGmail" placeholder="🔍 搜索邮件..." class="input-field">
+          </div>
+
+          <!-- 邮件列表 -->
+          <div id="gmailList" class="gmail-list" style="display: none;"></div>
+
+          <!-- 错误提示 -->
+          <div id="gmailError" style="display: none;">
+            <div class="calendar-error">
+              <div class="error-icon">⚠️</div>
+              <p id="gmailErrorMessage"></p>
+              <button id="retryGmail" class="btn btn-secondary">重试</button>
+            </div>
+          </div>
+
+          <!-- 邮件详情弹窗 -->
+          <div id="gmailDetailModal" class="gmail-modal" style="display: none;">
+            <div class="gmail-modal-content">
+              <div class="gmail-modal-header">
+                <h3 class="gmail-modal-title">📧 邮件详情</h3>
+                <button class="gmail-modal-close" id="closeGmailDetail">&times;</button>
+              </div>
+              <div class="gmail-modal-body">
+                <div id="gmailDetailLoading" class="gmail-detail-loading" style="display: none;">
+                  <div class="loading-spinner"></div>
+                  <p>正在加载邮件详情...</p>
+                </div>
+                <div id="gmailDetailContent">
+                  <!-- 动态渲染邮件详情 -->
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -1108,6 +1198,40 @@
     </div>
   </div>
   
+  <!-- Gmail 过滤设置弹窗 -->
+  <div id="gmailFilterModal" class="modal" style="display: none;">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>🔧 邮件过滤设置</h3>
+        <button class="modal-close" id="closeGmailFilterModal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="filter-settings-section">
+          <h4>屏蔽发件人</h4>
+          <p class="filter-desc">添加不想看到的发件人邮箱地址，这些邮件将被自动隐藏</p>
+          
+          <div class="filter-add-form">
+            <input type="email" id="filterEmailInput" placeholder="输入邮箱地址，如 noreply@example.com" class="input-field">
+            <button id="addFilterBtn" class="btn btn-primary">➕ 添加</button>
+          </div>
+
+          <div id="filterList" class="filter-list">
+            <!-- 动态渲染过滤列表 -->
+          </div>
+
+          <div class="filter-tips">
+            <strong>💡 使用技巧：</strong>
+            <ul>
+              <li>支持完整邮箱地址：noreply@shopee.com</li>
+              <li>支持域名过滤：@notifications.github.com</li>
+              <li>支持部分匹配：jira@（屏蔽所有 jira@ 开头的）</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- 任务弹窗 -->
   <div id="todoModal" class="modal">
     <div class="modal-content">
