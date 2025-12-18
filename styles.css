@@ -3,8 +3,8 @@
  * v2.6.0
  */
 
-/* DataSuite 快速入口 */
-.datasuite-quick-section {
+/* 快速入口合并卡片 */
+.quick-access-section {
   margin-bottom: 30px;
   padding: 20px;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -12,14 +12,30 @@
   box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
 }
 
-.datasuite-quick-section h3 {
-  margin: 0 0 15px 0;
+.quick-access-group {
+  margin-bottom: 20px;
+}
+
+.quick-access-group:last-child {
+  margin-bottom: 0;
+}
+
+.quick-access-group h3 {
+  margin: 0 0 12px 0;
   color: white !important;
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 600;
   text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
+/* 分隔线 */
+.quick-access-divider {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.3);
+  margin: 20px 0;
+}
+
+/* DataSuite 快速入口 */
 .datasuite-links {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
@@ -43,7 +59,7 @@
 .datasuite-link:hover {
   transform: translateY(-5px) scale(1.02);
   box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: rgba(255, 255, 255, 0.95);
 }
 
 .datasuite-link .link-icon {
@@ -64,8 +80,97 @@
   transition: color 0.3s ease;
 }
 
-.datasuite-link:hover .link-text {
+/* FMS 环境标签页 */
+.fms-env-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.fms-env-tab {
+  flex: 1;
+  min-width: 90px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.2);
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-radius: 8px;
   color: white;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: center;
+  letter-spacing: 0.5px;
+}
+
+.fms-env-tab:hover {
+  background: rgba(255, 255, 255, 0.3);
+  border-color: rgba(255, 255, 255, 0.5);
+  transform: translateY(-1px);
+}
+
+.fms-env-tab.active {
+  background: white;
+  color: #667eea;
+  border-color: white;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+/* 市场链接容器 */
+.fms-markets-container {
+  background: white;
+  border-radius: 10px;
+  padding: 12px;
+  min-height: 60px;
+}
+
+.fms-markets {
+  display: none;
+  flex-wrap: wrap;
+  gap: 8px;
+  animation: fadeIn 0.3s ease;
+}
+
+.fms-markets.active {
+  display: flex;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 市场按钮 */
+.fms-market-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 12px;
+  background: #f8f9fa;
+  border: 2px solid #e9ecef;
+  border-radius: 8px;
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 600;
+  color: #333;
+  transition: all 0.2s ease;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.fms-market-btn:hover {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-color: #667eea;
+  color: white;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(102, 126, 234, 0.3);
 }
 
 * {

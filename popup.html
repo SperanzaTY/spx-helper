@@ -262,30 +262,106 @@
       <!-- 快速链接 Tab -->
       <div id="links-tab" class="tab-pane">
         <div class="section">
-          <!-- DataSuite 快速入口 -->
-          <div class="datasuite-quick-section">
-            <h3>DataSuite 快速入口</h3>
-            <div class="datasuite-links">
-              <a href="https://datasuite.shopee.io/datamap" target="_blank" class="datasuite-link">
-                <span class="link-icon">🗺️</span>
-                <span class="link-text">DataMap</span>
-              </a>
-              <a href="https://datasuite.shopee.io/datahub" target="_blank" class="datasuite-link">
-                <span class="link-icon">🏛️</span>
-                <span class="link-text">DataHub</span>
-              </a>
-              <a href="https://datasuite.shopee.io/studio" target="_blank" class="datasuite-link">
-                <span class="link-icon">💻</span>
-                <span class="link-text">Studio</span>
-              </a>
-              <a href="https://datasuite.shopee.io/scheduler" target="_blank" class="datasuite-link">
-                <span class="link-icon">⏰</span>
-                <span class="link-text">Scheduler</span>
-              </a>
-              <a href="https://datasuite.shopee.io/flink" target="_blank" class="datasuite-link">
-                <span class="link-icon">⚡</span>
-                <span class="link-text">Flink</span>
-              </a>
+          <!-- 快速入口合并卡片 -->
+          <div class="quick-access-section">
+            <!-- DataSuite 快速入口 -->
+            <div class="quick-access-group">
+              <h3>DataSuite 快速入口</h3>
+              <div class="datasuite-links">
+                <a href="https://datasuite.shopee.io/datamap" target="_blank" class="datasuite-link">
+                  <span class="link-icon">🗺️</span>
+                  <span class="link-text">DataMap</span>
+                </a>
+                <a href="https://datasuite.shopee.io/datahub" target="_blank" class="datasuite-link">
+                  <span class="link-icon">🏛️</span>
+                  <span class="link-text">DataHub</span>
+                </a>
+                <a href="https://datasuite.shopee.io/studio" target="_blank" class="datasuite-link">
+                  <span class="link-icon">💻</span>
+                  <span class="link-text">Studio</span>
+                </a>
+                <a href="https://datasuite.shopee.io/scheduler" target="_blank" class="datasuite-link">
+                  <span class="link-icon">⏰</span>
+                  <span class="link-text">Scheduler</span>
+                </a>
+                <a href="https://datasuite.shopee.io/flink" target="_blank" class="datasuite-link">
+                  <span class="link-icon">⚡</span>
+                  <span class="link-text">Flink</span>
+                </a>
+              </div>
+            </div>
+
+            <!-- 分隔线 -->
+            <div class="quick-access-divider"></div>
+
+            <!-- FMS SPX Admin 快速入口 -->
+            <div class="quick-access-group">
+              <h3>FMS SPX Admin 快速入口</h3>
+              
+              <!-- 环境标签页 -->
+              <div class="fms-env-tabs">
+                <button class="fms-env-tab active" data-env="live">LIVE</button>
+                <button class="fms-env-tab" data-env="uat">UAT</button>
+                <button class="fms-env-tab" data-env="test">TEST</button>
+                <button class="fms-env-tab" data-env="test-stable">TEST-STABLE</button>
+                <button class="fms-env-tab" data-env="staging">STAGING</button>
+              </div>
+              
+              <!-- 市场链接区域 -->
+              <div class="fms-markets-container">
+                <!-- LIVE 环境 -->
+                <div class="fms-markets active" data-env="live">
+                  <a href="https://spx.shopee.co.id/" target="_blank" class="fms-market-btn">ID</a>
+                  <a href="https://spx.shopee.com.my" target="_blank" class="fms-market-btn">MY</a>
+                  <a href="https://spx.shopee.co.th/" target="_blank" class="fms-market-btn">TH</a>
+                  <a href="https://spx.shopee.ph/" target="_blank" class="fms-market-btn">PH</a>
+                  <a href="https://spx.shopee.vn/" target="_blank" class="fms-market-btn">VN</a>
+                  <a href="https://spx.shopee.sg/" target="_blank" class="fms-market-btn">SG</a>
+                  <a href="https://spx.shopee.tw" target="_blank" class="fms-market-btn">TW</a>
+                  <a href="https://spx.shopee.com.br/#/index" target="_blank" class="fms-market-btn">BR</a>
+                </div>
+                
+                <!-- UAT 环境 -->
+                <div class="fms-markets" data-env="uat">
+                  <a href="https://spx.uat.shopee.co.id/" target="_blank" class="fms-market-btn">ID</a>
+                  <a href="https://spx.uat.shopee.com.my" target="_blank" class="fms-market-btn">MY</a>
+                  <a href="https://spx.uat.shopee.co.th/" target="_blank" class="fms-market-btn">TH</a>
+                  <a href="https://spx.uat.shopee.ph/" target="_blank" class="fms-market-btn">PH</a>
+                  <a href="https://spx.uat.shopee.vn/" target="_blank" class="fms-market-btn">VN</a>
+                  <a href="https://spx.uat.shopee.sg/" target="_blank" class="fms-market-btn">SG</a>
+                  <a href="https://spx.uat.shopee.tw" target="_blank" class="fms-market-btn">TW</a>
+                  <a href="https://spx.uat.shopee.com.br/#/index" target="_blank" class="fms-market-btn">BR</a>
+                </div>
+                
+                <!-- TEST 环境 -->
+                <div class="fms-markets" data-env="test">
+                  <a href="https://spx.test.shopee.co.id/" target="_blank" class="fms-market-btn">ID</a>
+                  <a href="https://spx.test.shopee.com.my" target="_blank" class="fms-market-btn">MY</a>
+                  <a href="https://spx.test.shopee.co.th/" target="_blank" class="fms-market-btn">TH</a>
+                  <a href="https://spx.test.shopee.ph/" target="_blank" class="fms-market-btn">PH</a>
+                  <a href="https://spx.test.shopee.vn/" target="_blank" class="fms-market-btn">VN</a>
+                  <a href="https://spx.test.shopee.sg/" target="_blank" class="fms-market-btn">SG</a>
+                  <a href="https://spx.test.shopee.tw" target="_blank" class="fms-market-btn">TW</a>
+                  <a href="https://spx.test.shopee.com.br/#/index" target="_blank" class="fms-market-btn">BR</a>
+                </div>
+                
+                <!-- TEST-STABLE 环境 -->
+                <div class="fms-markets" data-env="test-stable">
+                  <a href="https://spx.test-stable.shopee.co.th/" target="_blank" class="fms-market-btn">TH</a>
+                </div>
+                
+                <!-- STAGING 环境 -->
+                <div class="fms-markets" data-env="staging">
+                  <a href="https://spx.staging.shopee.co.id/" target="_blank" class="fms-market-btn">ID</a>
+                  <a href="https://spx.staging.shopee.com.my" target="_blank" class="fms-market-btn">MY</a>
+                  <a href="https://spx.staging.shopee.co.th/" target="_blank" class="fms-market-btn">TH</a>
+                  <a href="https://spx.staging.shopee.ph/" target="_blank" class="fms-market-btn">PH</a>
+                  <a href="https://spx.staging.shopee.vn/" target="_blank" class="fms-market-btn">VN</a>
+                  <a href="https://spx.staging.shopee.sg/" target="_blank" class="fms-market-btn">SG</a>
+                  <a href="https://spx.staging.shopee.tw" target="_blank" class="fms-market-btn">TW</a>
+                  <a href="https://spx.staging.shopee.com.br/#/index" target="_blank" class="fms-market-btn">BR</a>
+                </div>
+              </div>
             </div>
           </div>
 

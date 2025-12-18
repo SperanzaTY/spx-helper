@@ -24,6 +24,7 @@ document.addEventListener('DOMContentLoaded', function() {
   initGmailTool();
   initCodeHelper();
   initTodos();
+  initFmsLinks();
   
   // 事件监听器
   document.getElementById('addLink').addEventListener('click', addLink);
@@ -6984,3 +6985,28 @@ document.getElementById('gmailDetailModal')?.addEventListener('click', function(
     closeGmailDetailModal();
   }
 });
+
+// ===== FMS 链接初始化 =====
+function initFmsLinks() {
+  // 获取所有环境标签按钮
+  const envTabs = document.querySelectorAll('.fms-env-tab');
+  const marketsContainers = document.querySelectorAll('.fms-markets');
+  
+  // 为每个标签添加点击事件
+  envTabs.forEach(tab => {
+    tab.addEventListener('click', function() {
+      const env = this.dataset.env;
+      
+      // 移除所有active状态
+      envTabs.forEach(t => t.classList.remove('active'));
+      marketsContainers.forEach(m => m.classList.remove('active'));
+      
+      // 添加当前active状态
+      this.classList.add('active');
+      const targetMarkets = document.querySelector(`.fms-markets[data-env="${env}"]`);
+      if (targetMarkets) {
+        targetMarkets.classList.add('active');
+      }
+    });
+  });
+}
