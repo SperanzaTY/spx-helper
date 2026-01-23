@@ -264,30 +264,30 @@
         <div class="section">
           <!-- 快速入口合并卡片 -->
           <div class="quick-access-section">
-            <!-- DataSuite 快速入口 -->
+          <!-- DataSuite 快速入口 -->
             <div class="quick-access-group">
-              <h3>DataSuite 快速入口</h3>
-              <div class="datasuite-links">
-                <a href="https://datasuite.shopee.io/datamap" target="_blank" class="datasuite-link">
-                  <span class="link-icon">🗺️</span>
-                  <span class="link-text">DataMap</span>
-                </a>
-                <a href="https://datasuite.shopee.io/datahub" target="_blank" class="datasuite-link">
-                  <span class="link-icon">🏛️</span>
-                  <span class="link-text">DataHub</span>
-                </a>
-                <a href="https://datasuite.shopee.io/studio" target="_blank" class="datasuite-link">
-                  <span class="link-icon">💻</span>
-                  <span class="link-text">Studio</span>
-                </a>
-                <a href="https://datasuite.shopee.io/scheduler" target="_blank" class="datasuite-link">
-                  <span class="link-icon">⏰</span>
-                  <span class="link-text">Scheduler</span>
-                </a>
-                <a href="https://datasuite.shopee.io/flink" target="_blank" class="datasuite-link">
-                  <span class="link-icon">⚡</span>
-                  <span class="link-text">Flink</span>
-                </a>
+            <h3>DataSuite 快速入口</h3>
+            <div class="datasuite-links">
+              <a href="https://datasuite.shopee.io/datamap" target="_blank" class="datasuite-link">
+                <span class="link-icon">🗺️</span>
+                <span class="link-text">DataMap</span>
+              </a>
+              <a href="https://datasuite.shopee.io/datahub" target="_blank" class="datasuite-link">
+                <span class="link-icon">🏛️</span>
+                <span class="link-text">DataHub</span>
+              </a>
+              <a href="https://datasuite.shopee.io/studio" target="_blank" class="datasuite-link">
+                <span class="link-icon">💻</span>
+                <span class="link-text">Studio</span>
+              </a>
+              <a href="https://datasuite.shopee.io/scheduler" target="_blank" class="datasuite-link">
+                <span class="link-icon">⏰</span>
+                <span class="link-text">Scheduler</span>
+              </a>
+              <a href="https://datasuite.shopee.io/flink" target="_blank" class="datasuite-link">
+                <span class="link-icon">⚡</span>
+                <span class="link-text">Flink</span>
+              </a>
               </div>
             </div>
 
@@ -517,6 +517,10 @@
             <button class="utils-grid-btn" data-util="decision">
               <span class="grid-icon">🎡</span>
               <span class="grid-label">Roll</span>
+            </button>
+            <button class="utils-grid-btn" data-util="station">
+              <span class="grid-icon">📍</span>
+              <span class="grid-label">站点查询</span>
             </button>
           </div>
 
@@ -1205,6 +1209,101 @@
               
               <div class="decision-actions-bottom">
                 <button id="saveWheelChoiceBtn" class="btn btn-secondary">💾 保存配置</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 站点查询工具 -->
+          <div id="station-util" class="utils-content">
+            <h3>📍 站点快速查询</h3>
+            
+            <div class="station-tool">
+              <!-- 查询输入区域 -->
+              <div class="station-input-section">
+                <div class="station-search-tabs">
+                  <button class="station-search-tab active" data-search-type="id">站点 ID</button>
+                  <button class="station-search-tab" data-search-type="name">站点名称</button>
+                </div>
+                
+                <!-- ID 查询 -->
+                <div id="station-search-id" class="station-search-panel active">
+                  <div class="station-input-row">
+                    <input type="number" id="stationIdInput" class="station-input" placeholder="输入站点 ID，如: 123456">
+                    <select id="stationMarketSelect" class="station-market-select">
+                      <option value="">所有市场</option>
+                      <option value="sg">Singapore (SG)</option>
+                      <option value="id">Indonesia (ID)</option>
+                      <option value="my">Malaysia (MY)</option>
+                      <option value="th">Thailand (TH)</option>
+                      <option value="ph">Philippines (PH)</option>
+                      <option value="vn">Vietnam (VN)</option>
+                      <option value="tw">Taiwan (TW)</option>
+                      <option value="br">Brazil (BR)</option>
+                    </select>
+                    <button id="searchStationById" class="btn btn-primary">🔍 查询</button>
+                  </div>
+                </div>
+                
+                <!-- 名称查询 -->
+                <div id="station-search-name" class="station-search-panel">
+                  <div class="station-input-row">
+                    <input type="text" id="stationNameInput" class="station-input" placeholder="输入站点名称关键词，如: Central Hub">
+                    <select id="stationMarketSelectName" class="station-market-select">
+                      <option value="">所有市场</option>
+                      <option value="sg">Singapore (SG)</option>
+                      <option value="id">Indonesia (ID)</option>
+                      <option value="my">Malaysia (MY)</option>
+                      <option value="th">Thailand (TH)</option>
+                      <option value="ph">Philippines (PH)</option>
+                      <option value="vn">Vietnam (VN)</option>
+                      <option value="tw">Taiwan (TW)</option>
+                      <option value="br">Brazil (BR)</option>
+                    </select>
+                    <button id="searchStationByName" class="btn btn-primary">🔍 搜索</button>
+                  </div>
+                </div>
+              </div>
+              
+              <!-- 查询结果区域 -->
+              <div class="station-results-section">
+                <div id="stationResults" class="station-results">
+                  <div class="station-placeholder">
+                    <span class="placeholder-icon">📍</span>
+                    <span class="placeholder-text">输入站点 ID 或名称进行查询</span>
+                    <div class="placeholder-help">
+                      <p>💡 支持跨市场查询，自动搜索所有市场的站点信息</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              <!-- 配置说明 -->
+              <div class="station-config-notice">
+                <div class="notice-header">
+                  <span class="notice-icon">✅</span>
+                  <span class="notice-title">服务已启动</span>
+                </div>
+                <div class="notice-content">
+                  <p><strong>后端 API 服务运行中</strong>，现在可以查询真实站点数据。</p>
+                  <div class="notice-steps">
+                    <div class="notice-step">
+                      <span class="step-number">✓</span>
+                      <span class="step-text">数据源: <code>clickhouse-k8s-sg-prod (TEST 环境)</code></span>
+                    </div>
+                    <div class="notice-step">
+                      <span class="step-number">✓</span>
+                      <span class="step-text">API 地址: <code>http://localhost:8888</code></span>
+                    </div>
+                    <div class="notice-step">
+                      <span class="step-number">✓</span>
+                      <span class="step-text">支持 8 个市场: SG, ID, MY, TH, PH, VN, TW, BR</span>
+                    </div>
+                  </div>
+                  <div class="notice-actions">
+                    <button id="testStationConnection" class="btn btn-secondary btn-small">🔌 测试连接</button>
+                    <button id="openStationDocs" class="btn btn-secondary btn-small">📖 查看文档</button>
+                  </div>
+                </div>
               </div>
             </div>
           </div>

@@ -1,0 +1,32 @@
+# HTTP 客户端
+requests>=2.25.0
+
+# YAML 配置解析
+PyYAML>=5.4.0
+
+# 命令行参数解析
+argparse>=1.4.0
+
+# SQL 解析（提取表依赖）
+sqlparse>=0.4.0
+
+# 正则表达式增强（可选）
+regex>=2021.0.0
+
+# HTTP 服务框架
+Flask>=2.0.0
+flask-cors>=3.0.0
+
+# 进度条（可选）
+tqdm>=4.60.0
+
+# 测试框架
+pytest>=6.0.0
+pytest-cov>=2.12.0
+
+# 日志轮转
+python-logging-loki>=0.3.0  # 可选：如果需要集成 Loki
+
+# 异步支持（可选）
+aiohttp>=3.8.0
+

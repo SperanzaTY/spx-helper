@@ -1,0 +1,38 @@
+# ClickHouse 配置
+# 使用 TEST 环境（HTTPS + 443 端口）
+
+online2:
+  host: "clickhouse-k8s-sg-prod.data-infra.shopee.io"
+  port: 443
+  user: "spx_mart-cluster_szsc_data_shared_online"
+  password: "RtL3jHWkDoHp"
+  database: "spx_mart_pub"
+  use_https: true
+  timeout: 30
+
+# 市场配置
+markets:
+  - sg
+  - id
+  - my
+  - th
+  - ph
+  - vn
+  - tw
+  - br
+
+# 查询配置
+query:
+  # 并行查询线程数
+  max_workers: 8
+  
+  # 查询超时（秒）
+  timeout: 30
+  
+  # 默认返回结果限制
+  default_limit: 100
+  
+  # 是否显示 SQL 日志
+  show_sql: false
+
+

@@ -1,0 +1,70 @@
+# ClickHouse 数据源配置示例
+# 复制此文件为 datasource.yaml 并填入真实配置
+
+# 元数据库配置（存储 ods_api_mart_api_tab_all 的库）
+metadata_db:
+  host: "metadata-host.example.com"
+  port: 8123
+  user: "readonly_user"
+  password: "your_password"
+  database: "spx_mart_pub"
+  use_https: false
+
+# 数据源映射（ds_id -> 集群配置）
+datasources:
+  1:
+    name: "online6"
+    description: "Online6 集群"
+    host: "10.0.0.1"
+    port: 8123
+    user: "sync_user"
+    password: "password1"
+    use_https: false
+  
+  2:
+    name: "online2"
+    description: "Online2 集群"
+    host: "10.0.0.2"
+    port: 8123
+    user: "sync_user"
+    password: "password2"
+    use_https: false
+  
+  3:
+    name: "online_sg"
+    description: "Singapore 集群"
+    host: "10.0.0.3"
+    port: 8123
+    user: "sync_user"
+    password: "password3"
+    use_https: false
+
+# 目标环境（Test 集群）
+target:
+  host: "test-clickhouse.example.com"
+  port: 8123
+  user: "test_user"
+  password: "test_password"
+  database: "test_database"
+  use_https: false
+
+# 同步配置
+sync_config:
+  # 最大并行线程数
+  max_workers: 10
+  
+  # 查询超时（秒）
+  query_timeout: 300
+  
+  # 同步超时（秒）
+  sync_timeout: 1800
+  
+  # 重试次数
+  max_retries: 3
+  
+  # 是否显示 SQL 日志
+  show_sql: false
+  
+  # 默认是否清空目标表
+  default_clear_target: false
+

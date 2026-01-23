@@ -7010,3 +7010,392 @@ function initFmsLinks() {
     });
   });
 }
+
+// ===== 站点查询工具 =====
+const STATION_API_BASE = 'http://localhost:8888';
+const STATION_DEMO_MODE = false; // 设置为 false 使用真实数据
+
+// 切换查询类型（ID / 名称）
+document.querySelectorAll('.station-search-tab').forEach(tab => {
+  tab.addEventListener('click', function() {
+    const searchType = this.dataset.searchType;
+    
+    // 切换标签状态
+    document.querySelectorAll('.station-search-tab').forEach(t => t.classList.remove('active'));
+    this.classList.add('active');
+    
+    // 切换面板
+    document.querySelectorAll('.station-search-panel').forEach(p => p.classList.remove('active'));
+    document.getElementById(`station-search-${searchType}`).classList.add('active');
+  });
+});
+
+// 按站点 ID 查询
+document.getElementById('searchStationById')?.addEventListener('click', async function() {
+  const stationId = document.getElementById('stationIdInput').value.trim();
+  const market = document.getElementById('stationMarketSelect').value;
+  
+  if (!stationId) {
+    showStationError('请输入站点 ID');
+    return;
+  }
+  
+  await queryStationById(stationId, market);
+});
+
+// 按站点名称查询
+document.getElementById('searchStationByName')?.addEventListener('click', async function() {
+  const stationName = document.getElementById('stationNameInput').value.trim();
+  const market = document.getElementById('stationMarketSelectName').value;
+  
+  if (!stationName) {
+    showStationError('请输入站点名称关键词');
+    return;
+  }
+  
+  await queryStationByName(stationName, market);
+});
+
+// 回车键触发查询
+document.getElementById('stationIdInput')?.addEventListener('keypress', function(e) {
+  if (e.key === 'Enter') {
+    document.getElementById('searchStationById').click();
+  }
+});
+
+document.getElementById('stationNameInput')?.addEventListener('keypress', function(e) {
+  if (e.key === 'Enter') {
+    document.getElementById('searchStationByName').click();
+  }
+});
+
+// 查询站点 ID
+async function queryStationById(stationId, market = '') {
+  const resultsContainer = document.getElementById('stationResults');
+  resultsContainer.innerHTML = '<div class="station-loading"><div class="station-loading-spinner"></div><div class="station-loading-text">查询中...</div></div>';
+  
+  // 演示模式：使用模拟数据
+  if (STATION_DEMO_MODE) {
+    setTimeout(() => {
+      const mockData = {
+        success: true,
+        data: [
+          {
+            market: market || 'id',
+            station_id: stationId,
+            station_name: '示例站点 - Jakarta Central Hub',
+            station_type: 1,
+            bi_station_type: 'HUB',
+            status: 1,
+            city_name: 'Jakarta',
+            district_id: 789,
+            latitude: -6.123456,
+            longitude: 106.789012,
+            manager: 'John Doe',
+            manager_email: 'john.doe@example.com',
+            director: 'Jane Smith',
+            director_email: 'jane.smith@example.com',
+            is_active_site_l7d: 1,
+            station_region: 'Jakarta Region',
+            station_area: 'Central Area',
+            station_sub_area: 'Downtown',
+            is_own_fleet: 1,
+            xpt_flag: 0,
+            address: 'Jl. Sudirman No. 123, Jakarta Pusat (演示数据)'
+          }
+        ],
+        query_time: '0.35s'
+      };
+      renderStationResults(mockData.data, mockData.query_time);
+    }, 500);
+    return;
+  }
+  
+  try {
+    const url = market 
+      ? `${STATION_API_BASE}/station/id/${stationId}?market=${market}`
+      : `${STATION_API_BASE}/station/id/${stationId}`;
+    
+    const response = await fetch(url);
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+    
+    const data = await response.json();
+    
+    if (data.success && data.data && data.data.length > 0) {
+      renderStationResults(data.data, data.query_time);
+    } else {
+      showStationEmpty(`未找到站点 ID: ${stationId}`);
+    }
+  } catch (error) {
+    console.error('查询失败:', error);
+    showStationError(`查询失败: ${error.message}。请配置后端服务或启用演示模式。`);
+  }
+}
+
+// 查询站点名称
+async function queryStationByName(stationName, market = '') {
+  const resultsContainer = document.getElementById('stationResults');
+  resultsContainer.innerHTML = '<div class="station-loading"><div class="station-loading-spinner"></div><div class="station-loading-text">搜索中...</div></div>';
+  
+  // 演示模式：使用模拟数据
+  if (STATION_DEMO_MODE) {
+    setTimeout(() => {
+      const mockData = {
+        success: true,
+        data: [
+          {
+            market: 'id',
+            station_id: 12345,
+            station_name: 'Jakarta Central Hub (演示)',
+            station_type: 1,
+            bi_station_type: 'HUB',
+            status: 1,
+            city_name: 'Jakarta',
+            manager: 'John Doe',
+            manager_email: 'john@example.com',
+            is_active_site_l7d: 1,
+            station_region: 'Jakarta Region',
+            address: 'Jl. Sudirman (演示数据)',
+            latitude: -6.123456,
+            longitude: 106.789012
+          },
+          {
+            market: 'sg',
+            station_id: 23456,
+            station_name: 'Singapore Hub (演示)',
+            station_type: 1,
+            bi_station_type: 'HUB',
+            status: 1,
+            city_name: 'Singapore',
+            manager: 'Jane Smith',
+            manager_email: 'jane@example.com',
+            is_active_site_l7d: 1,
+            station_region: 'Central',
+            address: 'Orchard Road (演示数据)',
+            latitude: 1.304833,
+            longitude: 103.831833
+          },
+          {
+            market: 'my',
+            station_id: 34567,
+            station_name: 'KL Central Hub (演示)',
+            station_type: 1,
+            bi_station_type: 'HUB',
+            status: 1,
+            city_name: 'Kuala Lumpur',
+            manager: 'Ali Ahmad',
+            manager_email: 'ali@example.com',
+            is_active_site_l7d: 0,
+            station_region: 'KL Region',
+            address: 'Jalan Bukit Bintang (演示数据)',
+            latitude: 3.139003,
+            longitude: 101.686855
+          }
+        ],
+        query_time: '0.52s'
+      };
+      
+      // 根据搜索关键词过滤
+      const filtered = mockData.data.filter(s => 
+        s.station_name.toLowerCase().includes(stationName.toLowerCase())
+      );
+      
+      if (filtered.length > 0) {
+        renderStationResults(filtered, mockData.query_time);
+      } else {
+        renderStationResults(mockData.data, mockData.query_time);
+      }
+    }, 800);
+    return;
+  }
+  
+  try {
+    const url = market 
+      ? `${STATION_API_BASE}/station/name/${encodeURIComponent(stationName)}?market=${market}`
+      : `${STATION_API_BASE}/station/name/${encodeURIComponent(stationName)}`;
+    
+    const response = await fetch(url);
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+    
+    const data = await response.json();
+    
+    if (data.success && data.data && data.data.length > 0) {
+      renderStationResults(data.data, data.query_time);
+    } else {
+      showStationEmpty(`未找到包含 "${stationName}" 的站点`);
+    }
+  } catch (error) {
+    console.error('搜索失败:', error);
+    showStationError(`搜索失败: ${error.message}。请配置后端服务或启用演示模式。`);
+  }
+}
+
+// 渲染查询结果
+function renderStationResults(stations, queryTime) {
+  const resultsContainer = document.getElementById('stationResults');
+  
+  let html = `<div class="station-results-header" style="margin-bottom: 15px; padding-bottom: 10px; border-bottom: 2px solid #667eea;">
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+      <span style="font-weight: 600; color: #333;">找到 ${stations.length} 个站点</span>
+      <span style="font-size: 12px; color: #999;">耗时: ${queryTime}</span>
+    </div>
+  </div>`;
+  
+  stations.forEach(station => {
+    const statusText = station.status === 1 ? '✅ 正常' : '❌ 停用';
+    const activeText = station.is_active_site_l7d === 1 ? '✅ 活跃' : '⚪ 不活跃';
+    
+    html += `
+      <div class="station-result-card">
+        <div class="station-result-header">
+          <div class="station-result-title">${station.station_name || '-'}</div>
+          <div class="station-result-market">${(station.market || '').toUpperCase()}</div>
+        </div>
+        <div class="station-result-body">
+          <div class="station-result-field">
+            <div class="station-result-label">站点 ID</div>
+            <div class="station-result-value highlight">${station.station_id}</div>
+          </div>
+          <div class="station-result-field">
+            <div class="station-result-label">类型</div>
+            <div class="station-result-value">${station.bi_station_type || '-'}</div>
+          </div>
+          <div class="station-result-field">
+            <div class="station-result-label">状态</div>
+            <div class="station-result-value">${statusText}</div>
+          </div>
+          <div class="station-result-field">
+            <div class="station-result-label">活跃状态</div>
+            <div class="station-result-value">${activeText}</div>
+          </div>
+          <div class="station-result-field">
+            <div class="station-result-label">城市</div>
+            <div class="station-result-value">${station.city_name || '-'}</div>
+          </div>
+          <div class="station-result-field">
+            <div class="station-result-label">区域</div>
+            <div class="station-result-value">${station.station_region || '-'}</div>
+          </div>
+          <div class="station-result-field">
+            <div class="station-result-label">经理</div>
+            <div class="station-result-value">${station.manager || '-'}</div>
+          </div>
+          <div class="station-result-field">
+            <div class="station-result-label">经理邮箱</div>
+            <div class="station-result-value" style="font-size: 12px;">${station.manager_email || '-'}</div>
+          </div>
+          <div class="station-result-field">
+            <div class="station-result-label">坐标</div>
+            <div class="station-result-value" style="font-size: 12px;">${station.latitude || '-'}, ${station.longitude || '-'}</div>
+          </div>
+          <div class="station-result-field" style="grid-column: 1 / -1;">
+            <div class="station-result-label">地址</div>
+            <div class="station-result-value" style="font-size: 12px;">${station.address || '-'}</div>
+          </div>
+        </div>
+        <div class="station-result-actions">
+          <button class="btn btn-secondary btn-small copy-station-id" data-id="${station.station_id}">📋 复制 ID</button>
+          <button class="btn btn-secondary btn-small copy-station-info" data-info='${JSON.stringify(station).replace(/'/g, "&apos;")}'>📄 复制详情</button>
+        </div>
+      </div>
+    `;
+  });
+  
+  resultsContainer.innerHTML = html;
+  
+  // 绑定复制事件
+  document.querySelectorAll('.copy-station-id').forEach(btn => {
+    btn.addEventListener('click', function() {
+      const stationId = this.dataset.id;
+      copyToClipboard(stationId);
+      showToast('✅ 站点 ID 已复制到剪贴板');
+    });
+  });
+  
+  document.querySelectorAll('.copy-station-info').forEach(btn => {
+    btn.addEventListener('click', function() {
+      const info = JSON.parse(this.dataset.info);
+      const text = `站点信息:\n` +
+        `市场: ${info.market}\n` +
+        `站点ID: ${info.station_id}\n` +
+        `站点名称: ${info.station_name}\n` +
+        `类型: ${info.bi_station_type}\n` +
+        `城市: ${info.city_name}\n` +
+        `经理: ${info.manager} (${info.manager_email})\n` +
+        `地址: ${info.address}`;
+      
+      copyToClipboard(text);
+      showToast('✅ 站点详情已复制到剪贴板');
+    });
+  });
+}
+
+// 显示空状态
+function showStationEmpty(message) {
+  const resultsContainer = document.getElementById('stationResults');
+  resultsContainer.innerHTML = `
+    <div class="station-empty">
+      <div class="station-empty-icon">🔍</div>
+      <div class="station-empty-text">${message}</div>
+    </div>
+  `;
+}
+
+// 显示错误
+function showStationError(message) {
+  const resultsContainer = document.getElementById('stationResults');
+  resultsContainer.innerHTML = `
+    <div class="station-error">
+      <div class="station-error-icon">⚠️</div>
+      <div>${message}</div>
+    </div>
+  `;
+}
+
+// 测试连接
+document.getElementById('testStationConnection')?.addEventListener('click', async function() {
+  const btn = this;
+  const originalText = btn.textContent;
+  btn.textContent = '🔌 测试中...';
+  btn.disabled = true;
+  
+  // 演示模式
+  if (STATION_DEMO_MODE) {
+    setTimeout(() => {
+      showToast('ℹ️ 当前为演示模式，使用模拟数据');
+      btn.textContent = originalText;
+      btn.disabled = false;
+    }, 1000);
+    return;
+  }
+  
+  try {
+    const response = await fetch(`${STATION_API_BASE}/health`, {
+      method: 'GET',
+      timeout: 5000
+    });
+    
+    if (response.ok) {
+      showToast('✅ 连接成功！服务运行正常');
+    } else {
+      showToast('❌ 连接失败：服务返回错误');
+    }
+  } catch (error) {
+    showToast('❌ 连接失败：无法访问服务，请确保已启动 station_api.py');
+  } finally {
+    btn.textContent = originalText;
+    btn.disabled = false;
+  }
+});
+
+// 打开文档
+document.getElementById('openStationDocs')?.addEventListener('click', function() {
+  window.open('https://github.com/SperanzaTY/spx-helper/blob/main/station_query/README.md', '_blank');
+});
+

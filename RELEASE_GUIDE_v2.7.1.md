@@ -1,5 +1,34 @@
-# SPX Helper v2.7.1 Release Notes
+# 发布 v2.7.1 Release 指南
 
+## ✅ 已完成的步骤
+
+1. ✅ 更新 manifest.json 版本号到 2.7.1
+2. ✅ 创建 release notes (release_notes_v2.7.1.md)
+3. ✅ 打包生成 SPX_Helper_v2.7.1.zip
+4. ✅ 提交代码到 GitHub
+5. ✅ 创建并推送 git tag v2.7.1
+
+## 📦 手动创建 GitHub Release
+
+### 步骤 1: 访问 Releases 页面
+
+打开浏览器访问：
+```
+https://github.com/SperanzaTY/spx-helper/releases/new?tag=v2.7.1
+```
+
+### 步骤 2: 填写 Release 信息
+
+**Tag:** `v2.7.1` (已自动选择)
+
+**Release title:** 
+```
+v2.7.1 - FMS快速入口功能
+```
+
+**Description:** 复制以下内容
+
+```markdown
 ## 🎉 新功能
 
 ### FMS SPX Admin 快速入口
@@ -43,12 +72,6 @@
 5. 点击"加载已解压的扩展程序"
 6. 选择解压后的文件夹
 
-## 🔗 相关链接
-
-- [GitHub Repository](https://github.com/SperanzaTY/spx-helper)
-- [功能详细说明](https://github.com/SperanzaTY/spx-helper/blob/main/FMS_FEATURE_UPDATE.md)
-- [问题反馈](https://github.com/SperanzaTY/spx-helper/issues)
-
 ## 📝 更新日志
 
 ### v2.7.1 (2024-12-18)
@@ -60,7 +83,33 @@
 
 ---
 
-感谢使用 SPX Helper！如有问题或建议，欢迎提交 Issue。
+**Full Changelog**: https://github.com/SperanzaTY/spx-helper/compare/v2.7.0...v2.7.1
+```
+
+### 步骤 3: 上传文件
+
+点击 "Attach binaries by dropping them here or selecting them" 区域，上传文件：
+
+📦 **SPX_Helper_v2.7.1.zip** (位置: `/Users/tianyi.liang/Cursor/SPX_Helper/SPX_Helper_v2.7.1.zip`)
+
+### 步骤 4: 发布
+
+- ✅ 勾选 "Set as the latest release"
+- 点击 "Publish release" 按钮
+
+## 🎉 完成！
+
+发布后，用户可以通过以下链接访问：
+- Release 页面: https://github.com/SperanzaTY/spx-helper/releases/tag/v2.7.1
+- 下载链接: https://github.com/SperanzaTY/spx-helper/releases/download/v2.7.1/SPX_Helper_v2.7.1.zip
+
+---
+
+## 📋 快速链接
+
+- **创建 Release**: https://github.com/SperanzaTY/spx-helper/releases/new?tag=v2.7.1
+- **所有 Releases**: https://github.com/SperanzaTY/spx-helper/releases
+- **项目主页**: https://github.com/SperanzaTY/spx-helper
 
 
 

@@ -1,0 +1,18 @@
+# HTTP 客户端
+requests>=2.25.0
+
+# YAML 配置
+PyYAML>=5.4.0
+
+# Web 框架
+Flask>=2.0.0
+flask-cors>=3.0.0
+
+# 命令行参数
+argparse>=1.4.0
+
+# 表格输出（命令行）
+tabulate>=0.8.9
+
+# 测试
+pytest>=6.0.0

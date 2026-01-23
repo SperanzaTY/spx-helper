@@ -1,0 +1,57 @@
+# 市场配置
+
+# 支持的所有市场
+all_markets:
+  - sg  # Singapore
+  - id  # Indonesia
+  - my  # Malaysia
+  - th  # Thailand
+  - ph  # Philippines
+  - vn  # Vietnam
+  - tw  # Taiwan
+  - br  # Brazil
+
+# 市场别名映射
+market_aliases:
+  singapore: sg
+  indonesia: id
+  malaysia: my
+  thailand: th
+  philippines: ph
+  vietnam: vn
+  taiwan: tw
+  brazil: br
+
+# 市场分组（可选，用于批量操作）
+market_groups:
+  sea:  # Southeast Asia
+    - sg
+    - id
+    - my
+    - th
+    - ph
+    - vn
+  
+  all_active:  # 所有活跃市场
+    - sg
+    - id
+    - my
+    - th
+    - ph
+    - vn
+    - tw
+    - br
+
+# 表名变量模式
+table_patterns:
+  # 市场变量可能的形式
+  market_vars:
+    - "{market}"
+    - "{region}"
+    - "{country}"
+  
+  # 常见表名模式示例
+  examples:
+    - "dim_spx_station_tab_{market}_all"
+    - "dws_order_{market}_all"
+    - "ads_product_{region}_daily"

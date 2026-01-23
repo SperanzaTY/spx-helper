@@ -1,0 +1,36 @@
+# ClickHouse 配置示例
+# 复制此文件为 clickhouse.yaml 并填入真实配置
+
+online2:
+  host: "your-clickhouse-host.example.com"
+  port: 8123
+  user: "readonly_user"
+  password: "your_password"
+  database: "spx_mart_manage_app"
+  use_https: false
+  timeout: 30
+
+# 市场配置
+markets:
+  - sg
+  - id
+  - my
+  - th
+  - ph
+  - vn
+  - tw
+  - br
+
+# 查询配置
+query:
+  # 并行查询线程数
+  max_workers: 8
+  
+  # 查询超时（秒）
+  timeout: 30
+  
+  # 默认返回结果限制
+  default_limit: 100
+  
+  # 是否显示 SQL 日志
+  show_sql: false
