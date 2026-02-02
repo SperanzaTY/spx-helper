@@ -3793,9 +3793,10 @@ function showHttpToast(message) {
 }
 
 // 生成 ApiMart JWT Token（返回 token 字符串）
+// 注意：站点查询使用 TEST 环境配置，因为接口域名是 test 环境
 async function generateApiMartJwtToken() {
-  const account = 'mgmt_app';
-  const secret = 'hZl.`xjR=0XUphtTf&uf)|K)Fo|/&-m';
+  const account = 'test_project_account';
+  const secret = 'test10010';
   
   const header = {
     alg: 'HS256',
@@ -7012,8 +7013,8 @@ function initFmsLinks() {
 }
 
 // ===== 站点查询工具 =====
-const STATION_API_BASE = 'http://localhost:8888';
-const STATION_DEMO_MODE = false; // 设置为 false 使用真实数据
+// 站点查询 - 使用 ApiMart 接口
+const STATION_API_URL = 'https://mgmt-data.ssc.test.shopeemobile.com/api_mart/mgmt_app/data_api/internal_search';
 
 // 切换查询类型（ID / 名称）
 document.querySelectorAll('.station-search-tab').forEach(tab => {
@@ -7074,65 +7075,73 @@ async function queryStationById(stationId, market = '') {
   const resultsContainer = document.getElementById('stationResults');
   resultsContainer.innerHTML = '<div class="station-loading"><div class="station-loading-spinner"></div><div class="station-loading-text">查询中...</div></div>';
   
-  // 演示模式：使用模拟数据
-  if (STATION_DEMO_MODE) {
-    setTimeout(() => {
-      const mockData = {
-        success: true,
-        data: [
-          {
-            market: market || 'id',
-            station_id: stationId,
-            station_name: '示例站点 - Jakarta Central Hub',
-            station_type: 1,
-            bi_station_type: 'HUB',
-            status: 1,
-            city_name: 'Jakarta',
-            district_id: 789,
-            latitude: -6.123456,
-            longitude: 106.789012,
-            manager: 'John Doe',
-            manager_email: 'john.doe@example.com',
-            director: 'Jane Smith',
-            director_email: 'jane.smith@example.com',
-            is_active_site_l7d: 1,
-            station_region: 'Jakarta Region',
-            station_area: 'Central Area',
-            station_sub_area: 'Downtown',
-            is_own_fleet: 1,
-            xpt_flag: 0,
-            address: 'Jl. Sudirman No. 123, Jakarta Pusat (演示数据)'
-          }
-        ],
-        query_time: '0.35s'
-      };
-      renderStationResults(mockData.data, mockData.query_time);
-    }, 500);
-    return;
-  }
+  console.log('=== 开始查询站点 ID ===');
+  console.log('📋 输入参数:', { stationId, market });
   
   try {
-    const url = market 
-      ? `${STATION_API_BASE}/station/id/${stationId}?market=${market}`
-      : `${STATION_API_BASE}/station/id/${stationId}`;
+    // 生成 JWT Token
+    console.log('🔑 生成 JWT Token...');
+    const jwtToken = await generateApiMartJwtToken();
+    console.log('🔑 JWT Token:', jwtToken.substring(0, 50) + '...');
     
-    const response = await fetch(url);
+    // 构造 SQL 查询
+    const markets = ['sg', 'id', 'my', 'th', 'ph', 'vn', 'tw', 'br'];
+    const targetMarkets = market ? [market] : markets;
+    console.log('🎯 目标市场:', targetMarkets);
+    
+    // 构造 UNION ALL 查询以支持跨市场查询
+    const sqlParts = targetMarkets.map(m => 
+      `SELECT '${m}' as market, station_id, station_name, station_type, status, city_name, district_id, latitude, longitude, manager, manager_email, director, director_email, is_active_site_l7d, station_region, station_area, station_sub_area, is_own_fleet, xpt_flag, address, bi_station_type, 1 as flag FROM spx_mart_manage_app.dim_spx_station_tab_${m}_all WHERE station_id = ${stationId}`
+    );
+    const sql = sqlParts.join(' UNION ALL ');
+    
+    console.log('📝 查询 SQL:', sql);
+    console.log('📝 SQL 长度:', sql.length);
+    
+    const startTime = Date.now();
+    console.log('🌐 发送请求到:', STATION_API_URL);
+    
+    const response = await fetch(STATION_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'jwt-token': jwtToken
+      },
+      body: JSON.stringify({ sql })
+    });
+    
+    console.log('📡 响应状态:', response.status, response.statusText);
     
     if (!response.ok) {
+      const errorText = await response.text();
+      console.error('❌ 响应错误:', errorText);
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
     
-    const data = await response.json();
+    const result = await response.json();
+    const queryTime = ((Date.now() - startTime) / 1000).toFixed(2) + 's';
     
-    if (data.success && data.data && data.data.length > 0) {
-      renderStationResults(data.data, data.query_time);
+    console.log('✅ 查询结果:', result);
+    console.log('✅ result.data:', result.data);
+    console.log('✅ result.data.list:', result.data?.list);
+    console.log('✅ 数据长度:', result.data?.list?.length);
+    console.log('✅ 查询耗时:', queryTime);
+    
+    // 检查返回数据 (数据在 result.data.list 数组中)
+    if (result && result.retcode === 0 && result.data && result.data.list && Array.isArray(result.data.list) && result.data.list.length > 0) {
+      console.log('✅ 渲染结果...');
+      renderStationResults(result.data.list, queryTime);
     } else {
+      console.warn('⚠️ 未找到数据');
       showStationEmpty(`未找到站点 ID: ${stationId}`);
     }
   } catch (error) {
-    console.error('查询失败:', error);
-    showStationError(`查询失败: ${error.message}。请配置后端服务或启用演示模式。`);
+    console.error('❌ 查询失败:', error);
+    console.error('❌ 错误堆栈:', error.stack);
+    showStationError(`查询失败: ${error.message}`);
   }
+  
+  console.log('=== 查询结束 ===');
 }
 
 // 查询站点名称
@@ -7140,100 +7149,73 @@ async function queryStationByName(stationName, market = '') {
   const resultsContainer = document.getElementById('stationResults');
   resultsContainer.innerHTML = '<div class="station-loading"><div class="station-loading-spinner"></div><div class="station-loading-text">搜索中...</div></div>';
   
-  // 演示模式：使用模拟数据
-  if (STATION_DEMO_MODE) {
-    setTimeout(() => {
-      const mockData = {
-        success: true,
-        data: [
-          {
-            market: 'id',
-            station_id: 12345,
-            station_name: 'Jakarta Central Hub (演示)',
-            station_type: 1,
-            bi_station_type: 'HUB',
-            status: 1,
-            city_name: 'Jakarta',
-            manager: 'John Doe',
-            manager_email: 'john@example.com',
-            is_active_site_l7d: 1,
-            station_region: 'Jakarta Region',
-            address: 'Jl. Sudirman (演示数据)',
-            latitude: -6.123456,
-            longitude: 106.789012
-          },
-          {
-            market: 'sg',
-            station_id: 23456,
-            station_name: 'Singapore Hub (演示)',
-            station_type: 1,
-            bi_station_type: 'HUB',
-            status: 1,
-            city_name: 'Singapore',
-            manager: 'Jane Smith',
-            manager_email: 'jane@example.com',
-            is_active_site_l7d: 1,
-            station_region: 'Central',
-            address: 'Orchard Road (演示数据)',
-            latitude: 1.304833,
-            longitude: 103.831833
-          },
-          {
-            market: 'my',
-            station_id: 34567,
-            station_name: 'KL Central Hub (演示)',
-            station_type: 1,
-            bi_station_type: 'HUB',
-            status: 1,
-            city_name: 'Kuala Lumpur',
-            manager: 'Ali Ahmad',
-            manager_email: 'ali@example.com',
-            is_active_site_l7d: 0,
-            station_region: 'KL Region',
-            address: 'Jalan Bukit Bintang (演示数据)',
-            latitude: 3.139003,
-            longitude: 101.686855
-          }
-        ],
-        query_time: '0.52s'
-      };
-      
-      // 根据搜索关键词过滤
-      const filtered = mockData.data.filter(s => 
-        s.station_name.toLowerCase().includes(stationName.toLowerCase())
-      );
-      
-      if (filtered.length > 0) {
-        renderStationResults(filtered, mockData.query_time);
-      } else {
-        renderStationResults(mockData.data, mockData.query_time);
-      }
-    }, 800);
-    return;
-  }
+  console.log('=== 开始搜索站点名称 ===');
+  console.log('📋 输入参数:', { stationName, market });
   
   try {
-    const url = market 
-      ? `${STATION_API_BASE}/station/name/${encodeURIComponent(stationName)}?market=${market}`
-      : `${STATION_API_BASE}/station/name/${encodeURIComponent(stationName)}`;
+    // 生成 JWT Token
+    console.log('🔑 生成 JWT Token...');
+    const jwtToken = await generateApiMartJwtToken();
+    console.log('🔑 JWT Token:', jwtToken.substring(0, 50) + '...');
     
-    const response = await fetch(url);
+    // 构造 SQL 查询（使用 LIKE 模糊匹配）
+    const markets = ['sg', 'id', 'my', 'th', 'ph', 'vn', 'tw', 'br'];
+    const targetMarkets = market ? [market] : markets;
+    console.log('🎯 目标市场:', targetMarkets);
+    
+    // 构造 UNION ALL 查询以支持跨市场查询
+    const sqlParts = targetMarkets.map(m => 
+      `SELECT '${m}' as market, station_id, station_name, station_type, status, city_name, district_id, latitude, longitude, manager, manager_email, director, director_email, is_active_site_l7d, station_region, station_area, station_sub_area, is_own_fleet, xpt_flag, address, bi_station_type, 1 as flag FROM spx_mart_manage_app.dim_spx_station_tab_${m}_all WHERE station_name LIKE '%${stationName}%' LIMIT 50`
+    );
+    const sql = sqlParts.join(' UNION ALL ');
+    
+    console.log('📝 搜索 SQL:', sql);
+    console.log('📝 SQL 长度:', sql.length);
+    
+    const startTime = Date.now();
+    console.log('🌐 发送请求到:', STATION_API_URL);
+    
+    const response = await fetch(STATION_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'jwt-token': jwtToken
+      },
+      body: JSON.stringify({ sql })
+    });
+    
+    console.log('📡 响应状态:', response.status, response.statusText);
     
     if (!response.ok) {
+      const errorText = await response.text();
+      console.error('❌ 响应错误:', errorText);
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
     
-    const data = await response.json();
+    const result = await response.json();
+    const queryTime = ((Date.now() - startTime) / 1000).toFixed(2) + 's';
     
-    if (data.success && data.data && data.data.length > 0) {
-      renderStationResults(data.data, data.query_time);
+    console.log('✅ 搜索结果:', result);
+    console.log('✅ result.data:', result.data);
+    console.log('✅ result.data.list:', result.data?.list);
+    console.log('✅ 数据长度:', result.data?.list?.length);
+    console.log('✅ 查询耗时:', queryTime);
+    
+    // 检查返回数据 (数据在 result.data.list 数组中)
+    if (result && result.retcode === 0 && result.data && result.data.list && Array.isArray(result.data.list) && result.data.list.length > 0) {
+      console.log('✅ 渲染结果...');
+      renderStationResults(result.data.list, queryTime);
     } else {
+      console.warn('⚠️ 未找到数据');
       showStationEmpty(`未找到包含 "${stationName}" 的站点`);
     }
   } catch (error) {
-    console.error('搜索失败:', error);
-    showStationError(`搜索失败: ${error.message}。请配置后端服务或启用演示模式。`);
+    console.error('❌ 搜索失败:', error);
+    console.error('❌ 错误堆栈:', error.stack);
+    showStationError(`搜索失败: ${error.message}`);
   }
+  
+  console.log('=== 搜索结束 ===');
 }
 
 // 渲染查询结果
@@ -7359,43 +7341,4 @@ function showStationError(message) {
 }
 
 // 测试连接
-document.getElementById('testStationConnection')?.addEventListener('click', async function() {
-  const btn = this;
-  const originalText = btn.textContent;
-  btn.textContent = '🔌 测试中...';
-  btn.disabled = true;
-  
-  // 演示模式
-  if (STATION_DEMO_MODE) {
-    setTimeout(() => {
-      showToast('ℹ️ 当前为演示模式，使用模拟数据');
-      btn.textContent = originalText;
-      btn.disabled = false;
-    }, 1000);
-    return;
-  }
-  
-  try {
-    const response = await fetch(`${STATION_API_BASE}/health`, {
-      method: 'GET',
-      timeout: 5000
-    });
-    
-    if (response.ok) {
-      showToast('✅ 连接成功！服务运行正常');
-    } else {
-      showToast('❌ 连接失败：服务返回错误');
-    }
-  } catch (error) {
-    showToast('❌ 连接失败：无法访问服务，请确保已启动 station_api.py');
-  } finally {
-    btn.textContent = originalText;
-    btn.disabled = false;
-  }
-});
-
-// 打开文档
-document.getElementById('openStationDocs')?.addEventListener('click', function() {
-  window.open('https://github.com/SperanzaTY/spx-helper/blob/main/station_query/README.md', '_blank');
-});
 
