@@ -5064,6 +5064,10 @@ const TIMEZONES = {
 function initTimezone() {
   setCurrentTimestamp();
   
+  // 设置反向转换的默认时间为当前时间
+  const now = new Date();
+  document.getElementById('datetimeInput').value = formatDateTimeForInput(now);
+  
   // 反向转换 - 当前时间按钮
   document.getElementById('setNow').addEventListener('click', function() {
     const now = new Date();
@@ -5078,7 +5082,7 @@ function formatDateTimeForInput(date) {
   const hours = String(date.getHours()).padStart(2, '0');
   const minutes = String(date.getMinutes()).padStart(2, '0');
   const seconds = String(date.getSeconds()).padStart(2, '0');
-  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+  return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
 }
 
 function setCurrentTimestamp() {
@@ -5129,29 +5133,36 @@ function convertToTimestamp() {
   const timezone = document.getElementById('fromTimezone').value;
   
   if (!datetimeInput) {
-    alert('请输入日期时间');
+    alert('请选择日期时间');
     return;
   }
   
-  // 解析用户输入的日期时间 (支持格式: YYYY-MM-DD HH:MM:SS 或 YYYY-MM-DD HH:MM)
-  const datePattern = /^(\d{4})-(\d{1,2})-(\d{1,2})\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?$/;
-  const match = datetimeInput.match(datePattern);
+  // datetime-local 返回格式: YYYY-MM-DDTHH:mm:ss 或 YYYY-MM-DDTHH:mm
+  const date = new Date(datetimeInput);
   
-  if (!match) {
-    alert('日期格式不正确，请使用格式: 2025-11-14 16:30:00');
+  if (isNaN(date.getTime())) {
+    alert('日期时间格式不正确');
     return;
   }
   
-  const [, year, month, day, hour, minute, second = '0'] = match;
-  const dateString = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T${hour.padStart(2, '0')}:${minute.padStart(2, '0')}:${second.padStart(2, '0')}`;
-  
-  const date = new Date(dateString);
   const timestamp = Math.floor(date.getTime() / 1000);
   
   document.getElementById('timestampResult').innerHTML = `
-    <div style="font-size: 14px; font-weight: bold; color: #667eea;">时间戳: ${timestamp}</div>
-    <div style="font-size: 12px; color: #666; margin-top: 5px;">时区: ${timezone}</div>
+    <div style="display: flex; align-items: center; gap: 10px; justify-content: space-between;">
+      <div>
+        <div style="font-size: 14px; font-weight: bold; color: #667eea;">时间戳: ${timestamp}</div>
+        <div style="font-size: 12px; color: #666; margin-top: 5px;">时区: ${timezone}</div>
+      </div>
+      <button class="btn btn-secondary" id="copyTimestampBtn" style="flex-shrink: 0;">复制</button>
+    </div>
   `;
+  
+  // 绑定复制按钮
+  document.getElementById('copyTimestampBtn').addEventListener('click', function() {
+    copyToClipboard(timestamp.toString());
+    this.textContent = '✅ 已复制';
+    setTimeout(() => { this.textContent = '复制'; }, 2000);
+  });
 }
 
 // ===== Code Helper - LLM对话功能 =====
@@ -7012,9 +7023,200 @@ function initFmsLinks() {
   });
 }
 
+// ========================================
+// 通用 Toast 提示函数
+// ========================================
+function showToast(message, duration = 3000) {
+  // 检查是否已有 toast
+  let toast = document.querySelector('.spx-toast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.className = 'spx-toast';
+    toast.style.cssText = `
+      position: fixed;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%) translateY(-20px);
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 12px 24px;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      z-index: 10000;
+      font-size: 14px;
+      opacity: 0;
+      transition: all 0.3s ease;
+      pointer-events: none;
+      max-width: 80%;
+      text-align: center;
+    `;
+    document.body.appendChild(toast);
+  }
+  
+  toast.textContent = message;
+  
+  // 显示动画
+  requestAnimationFrame(() => {
+    toast.style.opacity = '1';
+    toast.style.transform = 'translateX(-50%) translateY(0)';
+  });
+  
+  // 自动隐藏
+  setTimeout(() => {
+    toast.style.opacity = '0';
+    toast.style.transform = 'translateX(-50%) translateY(-20px)';
+  }, duration);
+}
+
 // ===== 站点查询工具 =====
 // 站点查询 - 使用 ApiMart 接口
 const STATION_API_URL = 'https://mgmt-data.ssc.test.shopeemobile.com/api_mart/mgmt_app/data_api/internal_search';
+
+// ========================================
+// ClickHouse 直连配置（TEST 环境）
+// ========================================
+const TEST_CLICKHOUSE_CONFIG = {
+  host: 'clickhouse-k8s-sg-prod.data-infra.shopee.io',
+  port: '443',
+  user: 'spx_mart-cluster_szsc_data_shared_online',
+  password: 'RtL3jHWkDoHp',
+  database: 'spx_mart_pub'
+};
+
+/**
+ * 直接连接 TEST 环境 ClickHouse 执行 SQL
+ * 
+ * 用途：数据同步（从 LIVE 同步到 TEST）
+ * 
+ * @param {string} sql - SQL 语句（支持 SELECT、INSERT 等）
+ * @returns {Promise<Object>} - { success: boolean, data?: string, error?: string }
+ */
+async function executeTestClickHouseSQL(sql) {
+  try {
+    console.log('🔵 [TEST ClickHouse 直连] 开始执行');
+    console.log('📝 SQL:', sql);
+    
+    const config = TEST_CLICKHOUSE_CONFIG;
+    
+    // 构建 ClickHouse HTTP 接口 URL
+    const url = `https://${config.host}:${config.port}/`;
+    
+    // 创建 Basic Auth
+    const basicAuth = btoa(`${config.user}:${config.password}`);
+    
+    console.log('🌐 连接到:', url);
+    console.log('🔑 认证方式: Basic Auth');
+    console.log('📊 数据库:', config.database);
+    
+    // 发送请求到 ClickHouse
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Basic ${basicAuth}`,
+        'Content-Type': 'text/plain'
+      },
+      body: sql
+    });
+    
+    console.log('📡 响应状态:', response.status);
+    
+    // 获取响应文本
+    const responseText = await response.text();
+    console.log('📄 响应内容:', responseText.substring(0, 500));
+    
+    // 检查响应状态
+    if (!response.ok) {
+      console.error('❌ 请求失败:', responseText);
+      return {
+        success: false,
+        error: `HTTP ${response.status}: ${responseText}`
+      };
+    }
+    
+    // 成功
+    console.log('✅ SQL 执行成功');
+    return {
+      success: true,
+      data: responseText
+    };
+    
+  } catch (error) {
+    console.error('❌ 执行异常:', error);
+    return {
+      success: false,
+      error: error.message || '执行失败'
+    };
+  }
+}
+
+// 通用的 ClickHouse SQL 执行函数（通过 internal_search API，查询 LIVE 数据）
+async function executeClickHouseSQL(sql) {
+  /**
+   * 通过 API 执行 ClickHouse SQL（查询 LIVE 环境数据）
+   * 
+   * 用途：站点查询等（后端连接 LIVE ClickHouse）
+   * 
+   * @param {string} sql - SQL 语句（必须以 ", 1 as flag" 结尾）
+   * @returns {Promise<Object>} - 返回格式：{ success: boolean, data?: any, error?: string }
+   */
+  try {
+    console.log('🔵 [ClickHouse SQL 执行器 - API] 开始执行');
+    console.log('📝 SQL:', sql);
+    
+    // 生成 JWT Token
+    const jwtToken = await generateApiMartJwtToken();
+    console.log('🔑 JWT Token 已生成');
+    
+    // 发送请求
+    const response = await fetch(STATION_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'jwt-token': jwtToken
+      },
+      body: JSON.stringify({ sql })
+    });
+    
+    console.log('📡 响应状态:', response.status);
+    
+    // 检查响应状态
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('❌ 请求失败:', errorText);
+      return {
+        success: false,
+        error: `HTTP ${response.status}: ${errorText}`
+      };
+    }
+    
+    // 解析响应
+    const result = await response.json();
+    console.log('📊 响应数据:', result);
+    
+    // 检查业务状态码
+    if (result.retcode !== 0) {
+      console.error('❌ 业务错误:', result);
+      return {
+        success: false,
+        error: result.message || '未知错误'
+      };
+    }
+    
+    // 成功返回数据
+    console.log('✅ SQL 执行成功');
+    return {
+      success: true,
+      data: result.data
+    };
+    
+  } catch (error) {
+    console.error('❌ 执行异常:', error);
+    return {
+      success: false,
+      error: error.message || '执行失败'
+    };
+  }
+}
 
 // 切换查询类型（ID / 名称）
 document.querySelectorAll('.station-search-tab').forEach(tab => {
@@ -7341,4 +7543,1403 @@ function showStationError(message) {
 }
 
 // 测试连接
+
+
+// ========================================
+// 数据同步工具 (LIVE → TEST)
+// ========================================
+
+// 获取选中的市场列表
+function getSelectedMarkets() {
+  const checkboxes = document.querySelectorAll('.market-checkbox:checked');
+  return Array.from(checkboxes).map(cb => cb.value);
+}
+
+// 更新选中市场的提示
+function updateSelectedMarketsHint() {
+  const markets = getSelectedMarkets();
+  const hint = document.getElementById('selectedMarketsHint');
+  if (hint) {
+    if (markets.length > 0) {
+      hint.textContent = `已选择: ${markets.map(m => m.toUpperCase()).join(', ')}`;
+      hint.style.color = '#667eea';
+      hint.style.fontWeight = '500';
+    } else {
+      hint.textContent = '请至少选择一个市场';
+      hint.style.color = '#ff5252';
+      hint.style.fontWeight = '500';
+    }
+  }
+}
+
+// 市场复选框事件监听
+document.querySelectorAll('.market-checkbox').forEach(checkbox => {
+  checkbox.addEventListener('change', () => {
+    updateSelectedMarketsHint();
+    updateSyncTablePreview();
+  });
+});
+
+// 全选按钮
+document.getElementById('selectAllMarkets')?.addEventListener('click', () => {
+  document.querySelectorAll('.market-checkbox').forEach(cb => cb.checked = true);
+  updateSelectedMarketsHint();
+  updateSyncTablePreview();
+});
+
+// 清空按钮
+document.getElementById('clearAllMarkets')?.addEventListener('click', () => {
+  document.querySelectorAll('.market-checkbox').forEach(cb => cb.checked = false);
+  updateSelectedMarketsHint();
+  updateSyncTablePreview();
+});
+
+// 初始化市场选择提示
+updateSelectedMarketsHint();
+
+// 更新表名预览
+function updateSyncTablePreview() {
+  const template = document.getElementById('syncTableTemplate')?.value || '';
+  const markets = getSelectedMarkets();
+  const database = document.getElementById('syncDatabase')?.value || '';
+  
+  const previewDiv = document.getElementById('syncTablePreview');
+  if (!previewDiv) return;
+  
+  if (template && markets.length > 0 && database) {
+    if (markets.length === 1) {
+      const fullTableName = `${database}.${template}_${markets[0]}_all`;
+      previewDiv.textContent = fullTableName;
+    } else {
+      const tableNames = markets.map(m => `${database}.${template}_${m}_all`).join('\n');
+      previewDiv.innerHTML = tableNames.replace(/\n/g, '<br>');
+    }
+  } else {
+    previewDiv.textContent = '-';
+  }
+}
+
+// 监听输入变化
+document.getElementById('syncTableTemplate')?.addEventListener('input', updateSyncTablePreview);
+document.getElementById('syncDatabase')?.addEventListener('input', updateSyncTablePreview);
+
+// 初始化预览
+updateSyncTablePreview();
+
+// 步骤 1: 验证源数据
+document.getElementById('verifySyncSourceBtn')?.addEventListener('click', async function() {
+  const btn = this;
+  const statusDiv = document.getElementById('syncStatus');
+  const executeSyncBtn = document.getElementById('executeSyncBtn');
+  
+  // 获取配置
+  const sourceHost = document.getElementById('syncSourceHost').value;
+  const template = document.getElementById('syncTableTemplate').value.trim();
+  const markets = getSelectedMarkets();
+  const database = document.getElementById('syncDatabase').value.trim();
+  
+  // 验证输入
+  if (!template) {
+    statusDiv.className = 'sync-status error';
+    statusDiv.innerHTML = '<div class="sync-status-title">❌ 输入错误</div><div>请输入表名模板</div>';
+    return;
+  }
+  
+  if (markets.length === 0) {
+    statusDiv.className = 'sync-status error';
+    statusDiv.innerHTML = '<div class="sync-status-title">❌ 输入错误</div><div>请至少选择一个市场</div>';
+    return;
+  }
+  
+  if (!database) {
+    statusDiv.className = 'sync-status error';
+    statusDiv.innerHTML = '<div class="sync-status-title">❌ 输入错误</div><div>请输入数据库名</div>';
+    return;
+  }
+  
+  // 禁用按钮
+  btn.disabled = true;
+  btn.textContent = '🔍 验证中...';
+  executeSyncBtn.disabled = true;
+  
+  // 显示加载状态
+  statusDiv.className = 'sync-status loading';
+  statusDiv.innerHTML = `<div class="sync-status-title">🔍 正在验证 ${markets.length} 个市场的源数据...</div>`;
+  
+  try {
+    const results = [];
+    
+    // 验证每个市场
+    for (const market of markets) {
+      const sourceTable = `${database}.${template}_${market}_all`;
+      
+      console.log(`=== 验证源数据: ${market.toUpperCase()} ===`);
+      console.log('源表:', sourceTable);
+      
+      try {
+        // 查询源表数据量
+        const sql = `
+          SELECT 
+            count() as row_count,
+            '${market}' as market
+          FROM remote(
+            '${sourceHost}',
+            '${sourceTable}',
+            'spx_mart',
+            'RtL3jHWkDoHp'
+          )
+          FORMAT JSON
+        `;
+        
+        const result = await executeTestClickHouseSQL(sql);
+        
+        if (result.success) {
+          const data = JSON.parse(result.data);
+          const rowCount = data.data[0].row_count;
+          results.push({
+            market: market.toUpperCase(),
+            table: sourceTable,
+            rowCount: rowCount,
+            success: true
+          });
+          console.log(`✅ ${market.toUpperCase()}: ${rowCount} 行`);
+        } else {
+          results.push({
+            market: market.toUpperCase(),
+            table: sourceTable,
+            error: result.error,
+            success: false
+          });
+          console.error(`❌ ${market.toUpperCase()}: ${result.error}`);
+        }
+      } catch (error) {
+        results.push({
+          market: market.toUpperCase(),
+          table: sourceTable,
+          error: error.message,
+          success: false
+        });
+        console.error(`❌ ${market.toUpperCase()}: ${error.message}`);
+      }
+    }
+    
+    // 统计结果
+    const successCount = results.filter(r => r.success).length;
+    const failCount = results.filter(r => !r.success).length;
+    
+    // 显示结果
+    if (failCount === 0) {
+      // 全部成功
+      statusDiv.className = 'sync-status success';
+      let html = `
+        <div class="sync-status-title">✅ 源数据验证成功 (${successCount}/${markets.length})</div>
+        <div style="margin-top: 10px;">
+      `;
+      
+      results.forEach(r => {
+        html += `
+          <div style="padding: 6px 0; border-bottom: 1px solid #e0e0e0;">
+            <strong>${r.market}</strong>: ${r.rowCount.toLocaleString()} 行
+            <div style="font-size: 11px; color: #666;">${r.table}</div>
+          </div>
+        `;
+      });
+      
+      html += `
+        </div>
+        <div style="margin-top: 15px; padding: 10px; background: #fff3e1; border-radius: 4px; color: #f57c00;">
+          ⚠️ 准备好后，点击"执行同步"开始同步数据到 TEST 环境
+        </div>
+      `;
+      
+      statusDiv.innerHTML = html;
+      executeSyncBtn.disabled = false;
+      
+    } else {
+      // 部分或全部失败
+      statusDiv.className = 'sync-status error';
+      let html = `
+        <div class="sync-status-title">⚠️ 验证完成：${successCount} 成功，${failCount} 失败</div>
+        <div style="margin-top: 10px;">
+      `;
+      
+      results.forEach(r => {
+        if (r.success) {
+          html += `
+            <div style="padding: 6px 0; border-bottom: 1px solid #e0e0e0; color: #2e7d32;">
+              ✅ <strong>${r.market}</strong>: ${r.rowCount.toLocaleString()} 行
+            </div>
+          `;
+        } else {
+          html += `
+            <div style="padding: 6px 0; border-bottom: 1px solid #e0e0e0; color: #c62828;">
+              ❌ <strong>${r.market}</strong>: ${r.error}
+            </div>
+          `;
+        }
+      });
+      
+      html += `</div>`;
+      
+      if (successCount > 0) {
+        html += `
+          <div style="margin-top: 15px; padding: 10px; background: #fff3e1; border-radius: 4px; color: #f57c00;">
+            💡 你可以只同步验证成功的市场，取消失败市场的勾选后重新验证
+          </div>
+        `;
+      }
+      
+      statusDiv.innerHTML = html;
+      executeSyncBtn.disabled = successCount === 0; // 如果有成功的，允许同步
+    }
+    
+  } catch (error) {
+    console.error('❌ 验证过程出错:', error);
+    
+    statusDiv.className = 'sync-status error';
+    statusDiv.innerHTML = `
+      <div class="sync-status-title">❌ 验证过程出错</div>
+      <div>${error.message}</div>
+    `;
+    
+    executeSyncBtn.disabled = true;
+    
+  } finally {
+    // 恢复按钮
+    btn.disabled = false;
+    btn.textContent = '1️⃣ 验证源数据';
+  }
+});
+
+// 步骤 2: 执行同步
+document.getElementById('executeSyncBtn')?.addEventListener('click', async function() {
+  const btn = this;
+  const statusDiv = document.getElementById('syncStatus');
+  const verifyResultBtn = document.getElementById('verifySyncResultBtn');
+  
+  // 获取配置
+  const sourceHost = document.getElementById('syncSourceHost').value;
+  const template = document.getElementById('syncTableTemplate').value.trim();
+  const markets = getSelectedMarkets();
+  const database = document.getElementById('syncDatabase').value.trim();
+  const syncMode = document.getElementById('syncMode').value;
+  
+  if (markets.length === 0) {
+    statusDiv.className = 'sync-status error';
+    statusDiv.innerHTML = '<div class="sync-status-title">❌ 请至少选择一个市场</div>';
+    return;
+  }
+  
+  // 确认操作
+  const confirmMsg = `确认要${syncMode === 'full_ddl' ? '清空并重新导入' : '追加'} ${markets.length} 个市场的数据吗？\n\n市场: ${markets.map(m => m.toUpperCase()).join(', ')}`;
+  if (!confirm(confirmMsg)) {
+    return;
+  }
+  
+  // 禁用按钮
+  btn.disabled = true;
+  btn.textContent = '⏳ 同步中...';
+  verifyResultBtn.disabled = true;
+  
+  // 显示加载状态
+  statusDiv.className = 'sync-status loading';
+  statusDiv.innerHTML = `<div class="sync-status-title">🔄 正在同步 ${markets.length} 个市场...</div>`;
+  
+  try {
+    const results = [];
+    
+    // 同步每个市场
+    for (let i = 0; i < markets.length; i++) {
+      const market = markets[i];
+      // LIVE环境使用用户输入的数据库名，TEST环境固定使用spx_mart_pub
+      const sourceTable = `${database}.${template}_${market}_all`;
+      const testDatabase = 'spx_mart_pub';  // TEST环境固定数据库名
+      const targetTableAll = `${testDatabase}.${template}_${market}_all`;
+      const targetTableLocal = `${testDatabase}.${template}_${market}_local`;
+      
+      statusDiv.innerHTML = `<div class="sync-status-title">🔄 正在同步 ${market.toUpperCase()} (${i+1}/${markets.length})...</div>`;
+      
+      console.log(`=== 开始同步: ${market.toUpperCase()} ===`);
+      console.log(`源: ${sourceTable} (LIVE)`);
+      console.log(`目标: ${targetTableAll} (TEST)`);
+      
+      try {
+        if (syncMode === 'full_ddl') {
+          // 完整同步模式：清空local表 + 写入all表
+          console.log('步骤 1: 清空TEST的local表数据...');
+          
+          // 清空local表（实际存储数据的表）
+          const truncateSQL = `TRUNCATE TABLE IF EXISTS ${targetTableLocal}`;
+          const truncateResult = await executeTestClickHouseSQL(truncateSQL);
+          
+          if (!truncateResult.success) {
+            // 检测表不存在的情况
+            if (truncateResult.error && truncateResult.error.includes('does not exist')) {
+              throw new Error(
+                `表不存在: ${targetTableLocal}\n\n` +
+                `⚠️ 完整同步模式要求local表已提前创建\n` +
+                `请联系DBA创建表结构，或使用追加模式`
+              );
+            }
+            throw new Error(`清空local表失败: ${truncateResult.error}`);
+          }
+          
+          console.log('✅ 表已清空');
+          
+        }
+        
+        // 导入数据（写入all表，自动路由到local表）
+        console.log('步骤 2: 通过all表导入数据...');
+        
+        const insertSQL = `
+          INSERT INTO ${targetTableAll}
+          SELECT * FROM remote(
+            '${sourceHost}',
+            '${sourceTable}',
+            'spx_mart',
+            'RtL3jHWkDoHp'
+          )
+        `;
+        
+        const insertResult = await executeTestClickHouseSQL(insertSQL);
+        
+        if (!insertResult.success) {
+          // 分析错误类型
+          const errorMsg = insertResult.error;
+          
+          if (errorMsg.includes('does not exist') || errorMsg.includes('Table') && errorMsg.includes('not found')) {
+            throw new Error(
+              `表不存在: ${targetTableAll}\n\n` +
+              `💡 解决方案:\n` +
+              `1. 联系DBA创建TEST环境的表结构\n` +
+              `2. 或检查表名、数据库名是否正确`
+            );
+          } else if (errorMsg.includes('Column') || errorMsg.includes('type mismatch') || errorMsg.includes('Structure')) {
+            throw new Error(
+              `表结构不匹配\n\n` +
+              `⚠️ LIVE和TEST的表结构不一致，需要手动修改表结构\n\n` +
+              `💡 解决方案:\n` +
+              `1. 联系DBA同步表结构\n` +
+              `2. 手动执行ALTER TABLE修改列定义\n\n` +
+              `详细错误: ${errorMsg}`
+            );
+          } else {
+            throw new Error(`导入数据失败: ${errorMsg}`);
+          }
+        }
+        
+        console.log(`✅ ${market.toUpperCase()} 同步成功`);
+        
+        results.push({
+          market: market.toUpperCase(),
+          success: true
+        });
+        
+      } catch (error) {
+        console.error(`❌ ${market.toUpperCase()} 同步失败:`, error);
+        
+        results.push({
+          market: market.toUpperCase(),
+          success: false,
+          error: error.message
+        });
+      }
+    }
+    
+    // 统计结果
+    const successCount = results.filter(r => r.success).length;
+    const failCount = results.filter(r => !r.success).length;
+    
+    // 显示结果
+    if (failCount === 0) {
+      // 全部成功
+      statusDiv.className = 'sync-status success';
+      let html = `
+        <div class="sync-status-title">✅ 同步完成 (${successCount}/${markets.length})</div>
+        <div style="margin-top: 10px;">
+      `;
+      
+      results.forEach(r => {
+        html += `<div style="padding: 4px 0; color: #2e7d32;">✅ ${r.market}</div>`;
+      });
+      
+      html += `
+        </div>
+        <div style="margin-top: 15px; padding: 10px; background: #e3f2fd; border-radius: 4px; color: #1976d2;">
+          💡 点击"验证结果"查看 TEST 环境的数据
+        </div>
+      `;
+      
+      statusDiv.innerHTML = html;
+      verifyResultBtn.disabled = false;
+      
+    } else {
+      // 部分或全部失败
+      statusDiv.className = 'sync-status error';
+      let html = `
+        <div class="sync-status-title">⚠️ 同步完成：${successCount} 成功，${failCount} 失败</div>
+        <div style="margin-top: 10px;">
+      `;
+      
+      results.forEach(r => {
+        if (r.success) {
+          html += `<div style="padding: 4px 0; color: #2e7d32;">✅ ${r.market}</div>`;
+        } else {
+          html += `
+            <div style="padding: 8px 0; border-bottom: 1px solid #e0e0e0;">
+              <div style="color: #c62828; font-weight: bold;">❌ ${r.market}</div>
+              <div style="font-size: 11px; color: #666; margin-top: 4px; white-space: pre-wrap;">${r.error}</div>
+            </div>
+          `;
+        }
+      });
+      
+      html += `</div>`;
+      
+      statusDiv.innerHTML = html;
+      verifyResultBtn.disabled = successCount === 0;
+    }
+    
+  } catch (error) {
+    console.error('❌ 同步过程出错:', error);
+    
+    statusDiv.className = 'sync-status error';
+    statusDiv.innerHTML = `
+      <div class="sync-status-title">❌ 同步过程出错</div>
+      <div style="white-space: pre-wrap;">${error.message}</div>
+    `;
+    
+  } finally {
+    // 恢复按钮
+    btn.disabled = false;
+    btn.textContent = '2️⃣ 执行同步';
+  }
+});
+
+// 步骤 3: 验证结果
+document.getElementById('verifySyncResultBtn')?.addEventListener('click', async function() {
+  const btn = this;
+  const statusDiv = document.getElementById('syncStatus');
+  
+  // 获取配置
+  const template = document.getElementById('syncTableTemplate').value.trim();
+  const markets = getSelectedMarkets();
+  const database = document.getElementById('syncDatabase').value.trim();
+  
+  if (markets.length === 0) {
+    statusDiv.className = 'sync-status error';
+    statusDiv.innerHTML = '<div class="sync-status-title">❌ 请至少选择一个市场</div>';
+    return;
+  }
+  
+  // 禁用按钮
+  btn.disabled = true;
+  btn.textContent = '🔍 验证中...';
+  
+  // 显示加载状态
+  statusDiv.className = 'sync-status loading';
+  statusDiv.innerHTML = `<div class="sync-status-title">🔍 正在验证 ${markets.length} 个市场的 TEST 环境数据...</div>`;
+  
+  try {
+    const results = [];
+    
+    // 验证每个市场
+    for (const market of markets) {
+      const testDatabase = 'spx_mart_pub';  // TEST环境固定数据库名
+      const targetTable = `${testDatabase}.${template}_${market}_all`;
+      
+      console.log(`=== 验证结果: ${market.toUpperCase()} ===`);
+      console.log('表:', targetTable);
+      
+      try {
+        // 查询 TEST 环境的表数据
+        const sql = `
+          SELECT count() as row_count
+          FROM ${targetTable}
+          FORMAT JSON
+        `;
+        
+        const result = await executeTestClickHouseSQL(sql);
+        
+        if (result.success) {
+          const data = JSON.parse(result.data);
+          const rowCount = data.data[0].row_count;
+          results.push({
+            market: market.toUpperCase(),
+            table: targetTable,
+            rowCount: rowCount,
+            success: true
+          });
+          console.log(`✅ ${market.toUpperCase()}: ${rowCount} 行`);
+        } else {
+          results.push({
+            market: market.toUpperCase(),
+            table: targetTable,
+            error: result.error,
+            success: false
+          });
+          console.error(`❌ ${market.toUpperCase()}: ${result.error}`);
+        }
+      } catch (error) {
+        results.push({
+          market: market.toUpperCase(),
+          table: targetTable,
+          error: error.message,
+          success: false
+        });
+        console.error(`❌ ${market.toUpperCase()}: ${error.message}`);
+      }
+    }
+    
+    // 统计结果
+    const successCount = results.filter(r => r.success).length;
+    const failCount = results.filter(r => !r.success).length;
+    
+    // 显示结果
+    if (failCount === 0) {
+      // 全部成功
+      statusDiv.className = 'sync-status success';
+      let html = `
+        <div class="sync-status-title">✅ 验证完成 (${successCount}/${markets.length})</div>
+        <div style="margin-top: 10px;">
+      `;
+      
+      results.forEach(r => {
+        html += `
+          <div style="padding: 6px 0; border-bottom: 1px solid #e0e0e0;">
+            <strong>${r.market}</strong>: ${r.rowCount.toLocaleString()} 行
+            <div style="font-size: 11px; color: #666;">${r.table}</div>
+          </div>
+        `;
+      });
+      
+      html += `
+        </div>
+        <div style="margin-top: 15px; padding: 10px; background: #e8f5e9; border-radius: 4px; color: #2e7d32;">
+          🎉 数据同步流程完成！
+        </div>
+      `;
+      
+      statusDiv.innerHTML = html;
+      
+    } else {
+      // 部分或全部失败
+      statusDiv.className = 'sync-status error';
+      let html = `
+        <div class="sync-status-title">⚠️ 验证完成：${successCount} 成功，${failCount} 失败</div>
+        <div style="margin-top: 10px;">
+      `;
+      
+      results.forEach(r => {
+        if (r.success) {
+          html += `
+            <div style="padding: 6px 0; border-bottom: 1px solid #e0e0e0; color: #2e7d32;">
+              ✅ <strong>${r.market}</strong>: ${r.rowCount.toLocaleString()} 行
+            </div>
+          `;
+        } else {
+          html += `
+            <div style="padding: 6px 0; border-bottom: 1px solid #e0e0e0; color: #c62828;">
+              ❌ <strong>${r.market}</strong>: ${r.error}
+            </div>
+          `;
+        }
+      });
+      
+      html += `</div>`;
+      
+      statusDiv.innerHTML = html;
+    }
+    
+  } catch (error) {
+    console.error('❌ 验证失败:', error);
+    
+    statusDiv.className = 'sync-status error';
+    statusDiv.innerHTML = `
+      <div class="sync-status-title">❌ 验证失败</div>
+      <div>${error.message}</div>
+    `;
+    
+  } finally {
+    // 恢复按钮
+    btn.disabled = false;
+    btn.textContent = '3️⃣ 验证结果';
+  }
+});
+
+
+// ========================================
+// API 数据溯源工具
+// ========================================
+
+let apiTrackerCount = 0;
+
+// 刷新页面按钮
+document.getElementById('refreshPageBtn')?.addEventListener('click', async function() {
+  const btn = this;
+  const originalText = btn.innerHTML;
+  btn.innerHTML = '🔄 刷新中...';
+  btn.disabled = true;
+  
+  try {
+    // 获取所有标签页，找到最近的非扩展页面
+    const tabs = await chrome.tabs.query({});
+    const webTabs = tabs.filter(tab => {
+      return tab.url && 
+             !tab.url.startsWith('chrome://') && 
+             !tab.url.startsWith('chrome-extension://') &&
+             !tab.url.startsWith('edge://') &&
+             !tab.url.startsWith('about:');
+    });
+    
+    webTabs.sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0));
+    const tab = webTabs[0];
+    
+    if (!tab || !tab.id) {
+      showToast('❌ 无法获取网页标签页，请先打开一个网页');
+      btn.innerHTML = originalText;
+      btn.disabled = false;
+      return;
+    }
+    
+    console.log('✅ 刷新目标标签页:', tab.url);
+    
+    // 刷新页面
+    await chrome.tabs.reload(tab.id);
+    
+    showToast('✅ 页面已刷新，等待加载完成...');
+    
+    // 等待一下让页面加载
+    setTimeout(() => {
+      loadAPIRecords();
+      btn.innerHTML = originalText;
+      btn.disabled = false;
+    }, 2000);
+    
+  } catch (error) {
+    console.error('❌ 刷新页面失败:', error.message);
+    showToast('❌ 刷新失败: ' + error.message);
+    btn.innerHTML = originalText;
+    btn.disabled = false;
+  }
+});
+
+// 启动 API 溯源检查器
+document.getElementById('startAPITracker')?.addEventListener('click', async function() {
+  const btn = this;
+  const originalText = btn.innerHTML;
+  btn.innerHTML = '🔄 启动中...';
+  btn.disabled = true;
+  
+  try {
+    // 获取所有标签页，找到最近的非扩展页面
+    const tabs = await chrome.tabs.query({});
+    const webTabs = tabs.filter(tab => {
+      return tab.url && 
+             !tab.url.startsWith('chrome://') && 
+             !tab.url.startsWith('chrome-extension://') &&
+             !tab.url.startsWith('edge://') &&
+             !tab.url.startsWith('about:');
+    });
+    
+    webTabs.sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0));
+    const tab = webTabs[0];
+    
+    if (!tab || !tab.id) {
+      showToast('❌ 无法获取网页标签页，请先打开一个网页');
+      btn.innerHTML = originalText;
+      btn.disabled = false;
+      return;
+    }
+    
+    console.log('✅ 找到目标标签页:', tab.url);
+    
+    chrome.tabs.sendMessage(tab.id, { action: 'START_INSPECTOR' }, (response) => {
+      if (chrome.runtime.lastError) {
+        showToast('❌ 无法启动检查器，请刷新页面后重试');
+        console.log('ℹ️ Content script 未就绪:', chrome.runtime.lastError.message);
+        console.log('💡 提示: 刷新页面让 content.js 重新加载');
+      } else if (response?.success) {
+        showToast('✅ 检查器已启动！现在可以点击页面元素了');
+        document.getElementById('apiTrackerActive').textContent = '运行中';
+        document.getElementById('apiTrackerActive').style.color = '#4caf50';
+        
+        // 不关闭窗口模式的 popup
+        // setTimeout(() => window.close(), 1000);
+      }
+      
+      btn.innerHTML = originalText;
+      btn.disabled = false;
+    });
+  } catch (error) {
+    console.error('❌ 启动检查器失败:', error.message);
+    showToast('❌ 启动失败: ' + error.message);
+    btn.innerHTML = originalText;
+    btn.disabled = false;
+  }
+});
+
+// 加载 API 记录
+async function loadAPIRecords() {
+  try {
+    // 获取所有标签页，找到最近的非扩展页面
+    const tabs = await chrome.tabs.query({});
+    
+    // 过滤掉扩展自己的页面
+    const webTabs = tabs.filter(tab => {
+      return tab.url && 
+             !tab.url.startsWith('chrome://') && 
+             !tab.url.startsWith('chrome-extension://') &&
+             !tab.url.startsWith('edge://') &&
+             !tab.url.startsWith('about:');
+    });
+    
+    // 找到最近活跃的网页标签（按 lastAccessed 排序）
+    webTabs.sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0));
+    
+    const tab = webTabs[0];
+    
+    if (!tab || !tab.id) {
+      console.log('⚠️ 无法获取网页标签页');
+      
+      const countEl = document.getElementById('apiTrackerCount');
+      const listEl = document.getElementById('apiTrackerList');
+      
+      if (countEl) countEl.textContent = '0';
+      if (listEl) {
+        listEl.innerHTML = `
+          <div style="text-align: center; color: #999; padding: 20px;">
+            <div style="margin-bottom: 10px;">📄</div>
+            <div style="font-size: 12px;">
+              请先访问一个网页<br>
+              或刷新当前页面
+            </div>
+          </div>
+        `;
+      }
+      return;
+    }
+    
+    console.log('✅ 找到目标标签页:', tab.url);
+    
+    chrome.tabs.sendMessage(tab.id, { action: 'GET_API_RECORDS' }, (response) => {
+      if (chrome.runtime.lastError) {
+        // Content script 可能还未加载，这是正常情况
+        console.log('ℹ️ Content script 未就绪:', chrome.runtime.lastError.message);
+        
+        // 显示提示信息
+        const countEl = document.getElementById('apiTrackerCount');
+        const listEl = document.getElementById('apiTrackerList');
+        
+        if (countEl) countEl.textContent = '0';
+        if (listEl) {
+          listEl.innerHTML = `
+            <div style="text-align: center; color: #999; padding: 20px;">
+              <div style="margin-bottom: 10px;">📄</div>
+              <div style="font-size: 12px;">
+                请先访问一个网页<br>
+                或刷新当前页面
+              </div>
+            </div>
+          `;
+        }
+        return;
+      }
+      
+      if (response && response.records) {
+        document.getElementById('apiTrackerCount').textContent = response.records.length;
+        updateAPIRecordsList(response.records);
+      } else {
+        // 没有记录
+        document.getElementById('apiTrackerCount').textContent = '0';
+      }
+    });
+  } catch (error) {
+    console.error('❌ 加载 API 记录失败:', error.message);
+  }
+}
+
+// 更新 API 记录列表
+function updateAPIRecordsList(records) {
+  const listContainer = document.getElementById('apiTrackerList');
+  
+  if (!records || records.length === 0) {
+    listContainer.innerHTML = `
+      <div style="text-align: center; color: #999; padding: 20px;">
+        暂无记录
+      </div>
+    `;
+    return;
+  }
+  
+  // 只显示最近 10 条
+  const recentRecords = records.slice(-10).reverse();
+  
+  listContainer.innerHTML = recentRecords.map(record => `
+    <div class="api-record-item" data-record-id="${record.id}" style="margin-bottom: 10px; padding: 10px; background: white; border-radius: 6px; border-left: 3px solid #667eea; cursor: pointer; transition: all 0.2s;">
+      <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 5px;">
+        <span style="font-weight: 500; color: #667eea; font-size: 12px;">${record.method}</span>
+        <span style="background: ${record.status === 200 ? '#4caf50' : '#ff9800'}; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px;">
+          ${record.status}
+        </span>
+      </div>
+      <div style="font-size: 11px; color: #666; word-break: break-all; margin-bottom: 5px;">
+        ${record.url}
+      </div>
+      <div style="font-size: 10px; color: #999;">
+        ⏱️ ${record.duration}ms | 🕐 ${new Date(record.requestTime).toLocaleTimeString()}
+      </div>
+      <div style="margin-top: 8px; font-size: 11px; color: #667eea;">
+        👁️ 点击查看详情
+      </div>
+    </div>
+  `).join('');
+  
+  // 添加点击事件
+  document.querySelectorAll('.api-record-item').forEach(item => {
+    item.addEventListener('click', async function() {
+      const recordId = this.dataset.recordId;
+      await viewAPIRecordDetail(recordId);
+    });
+    
+    // 悬停效果
+    item.addEventListener('mouseenter', function() {
+      this.style.background = '#f0f4ff';
+      this.style.transform = 'translateX(2px)';
+    });
+    
+    item.addEventListener('mouseleave', function() {
+      this.style.background = 'white';
+      this.style.transform = 'translateX(0)';
+    });
+  });
+}
+
+// 查看 API 记录详情
+async function viewAPIRecordDetail(recordId) {
+  try {
+    // 获取所有标签页，找到最近的非扩展页面
+    const tabs = await chrome.tabs.query({});
+    const webTabs = tabs.filter(tab => {
+      return tab.url && 
+             !tab.url.startsWith('chrome://') && 
+             !tab.url.startsWith('chrome-extension://') &&
+             !tab.url.startsWith('edge://') &&
+             !tab.url.startsWith('about:');
+    });
+    
+    webTabs.sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0));
+    const tab = webTabs[0];
+    
+    if (!tab || !tab.id) {
+      showToast('❌ 无法获取网页标签页');
+      return;
+    }
+    
+    // 从 content script 获取完整记录（包含 responseData）
+    chrome.tabs.sendMessage(tab.id, { 
+      action: 'GET_API_RECORD_DETAIL',
+      recordId: recordId
+    }, (response) => {
+      if (chrome.runtime.lastError) {
+        showToast('❌ 获取详情失败');
+        console.error('获取详情失败:', chrome.runtime.lastError.message);
+        return;
+      }
+      
+      if (response && response.record) {
+        showAPIDetailModal(response.record);
+      } else {
+        showToast('❌ 未找到记录');
+      }
+    });
+  } catch (error) {
+    console.error('查看详情失败:', error);
+    showToast('❌ 查看详情失败');
+  }
+}
+
+// 显示 API 详情弹窗
+function showAPIDetailModal(record) {
+  // 检测是否在窗口模式
+  const isWindowMode = new URLSearchParams(window.location.search).get('mode') === 'window';
+  
+  if (isWindowMode) {
+    // 窗口模式：在新窗口中打开
+    openAPIDetailInNewWindow(record);
+  } else {
+    // 弹出模式：在当前弹窗中显示
+    showAPIDetailInPopup(record);
+  }
+}
+
+// 在新窗口中打开 API 详情
+function openAPIDetailInNewWindow(record) {
+  const newWindow = window.open('', '_blank', 'width=900,height=700');
+  
+  if (!newWindow) {
+    showToast('❌ 无法打开新窗口，请检查浏览器设置');
+    return;
+  }
+  
+  newWindow.document.write(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>API 响应详情 - ${record.method} ${record.status}</title>
+      <style>
+        * {
+          margin: 0;
+          padding: 0;
+          box-sizing: border-box;
+        }
+        
+        body {
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+          background: #f5f5f5;
+          padding: 20px;
+        }
+        
+        .container {
+          max-width: 1200px;
+          margin: 0 auto;
+          background: white;
+          border-radius: 12px;
+          padding: 30px;
+          box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        .header {
+          border-bottom: 2px solid #667eea;
+          padding-bottom: 20px;
+          margin-bottom: 30px;
+        }
+        
+        h1 {
+          color: #333;
+          margin-bottom: 10px;
+          font-size: 24px;
+        }
+        
+        .meta {
+          display: flex;
+          gap: 15px;
+          align-items: center;
+          font-size: 14px;
+        }
+        
+        .badge {
+          padding: 4px 12px;
+          border-radius: 6px;
+          font-weight: 500;
+        }
+        
+        .badge-method {
+          background: #667eea;
+          color: white;
+        }
+        
+        .badge-status-ok {
+          background: #4caf50;
+          color: white;
+        }
+        
+        .badge-status-error {
+          background: #ff9800;
+          color: white;
+        }
+        
+        .section {
+          margin-bottom: 30px;
+        }
+        
+        .section-title {
+          font-size: 16px;
+          font-weight: 600;
+          color: #333;
+          margin-bottom: 12px;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+        
+        .url-box {
+          background: #f8f9fa;
+          padding: 15px;
+          border-radius: 8px;
+          font-family: 'Courier New', monospace;
+          font-size: 13px;
+          word-break: break-all;
+          border-left: 4px solid #667eea;
+        }
+        
+        .info-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+          gap: 15px;
+        }
+        
+        .info-card {
+          background: #f8f9fa;
+          padding: 15px;
+          border-radius: 8px;
+        }
+        
+        .info-label {
+          color: #999;
+          font-size: 12px;
+          margin-bottom: 6px;
+        }
+        
+        .info-value {
+          color: #333;
+          font-weight: 500;
+          font-size: 14px;
+        }
+        
+        .response-box {
+          background: #1e1e1e;
+          color: #d4d4d4;
+          padding: 20px;
+          border-radius: 8px;
+          font-family: 'Courier New', monospace;
+          font-size: 12px;
+          max-height: 500px;
+          overflow-y: auto;
+          position: relative;
+        }
+        
+        .copy-btn {
+          position: absolute;
+          top: 15px;
+          right: 15px;
+          background: #667eea;
+          color: white;
+          border: none;
+          padding: 8px 16px;
+          border-radius: 6px;
+          cursor: pointer;
+          font-size: 12px;
+          transition: all 0.2s;
+        }
+        
+        .copy-btn:hover {
+          background: #5568d3;
+        }
+        
+        pre {
+          margin: 0;
+          white-space: pre-wrap;
+          word-wrap: break-word;
+        }
+        
+        .close-btn {
+          background: #f5f5f5;
+          border: none;
+          padding: 10px 20px;
+          border-radius: 8px;
+          cursor: pointer;
+          font-size: 14px;
+          margin-top: 20px;
+          transition: all 0.2s;
+        }
+        
+        .close-btn:hover {
+          background: #e0e0e0;
+        }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <div class="header">
+          <h1>🔍 API 响应详情</h1>
+          <div class="meta">
+            <span class="badge badge-method">${record.method}</span>
+            <span class="badge ${record.status === 200 ? 'badge-status-ok' : 'badge-status-error'}">${record.status}</span>
+            <span style="color: #666;">⏱️ ${record.duration}ms</span>
+            <span style="color: #666;">🕐 ${new Date(record.requestTime).toLocaleString()}</span>
+          </div>
+        </div>
+        
+        <div class="section">
+          <div class="section-title">📡 请求 URL</div>
+          <div class="url-box">${record.url}</div>
+        </div>
+        
+        <div class="section">
+          <div class="section-title">⏱️ 请求信息</div>
+          <div class="info-grid">
+            <div class="info-card">
+              <div class="info-label">请求方法</div>
+              <div class="info-value">${record.method}</div>
+            </div>
+            <div class="info-card">
+              <div class="info-label">响应状态</div>
+              <div class="info-value">${record.status}</div>
+            </div>
+            <div class="info-card">
+              <div class="info-label">请求耗时</div>
+              <div class="info-value">${record.duration}ms</div>
+            </div>
+            <div class="info-card">
+              <div class="info-label">请求时间</div>
+              <div class="info-value">${new Date(record.requestTime).toLocaleString()}</div>
+            </div>
+          </div>
+        </div>
+        
+        <div class="section">
+          <div class="section-title">📦 响应数据</div>
+          <div class="response-box">
+            <button class="copy-btn" onclick="copyResponse()">📋 复制</button>
+            <pre>${JSON.stringify(record.responseData, null, 2)}</pre>
+          </div>
+        </div>
+        
+        <button class="close-btn" onclick="window.close()">✕ 关闭窗口</button>
+      </div>
+      
+      <script>
+        function copyResponse() {
+          const text = ${JSON.stringify(JSON.stringify(record.responseData, null, 2))};
+          navigator.clipboard.writeText(text).then(() => {
+            const btn = document.querySelector('.copy-btn');
+            const originalText = btn.textContent;
+            btn.textContent = '✅ 已复制';
+            btn.style.background = '#4caf50';
+            setTimeout(() => {
+              btn.textContent = originalText;
+              btn.style.background = '#667eea';
+            }, 2000);
+          }).catch(err => {
+            alert('复制失败: ' + err);
+          });
+        }
+      </script>
+    </body>
+    </html>
+  `);
+  
+  newWindow.document.close();
+}
+
+// 在弹窗中显示 API 详情
+function showAPIDetailInPopup(record) {
+  // 移除旧弹窗
+  const oldModal = document.getElementById('api-detail-modal');
+  if (oldModal) oldModal.remove();
+  
+  const modal = document.createElement('div');
+  modal.id = 'api-detail-modal';
+  modal.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+    padding: 20px;
+  `;
+  
+  const content = document.createElement('div');
+  content.style.cssText = `
+    background: white;
+    border-radius: 12px;
+    width: 90%;
+    max-width: 800px;
+    max-height: 90vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+  `;
+  
+  const header = document.createElement('div');
+  header.style.cssText = `
+    padding: 20px;
+    border-bottom: 1px solid #eee;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  `;
+  
+  header.innerHTML = `
+    <div>
+      <h3 style="margin: 0 0 8px 0; color: #333;">API 响应详情</h3>
+      <div style="font-size: 12px; color: #666;">
+        <span style="font-weight: 500; color: #667eea;">${record.method}</span>
+        <span style="background: ${record.status === 200 ? '#4caf50' : '#ff9800'}; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px; margin-left: 8px;">
+          ${record.status}
+        </span>
+      </div>
+    </div>
+    <button id="close-api-modal" style="background: #f5f5f5; border: none; border-radius: 6px; padding: 8px 15px; cursor: pointer; font-size: 14px;">
+      ✕ 关闭
+    </button>
+  `;
+  
+  const body = document.createElement('div');
+  body.style.cssText = `
+    padding: 20px;
+    overflow-y: auto;
+    flex: 1;
+  `;
+  
+  body.innerHTML = `
+    <div style="margin-bottom: 20px;">
+      <div style="font-weight: 500; color: #333; margin-bottom: 8px;">📡 请求 URL</div>
+      <div style="background: #f8f9fa; padding: 10px; border-radius: 6px; font-size: 12px; word-break: break-all; font-family: monospace;">
+        ${record.url}
+      </div>
+    </div>
+    
+    <div style="margin-bottom: 20px;">
+      <div style="font-weight: 500; color: #333; margin-bottom: 8px;">⏱️ 请求信息</div>
+      <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;">
+        <div style="background: #f8f9fa; padding: 10px; border-radius: 6px; font-size: 12px;">
+          <div style="color: #999; margin-bottom: 4px;">方法</div>
+          <div style="font-weight: 500;">${record.method}</div>
+        </div>
+        <div style="background: #f8f9fa; padding: 10px; border-radius: 6px; font-size: 12px;">
+          <div style="color: #999; margin-bottom: 4px;">状态</div>
+          <div style="font-weight: 500;">${record.status}</div>
+        </div>
+        <div style="background: #f8f9fa; padding: 10px; border-radius: 6px; font-size: 12px;">
+          <div style="color: #999; margin-bottom: 4px;">耗时</div>
+          <div style="font-weight: 500;">${record.duration}ms</div>
+        </div>
+        <div style="background: #f8f9fa; padding: 10px; border-radius: 6px; font-size: 12px;">
+          <div style="color: #999; margin-bottom: 4px;">时间</div>
+          <div style="font-weight: 500;">${new Date(record.requestTime).toLocaleString()}</div>
+        </div>
+      </div>
+    </div>
+    
+    <div style="margin-bottom: 20px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+        <div style="font-weight: 500; color: #333;">📦 响应数据</div>
+        <button id="copy-response-btn" style="background: #667eea; color: white; border: none; border-radius: 6px; padding: 6px 12px; cursor: pointer; font-size: 12px;">
+          📋 复制
+        </button>
+      </div>
+      <div style="background: #1e1e1e; color: #d4d4d4; padding: 15px; border-radius: 6px; font-size: 11px; max-height: 400px; overflow-y: auto; font-family: 'Courier New', monospace;">
+        <pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word;">${JSON.stringify(record.responseData, null, 2)}</pre>
+      </div>
+    </div>
+  `;
+  
+  content.appendChild(header);
+  content.appendChild(body);
+  modal.appendChild(content);
+  document.body.appendChild(modal);
+  
+  // 关闭按钮
+  document.getElementById('close-api-modal').addEventListener('click', () => {
+    modal.remove();
+  });
+  
+  // 点击背景关闭
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) {
+      modal.remove();
+    }
+  });
+  
+  // 复制响应数据
+  document.getElementById('copy-response-btn').addEventListener('click', () => {
+    const text = JSON.stringify(record.responseData, null, 2);
+    navigator.clipboard.writeText(text).then(() => {
+      showToast('✅ 已复制到剪贴板');
+    }).catch(() => {
+      showToast('❌ 复制失败');
+    });
+  });
+}
+
+// 监听来自 content script 的消息
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.type === 'API_RECORDED') {
+    apiTrackerCount++;
+    document.getElementById('apiTrackerCount').textContent = apiTrackerCount;
+    
+    // 重新加载列表
+    loadAPIRecords();
+  }
+});
+
+// 当切换到 API 溯源标签时，加载数据
+// 刷新 API 列表按钮
+document.getElementById('refreshAPIListBtn')?.addEventListener('click', function() {
+  const btn = this;
+  const originalText = btn.innerHTML;
+  btn.innerHTML = '🔄 刷新中...';
+  btn.disabled = true;
+  
+  loadAPIRecords();
+  
+  setTimeout(() => {
+    btn.innerHTML = originalText;
+    btn.disabled = false;
+  }, 500);
+});
+
+// API 溯源工具打开时加载记录
+document.querySelectorAll('[data-util="api-tracker"]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    loadAPIRecords();
+    startAutoRefresh();  // 启动自动刷新
+  });
+});
+
+// 初始加载（如果当前就在 API 溯源标签）
+if (document.querySelector('[data-util="api-tracker"].active')) {
+  loadAPIRecords();
+  startAutoRefresh();  // 启动自动刷新
+}
+
+// 自动刷新功能
+let autoRefreshInterval = null;
+
+function startAutoRefresh() {
+  // 清除旧的定时器
+  if (autoRefreshInterval) {
+    clearInterval(autoRefreshInterval);
+  }
+  
+  // 每 2 秒自动刷新一次 API 列表
+  autoRefreshInterval = setInterval(() => {
+    // 只有在 API 溯源工具显示时才刷新
+    const apiTrackerUtil = document.getElementById('api-tracker-util');
+    if (apiTrackerUtil && apiTrackerUtil.style.display !== 'none') {
+      loadAPIRecords();
+    } else {
+      // 如果工具不显示了，停止刷新
+      stopAutoRefresh();
+    }
+  }, 2000);
+  
+  console.log('✅ API 列表自动刷新已启动（每 2 秒）');
+}
+
+function stopAutoRefresh() {
+  if (autoRefreshInterval) {
+    clearInterval(autoRefreshInterval);
+    autoRefreshInterval = null;
+    console.log('⏹️ API 列表自动刷新已停止');
+  }
+}
+
+// 切换到其他工具时停止自动刷新
+document.querySelectorAll('.utils-grid-btn').forEach(btn => {
+  btn.addEventListener('click', function() {
+    const util = this.dataset.util;
+    if (util !== 'api-tracker') {
+      stopAutoRefresh();
+    }
+  });
+});
 

@@ -17,7 +17,6 @@
       <div class="subtitle">Shopee 大数据开发助手</div>
     </header>
     
-    <!-- 设置面板 -->
     <div id="settingsPanel" class="settings-panel" style="display: none;">
       <div class="settings-content">
         <div class="settings-header">
@@ -60,7 +59,6 @@
           
           <div class="settings-divider"></div>
           
-          <!-- 版本信息 -->
           <div class="setting-section">
             <div class="setting-section-title">关于</div>
             <div class="version-info">
@@ -79,7 +77,6 @@
       </div>
     </div>
 
-    <!-- Tab 导航 -->
     <nav class="tabs">
       <button class="tab-btn active" data-tab="calendar">📅 今日日程</button>
       <button class="tab-btn" data-tab="gmail">📬 邮件</button>
@@ -482,6 +479,10 @@
               <span class="grid-icon">⏰</span>
               <span class="grid-label">时区转换</span>
             </button>
+            <button class="utils-grid-btn" data-util="api-tracker">
+              <span class="grid-icon">🔍</span>
+              <span class="grid-label">API溯源</span>
+            </button>
             <button class="utils-grid-btn" data-util="json">
               <span class="grid-icon">📋</span>
               <span class="grid-label">JSON</span>
@@ -521,6 +522,10 @@
             <button class="utils-grid-btn" data-util="station">
               <span class="grid-icon">📍</span>
               <span class="grid-label">站点查询</span>
+            </button>
+            <button class="utils-grid-btn" data-util="data-sync">
+              <span class="grid-icon">🔄</span>
+              <span class="grid-label">数据同步</span>
             </button>
           </div>
 
@@ -580,10 +585,8 @@
           <div class="timezone-reverse">
             <h3>反向转换（时间 → 时间戳）</h3>
             <div class="datetime-input-group">
-              <input type="text" id="datetimeInput" class="input-field" placeholder="输入日期时间 (格式: YYYY-MM-DD HH:mm:ss)">
-              <div class="datetime-quick-buttons">
-                <button class="btn-quick" id="setNow">当前时间</button>
-              </div>
+              <input type="datetime-local" id="datetimeInput" class="input-field" step="1">
+              <button class="btn btn-secondary" id="setNow">当前时间</button>
             </div>
             <select id="fromTimezone" class="input-field">
               <option value="Asia/Singapore">Singapore (SG)</option>
@@ -771,7 +774,178 @@
             </div>
           </div>
 
-          <!-- JSON工具 -->
+          <!-- API溯源工具 -->
+          <div id="api-tracker-util" class="utils-content">
+            <h3>🔍 API 数据溯源</h3>
+            
+            <div class="api-tracker-tool">
+              <div class="api-tracker-intro">
+                <p>🎯 快速定位页面元素的数据来源</p>
+                <ul style="margin: 10px 0; padding-left: 20px; color: #666; font-size: 13px;">
+                  <li>自动拦截所有 API 请求</li>
+                  <li>点击页面元素查看数据来源</li>
+                  <li>智能匹配 API 响应数据</li>
+                </ul>
+                <div style="background: #fff3cd; padding: 10px; border-radius: 6px; font-size: 12px; color: #856404; margin-top: 10px;">
+                  💡 <strong>首次使用</strong>：如果"已捕获 API"为0，请刷新页面让工具生效
+                </div>
+              </div>
+
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px;">
+                <button id="refreshPageBtn" class="btn btn-secondary" style="padding: 12px; font-size: 14px;">
+                  🔄 刷新页面
+                </button>
+                <button id="startAPITracker" class="btn btn-primary" style="padding: 12px; font-size: 14px;">
+                  🎯 启动检查器
+                </button>
+              </div>
+
+              <div class="api-tracker-stats" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px;">
+                <div style="background: #f0f4ff; padding: 15px; border-radius: 8px; text-align: center;">
+                  <div style="font-size: 24px; font-weight: bold; color: #667eea;" id="apiTrackerCount">0</div>
+                  <div style="font-size: 12px; color: #666; margin-top: 5px;">已捕获 API</div>
+                </div>
+                <div style="background: #f0f4ff; padding: 15px; border-radius: 8px; text-align: center;">
+                  <div style="font-size: 24px; font-weight: bold; color: #667eea;" id="apiTrackerActive">待命</div>
+                  <div style="font-size: 12px; color: #666; margin-top: 5px;">检查器状态</div>
+                </div>
+              </div>
+
+              <div class="api-tracker-list">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                  <h4 style="font-size: 14px; color: #333; margin: 0;">📋 最近的 API 调用</h4>
+                  <button id="refreshAPIListBtn" style="background: #667eea; color: white; border: none; border-radius: 6px; padding: 6px 12px; cursor: pointer; font-size: 12px;">
+                    🔄 刷新列表
+                  </button>
+                </div>
+                <div id="apiTrackerList" style="max-height: 300px; overflow-y: auto; background: #f8f9fa; border-radius: 8px; padding: 10px;">
+                  <div style="text-align: center; color: #999; padding: 20px;">
+                    暂无记录
+                  </div>
+                </div>
+              </div>
+
+              <div class="api-tracker-help" style="margin-top: 20px; padding: 15px; background: #fff8e1; border-radius: 8px; font-size: 12px; color: #666;">
+                <div style="font-weight: bold; color: #f57c00; margin-bottom: 8px;">💡 使用提示</div>
+                <ul style="margin: 0; padding-left: 20px;">
+                  <li>在任意页面打开扩展，点击"启动检查器"</li>
+                  <li>移动鼠标到页面元素上，会高亮显示</li>
+                  <li>点击元素查看其数据来源的 API</li>
+                  <li>按 ESC 键退出检查器模式</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+
+          <!-- 数据同步工具 -->
+          <div id="data-sync-util" class="utils-content">
+            <h3>🔄 数据同步工具 (LIVE → TEST)</h3>
+            
+            <div class="data-sync-tool">
+              <div class="sync-config-section">
+                <div class="sync-form-group">
+                  <label class="sync-label">源服务器 (LIVE):</label>
+                  <select id="syncSourceHost" class="sync-select">
+                    <option value="10.180.129.96">ONLINE2 (10.180.129.96)</option>
+                    <option value="10.180.129.141">ONLINE6 (10.180.129.141)</option>
+                  </select>
+                </div>
+
+                <div class="sync-form-group">
+                  <label class="sync-label">表名模板:</label>
+                  <input type="text" id="syncTableTemplate" class="sync-input" 
+                         placeholder="例如: dim_spx_driver_tab"
+                         value="dim_spx_driver_tab">
+                </div>
+
+                <div class="sync-form-group">
+                  <label class="sync-label">市场 (可多选):</label>
+                  <div class="sync-market-selector">
+                    <div class="market-checkboxes">
+                      <label class="market-checkbox-label">
+                        <input type="checkbox" class="market-checkbox" value="sg" checked>
+                        <span>SG</span>
+                      </label>
+                      <label class="market-checkbox-label">
+                        <input type="checkbox" class="market-checkbox" value="id">
+                        <span>ID</span>
+                      </label>
+                      <label class="market-checkbox-label">
+                        <input type="checkbox" class="market-checkbox" value="my">
+                        <span>MY</span>
+                      </label>
+                      <label class="market-checkbox-label">
+                        <input type="checkbox" class="market-checkbox" value="th">
+                        <span>TH</span>
+                      </label>
+                      <label class="market-checkbox-label">
+                        <input type="checkbox" class="market-checkbox" value="ph">
+                        <span>PH</span>
+                      </label>
+                      <label class="market-checkbox-label">
+                        <input type="checkbox" class="market-checkbox" value="vn">
+                        <span>VN</span>
+                      </label>
+                      <label class="market-checkbox-label">
+                        <input type="checkbox" class="market-checkbox" value="tw">
+                        <span>TW</span>
+                      </label>
+                      <label class="market-checkbox-label">
+                        <input type="checkbox" class="market-checkbox" value="br">
+                        <span>BR</span>
+                      </label>
+                      <label class="market-checkbox-label">
+                        <input type="checkbox" class="market-checkbox" value="reg">
+                        <span>REG</span>
+                      </label>
+                    </div>
+                    <div class="market-actions">
+                      <button type="button" id="selectAllMarkets" class="btn-link">全选</button>
+                      <button type="button" id="clearAllMarkets" class="btn-link">清空</button>
+                    </div>
+                  </div>
+                  <div class="sync-hint" id="selectedMarketsHint">已选择: SG</div>
+                </div>
+
+                <div class="sync-form-group">
+                  <label class="sync-label">数据库 (LIVE环境):</label>
+                  <input type="text" id="syncDatabase" class="sync-input" 
+                         placeholder="例如: spx_mart_manage_app"
+                         value="spx_mart_manage_app">
+                </div>
+
+                <div class="sync-form-group">
+                  <label class="sync-label">同步模式:</label>
+                  <select id="syncMode" class="sync-select">
+                    <option value="full_ddl" selected>完整同步 (清空+导入)</option>
+                    <option value="insert">追加模式 (INSERT)</option>
+                  </select>
+                </div>
+
+                <div class="sync-form-group" style="margin-top: 20px;">
+                  <div class="sync-preview" style="background: #f5f5f5; padding: 12px; border-radius: 8px; font-family: monospace; font-size: 12px;">
+                    <div style="color: #666; margin-bottom: 5px;">完整表名预览:</div>
+                    <div id="syncTablePreview" style="color: #1976d2; font-weight: bold;">-</div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="sync-actions" style="margin-top: 20px;">
+                <button id="verifySyncSourceBtn" class="btn btn-secondary" style="flex: 1;">
+                  1️⃣ 验证源数据
+                </button>
+                <button id="executeSyncBtn" class="btn btn-primary" style="flex: 1;" disabled>
+                  2️⃣ 执行同步
+                </button>
+                <button id="verifySyncResultBtn" class="btn btn-secondary" style="flex: 1;" disabled>
+                  3️⃣ 验证结果
+                </button>
+              </div>
+
+              <div id="syncStatus" class="sync-status" style="margin-top: 20px;"></div>
+            </div>
+          </div>
+
           <div id="json-util" class="utils-content">
             <h3>📋 JSON 格式化 & 验证</h3>
             
