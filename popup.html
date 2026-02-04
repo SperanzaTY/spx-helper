@@ -528,6 +528,10 @@
               <span class="grid-icon">🔄</span>
               <span class="grid-label">数据同步</span>
             </button>
+            <button class="utils-grid-btn" data-util="dod">
+              <span class="grid-icon">📖</span>
+              <span class="grid-label">DOD查询</span>
+            </button>
           </div>
 
           <!-- 时区转换工具 -->
@@ -1453,6 +1457,54 @@
                     </div>
                   </div>
                 </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- DOD查询工具 -->
+          <div id="dod-util" class="utils-content">
+            <h3>📖 DOD 查询</h3>
+            
+            <div class="dod-tool">
+              <!-- 搜索区域 -->
+              <div class="dod-search-section">
+                <div class="dod-input-row">
+                  <input type="text" id="dodSearchInput" class="dod-input" placeholder="输入表名、字段名或关键词搜索...">
+                  <button id="searchDodBtn" class="btn btn-primary">🔍 搜索</button>
+                  <button id="loadAllDodBtn" class="btn btn-secondary">📋 加载全部</button>
+                </div>
+              </div>
+              
+              <!-- 统计信息 -->
+              <div id="dodStats" class="dod-stats" style="display: none;">
+                <div class="stat-card">
+                  <span class="stat-number" id="dodTotalCount">0</span>
+                  <span class="stat-label">总记录数</span>
+                </div>
+                <div class="stat-card">
+                  <span class="stat-number" id="dodFilteredCount">0</span>
+                  <span class="stat-label">搜索结果</span>
+                </div>
+              </div>
+              
+              <!-- 结果区域 -->
+              <div class="dod-results-section">
+                <div id="dodResults" class="dod-results">
+                  <div class="dod-placeholder">
+                    <span class="placeholder-icon">📖</span>
+                    <span class="placeholder-text">输入关键词搜索DOD，或点击"加载全部"查看所有记录</span>
+                    <div class="placeholder-help">
+                      <p>💡 支持搜索表名、字段名、描述等内容</p>
+                      <p>📊 数据来源: Google Sheets DOD文档</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              <!-- 加载状态 -->
+              <div id="dodLoading" class="dod-loading" style="display: none;">
+                <div class="loading-spinner"></div>
+                <p>正在加载 DOD 数据...</p>
               </div>
             </div>
           </div>

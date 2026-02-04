@@ -25,6 +25,7 @@ document.addEventListener('DOMContentLoaded', function() {
   initCodeHelper();
   initTodos();
   initFmsLinks();
+  initDodTool();
   
   // 事件监听器
   document.getElementById('addLink').addEventListener('click', addLink);
@@ -9042,3 +9043,226 @@ document.querySelectorAll('.utils-grid-btn').forEach(btn => {
   });
 });
 
+
+// ===== DOD 查询工具 =====
+const DOD_SHEET_ID = '17jW1K3gEwhyyJxoOsXTOLlzQVXVIaU44S4SLLZBO-Zo';
+const DOD_SHEET_GID = '374454140';
+let dodData = [];
+let dodAllData = [];
+
+function initDodTool() {
+  const searchBtn = document.getElementById('searchDodBtn');
+  const loadAllBtn = document.getElementById('loadAllDodBtn');
+  const searchInput = document.getElementById('dodSearchInput');
+  
+  if (searchBtn) {
+    searchBtn.addEventListener('click', searchDod);
+  }
+  
+  if (loadAllBtn) {
+    loadAllBtn.addEventListener('click', loadAllDod);
+  }
+  
+  if (searchInput) {
+    searchInput.addEventListener('keypress', function(e) {
+      if (e.key === 'Enter') {
+        searchDod();
+      }
+    });
+  }
+}
+
+async function loadAllDod() {
+  showDodLoading();
+  
+  try {
+    // 使用 Google Sheets 公开 CSV 导出
+    const csvUrl = `https://docs.google.com/spreadsheets/d/${DOD_SHEET_ID}/export?format=csv&gid=${DOD_SHEET_GID}`;
+    
+    const response = await fetch(csvUrl);
+    if (!response.ok) {
+      throw new Error('无法加载数据');
+    }
+    
+    const csvText = await response.text();
+    dodAllData = parseCSV(csvText);
+    dodData = dodAllData;
+    
+    console.log('成功加载 DOD 数据:', dodData.length, '条记录');
+    
+    // 更新统计
+    document.getElementById('dodTotalCount').textContent = dodAllData.length;
+    document.getElementById('dodFilteredCount').textContent = dodData.length;
+    document.getElementById('dodStats').style.display = 'grid';
+    
+    // 显示结果
+    displayDodResults(dodData);
+    
+  } catch (error) {
+    console.error('加载 DOD 失败:', error);
+    showDodError('加载失败: ' + error.message);
+  }
+}
+
+async function searchDod() {
+  const keyword = document.getElementById('dodSearchInput').value.trim();
+  
+  if (!keyword) {
+    alert('请输入搜索关键词');
+    return;
+  }
+  
+  // 如果还没有加载数据，先加载
+  if (dodAllData.length === 0) {
+    await loadAllDod();
+  }
+  
+  // 搜索过滤
+  const filtered = dodAllData.filter(item => {
+    const searchText = JSON.stringify(item).toLowerCase();
+    return searchText.includes(keyword.toLowerCase());
+  });
+  
+  dodData = filtered;
+  
+  // 更新统计
+  document.getElementById('dodFilteredCount').textContent = filtered.length;
+  document.getElementById('dodStats').style.display = 'grid';
+  
+  // 显示结果
+  displayDodResults(filtered);
+}
+
+function parseCSV(csvText) {
+  const lines = csvText.split('\n').filter(line => line.trim());
+  if (lines.length === 0) return [];
+  
+  // 第一行是标题
+  const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''));
+  
+  // 解析数据行
+  const data = [];
+  for (let i = 1; i < lines.length; i++) {
+    const values = parseCSVLine(lines[i]);
+    if (values.length === headers.length) {
+      const item = {};
+      headers.forEach((header, index) => {
+        item[header] = values[index];
+      });
+      data.push(item);
+    }
+  }
+  
+  return data;
+}
+
+function parseCSVLine(line) {
+  const values = [];
+  let current = '';
+  let inQuotes = false;
+  
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+    
+    if (char === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (char === ',' && !inQuotes) {
+      values.push(current.trim());
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+  
+  values.push(current.trim());
+  return values;
+}
+
+function displayDodResults(data) {
+  const resultsDiv = document.getElementById('dodResults');
+  
+  if (data.length === 0) {
+    resultsDiv.innerHTML = `
+      <div class="dod-no-results">
+        <span class="dod-no-results-icon">🔍</span>
+        <div class="dod-no-results-text">未找到匹配的记录</div>
+      </div>
+    `;
+    return;
+  }
+  
+  // 显示前50条结果
+  const displayData = data.slice(0, 50);
+  
+  let html = '';
+  displayData.forEach((item, index) => {
+    html += `
+      <div class="dod-item">
+        <div class="dod-item-header">
+          <div>
+            <h4 class="dod-item-title">${escapeHtml(item['Table Name'] || item['table_name'] || '未知表名')}</h4>
+            <div class="dod-item-meta">
+              ${item['Field Name'] || item['field_name'] ? `<span class="dod-item-tag">字段: ${escapeHtml(item['Field Name'] || item['field_name'])}</span>` : ''}
+            </div>
+          </div>
+        </div>
+        <div class="dod-item-body">
+          ${Object.keys(item).map(key => {
+            if (key !== 'Table Name' && key !== 'Field Name' && key !== 'table_name' && key !== 'field_name' && item[key]) {
+              return `
+                <div class="dod-item-row">
+                  <div class="dod-item-label">${escapeHtml(key)}:</div>
+                  <div class="dod-item-value">${escapeHtml(item[key])}</div>
+                </div>
+              `;
+            }
+            return '';
+          }).join('')}
+        </div>
+      </div>
+    `;
+  });
+  
+  if (data.length > 50) {
+    html += `
+      <div style="text-align: center; padding: 15px; color: #666; font-size: 13px;">
+        显示前 50 条结果，共 ${data.length} 条记录
+      </div>
+    `;
+  }
+  
+  resultsDiv.innerHTML = html;
+  hideDodLoading();
+}
+
+function showDodLoading() {
+  document.getElementById('dodLoading').style.display = 'block';
+  document.getElementById('dodResults').style.display = 'none';
+}
+
+function hideDodLoading() {
+  document.getElementById('dodLoading').style.display = 'none';
+  document.getElementById('dodResults').style.display = 'block';
+}
+
+function showDodError(message) {
+  const resultsDiv = document.getElementById('dodResults');
+  resultsDiv.innerHTML = `
+    <div class="dod-no-results">
+      <span class="dod-no-results-icon">⚠️</span>
+      <div class="dod-no-results-text">${escapeHtml(message)}</div>
+    </div>
+  `;
+  hideDodLoading();
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
