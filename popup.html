@@ -1463,39 +1463,35 @@
 
           <!-- DOD查询工具 -->
           <div id="dod-util" class="utils-content">
-            <h3>📖 DOD 查询</h3>
+            <h3>📅 本周值班 (DOD)</h3>
             
             <div class="dod-tool">
-              <!-- 搜索区域 -->
+              <!-- 当前周信息 -->
+              <div class="dod-week-info">
+                <div class="dod-week-header">
+                  <span class="dod-week-icon">📆</span>
+                  <div class="dod-week-text">
+                    <div class="dod-week-title" id="dodWeekTitle">正在加载...</div>
+                    <div class="dod-week-date" id="dodWeekDate">-</div>
+                  </div>
+                  <button id="refreshDodBtn" class="btn btn-secondary btn-small">🔄 刷新</button>
+                </div>
+              </div>
+              
+              <!-- 搜索框 -->
               <div class="dod-search-section">
-                <div class="dod-input-row">
-                  <input type="text" id="dodSearchInput" class="dod-input" placeholder="输入表名、字段名或关键词搜索...">
-                  <button id="searchDodBtn" class="btn btn-primary">🔍 搜索</button>
-                  <button id="loadAllDodBtn" class="btn btn-secondary">📋 加载全部</button>
-                </div>
+                <input type="text" id="dodSearchInput" class="dod-input" placeholder="🔍 搜索域名...（如: Driver, Order, Delivery）">
               </div>
               
-              <!-- 统计信息 -->
-              <div id="dodStats" class="dod-stats" style="display: none;">
-                <div class="stat-card">
-                  <span class="stat-number" id="dodTotalCount">0</span>
-                  <span class="stat-label">总记录数</span>
-                </div>
-                <div class="stat-card">
-                  <span class="stat-number" id="dodFilteredCount">0</span>
-                  <span class="stat-label">搜索结果</span>
-                </div>
-              </div>
-              
-              <!-- 结果区域 -->
+              <!-- 值班人员列表 -->
               <div class="dod-results-section">
                 <div id="dodResults" class="dod-results">
                   <div class="dod-placeholder">
-                    <span class="placeholder-icon">📖</span>
-                    <span class="placeholder-text">输入关键词搜索DOD，或点击"加载全部"查看所有记录</span>
+                    <span class="placeholder-icon">📅</span>
+                    <span class="placeholder-text">点击刷新按钮加载本周值班信息</span>
                     <div class="placeholder-help">
-                      <p>💡 支持搜索表名、字段名、描述等内容</p>
-                      <p>📊 数据来源: Google Sheets DOD文档</p>
+                      <p>💡 自动显示本周各域的值班人员</p>
+                      <p>📊 数据来源: Google Sheets 值班排班表</p>
                     </div>
                   </div>
                 </div>
@@ -1504,7 +1500,7 @@
               <!-- 加载状态 -->
               <div id="dodLoading" class="dod-loading" style="display: none;">
                 <div class="loading-spinner"></div>
-                <p>正在加载 DOD 数据...</p>
+                <p>正在加载值班数据...</p>
               </div>
             </div>
           </div>

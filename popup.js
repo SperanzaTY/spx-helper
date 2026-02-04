@@ -9044,35 +9044,30 @@ document.querySelectorAll('.utils-grid-btn').forEach(btn => {
 });
 
 
-// ===== DOD 查询工具 =====
+// ===== DOD 值班查询工具 =====
 const DOD_SHEET_ID = '17jW1K3gEwhyyJxoOsXTOLlzQVXVIaU44S4SLLZBO-Zo';
 const DOD_SHEET_GID = '374454140';
-let dodData = [];
-let dodAllData = [];
+let dodScheduleData = [];
+let dodTeamLeaders = {}; // 存储team leader信息
+let currentDodList = []; // 存储当前周的所有域值班信息
 
 function initDodTool() {
-  const searchBtn = document.getElementById('searchDodBtn');
-  const loadAllBtn = document.getElementById('loadAllDodBtn');
+  const refreshBtn = document.getElementById('refreshDodBtn');
   const searchInput = document.getElementById('dodSearchInput');
   
-  if (searchBtn) {
-    searchBtn.addEventListener('click', searchDod);
-  }
-  
-  if (loadAllBtn) {
-    loadAllBtn.addEventListener('click', loadAllDod);
+  if (refreshBtn) {
+    refreshBtn.addEventListener('click', loadCurrentWeekDod);
   }
   
   if (searchInput) {
-    searchInput.addEventListener('keypress', function(e) {
-      if (e.key === 'Enter') {
-        searchDod();
-      }
-    });
+    searchInput.addEventListener('input', filterDodDomains);
   }
+  
+  // 自动加载本周值班
+  loadCurrentWeekDod();
 }
 
-async function loadAllDod() {
+async function loadCurrentWeekDod() {
   showDodLoading();
   
   try {
@@ -9085,72 +9080,411 @@ async function loadAllDod() {
     }
     
     const csvText = await response.text();
-    dodAllData = parseCSV(csvText);
-    dodData = dodAllData;
     
-    console.log('成功加载 DOD 数据:', dodData.length, '条记录');
+    // 调试：打印原始CSV的前3行和匹配行周围的数据
+    const lines = csvText.split('\n');
+    console.log('=== Raw CSV (First 3 lines) ===');
+    console.log('Line 0 (Headers):', lines[0]);
+    console.log('Line 1 (Team Leaders):', lines[1]);
+    console.log('Line 2 (First Data):', lines[2]);
     
-    // 更新统计
-    document.getElementById('dodTotalCount').textContent = dodAllData.length;
-    document.getElementById('dodFilteredCount').textContent = dodData.length;
-    document.getElementById('dodStats').style.display = 'grid';
+    // 查找包含 02/02 的行号
+    const targetIndex = lines.findIndex(line => line.includes('02/02-02/08'));
+    if (targetIndex !== -1) {
+      console.log('=== Found 02/02-02/08 at line', targetIndex, '===');
+      console.log('Raw line:', lines[targetIndex]);
+      console.log('Previous line:', lines[targetIndex - 1]);
+      console.log('Next line:', lines[targetIndex + 1]);
+    }
+    console.log('=====================================');
     
-    // 显示结果
-    displayDodResults(dodData);
+    const allData = parseCSV(csvText);
+    
+    // 第一行是域名标题（CSV的header）
+    // parseCSV后：
+    // allData[0] = 第二行（Team Leader行）
+    // allData[1] = 第三行（Date标题行）
+    // allData[2] 开始 = 实际的值班数据
+    
+    if (allData.length >= 2) {
+      const leaderRow = allData[0]; // Team Leader在第二行
+      
+      console.log('=== Team Leader Row ===');
+      console.log(leaderRow);
+      
+      // 提取team leader信息
+      dodTeamLeaders = {};
+      for (const key in leaderRow) {
+        if (key !== 'Date' && key !== '日期' && key !== 'Domain' && key !== '') {
+          dodTeamLeaders[key] = leaderRow[key] || '';
+        }
+      }
+      
+      console.log('=== Parsed Team Leaders ===');
+      console.log(dodTeamLeaders);
+      
+      // 从第3行开始是实际的值班数据（allData[2]开始）
+      dodScheduleData = allData.slice(2);
+    } else {
+      dodScheduleData = allData;
+    }
+    
+    console.log('成功加载值班数据:', dodScheduleData.length, '条记录');
+    
+    // 获取当前日期
+    const today = new Date();
+    
+    // 查找匹配当前日期的值班记录（选择最新的匹配项）
+    const currentDodRow = findCurrentWeekDodRow(dodScheduleData, today);
+    
+    if (currentDodRow) {
+      // 更新周信息
+      updateWeekInfo(currentDodRow.dateRange);
+      
+      // 显示结果
+      displayDodSchedule(currentDodRow);
+    } else {
+      showDodError('未找到当前日期的值班信息');
+    }
     
   } catch (error) {
-    console.error('加载 DOD 失败:', error);
+    console.error('加载值班数据失败:', error);
     showDodError('加载失败: ' + error.message);
   }
 }
 
-async function searchDod() {
-  const keyword = document.getElementById('dodSearchInput').value.trim();
+function findCurrentWeekDodRow(data, currentDate) {
+  let matchedRow = null;
+  let matchedRows = []; // 收集所有匹配的行
   
-  if (!keyword) {
-    alert('请输入搜索关键词');
+  console.log('=== Finding DOD for date:', currentDate.toLocaleDateString());
+  console.log('Total rows to check:', data.length);
+  
+  // 从后往前遍历，这样最后一个匹配的就是最新的
+  for (let i = data.length - 1; i >= 0; i--) {
+    const row = data[i];
+    const dateStr = row['Date'] || row['日期'] || Object.values(row)[0];
+    
+    if (!dateStr || dateStr.trim() === '') continue;
+    
+    // 跳过标题行和年份标记行
+    if (dateStr.includes('Domain') || dateStr.includes('月份') || dateStr.includes('年')) {
+      continue;
+    }
+    
+    // 解析日期范围
+    const dateRange = parseDateRange(dateStr, currentDate.getFullYear());
+    
+    if (dateRange) {
+      const inRange = isDateInRange(currentDate, dateRange);
+      
+      // 调试：打印最后20行的匹配情况
+      if (i >= data.length - 20) {
+        console.log(`Row ${i}: ${dateStr} - In Range: ${inRange}`, dateRange);
+      }
+      
+      if (inRange) {
+        console.log(`✅ MATCHED Row ${i}: ${dateStr}`);
+        matchedRows.push({ index: i, dateStr, row, dateRange });
+        matchedRow = {
+          dateRange: dateStr,
+          data: row,
+          parsedRange: dateRange,
+          rowIndex: i
+        };
+        // 找到第一个匹配的（因为是从后往前遍历，第一个就是最新的）
+        break;
+      }
+    }
+  }
+  
+  console.log('=== Match Result ===');
+  console.log('Total matched rows:', matchedRows.length);
+  if (matchedRow) {
+    console.log('Selected row index:', matchedRow.rowIndex);
+    console.log('Date range:', matchedRow.dateRange);
+    console.log('Non-empty fields:', Object.keys(matchedRow.data).filter(k => matchedRow.data[k] && matchedRow.data[k].trim()));
+  }
+  
+  return matchedRow;
+}
+
+function parseDateRange(dateStr, currentYear) {
+  // 清理字符串
+  dateStr = dateStr.trim();
+  
+  // 多种日期格式：
+  // 11.29~12.5
+  // 12.6~12.12
+  // 7/4
+  // 1.3~1.9
+  // 5.30-6.6
+  // 6/27
+  // 1/6-1/12
+  
+  let startDate, endDate;
+  
+  // 格式1: MM.DD~MM.DD 或 M.D~M.D
+  let match = dateStr.match(/(\d{1,2})\.(\d{1,2})~(\d{1,2})\.(\d{1,2})/);
+  if (match) {
+    const [, startMonth, startDay, endMonth, endDay] = match;
+    startDate = new Date(currentYear, parseInt(startMonth) - 1, parseInt(startDay));
+    endDate = new Date(currentYear, parseInt(endMonth) - 1, parseInt(endDay));
+    
+    // 处理跨年情况（如 12.27~1.2）
+    if (endDate < startDate) {
+      endDate.setFullYear(currentYear + 1);
+    }
+    
+    return { start: startDate, end: endDate };
+  }
+  
+  // 格式2: M/D-M/D 或 M.D-M.D
+  match = dateStr.match(/(\d{1,2})[/.](\d{1,2})[-~](\d{1,2})[/.](\d{1,2})/);
+  if (match) {
+    const [, startMonth, startDay, endMonth, endDay] = match;
+    startDate = new Date(currentYear, parseInt(startMonth) - 1, parseInt(startDay));
+    endDate = new Date(currentYear, parseInt(endMonth) - 1, parseInt(endDay));
+    
+    // 处理跨年情况
+    if (endDate < startDate) {
+      endDate.setFullYear(currentYear + 1);
+    }
+    
+    return { start: startDate, end: endDate };
+  }
+  
+  // 格式3: M/D 或 M.D (单日)
+  match = dateStr.match(/^(\d{1,2})[/.](\d{1,2})$/);
+  if (match) {
+    const [, month, day] = match;
+    startDate = new Date(currentYear, parseInt(month) - 1, parseInt(day));
+    endDate = new Date(startDate);
+    endDate.setDate(endDate.getDate() + 6); // 假设一周
+    
+    return { start: startDate, end: endDate };
+  }
+  
+  return null;
+}
+
+function isDateInRange(date, range) {
+  // 设置时间为当天的开始，避免时间部分影响比较
+  const checkDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const startDate = new Date(range.start.getFullYear(), range.start.getMonth(), range.start.getDate());
+  const endDate = new Date(range.end.getFullYear(), range.end.getMonth(), range.end.getDate());
+  
+  return checkDate >= startDate && checkDate <= endDate;
+}
+
+function updateWeekInfo(dateRangeStr) {
+  const titleEl = document.getElementById('dodWeekTitle');
+  const dateEl = document.getElementById('dodWeekDate');
+  
+  if (titleEl) {
+    titleEl.textContent = '本周值班';
+  }
+  
+  if (dateEl) {
+    dateEl.textContent = dateRangeStr;
+  }
+}
+
+function displayDodSchedule(dodRow) {
+  const resultsDiv = document.getElementById('dodResults');
+  
+  if (!dodRow || !dodRow.data) {
+    resultsDiv.innerHTML = `
+      <div class="dod-no-results">
+        <span class="dod-no-results-icon">📅</span>
+        <div class="dod-no-results-text">未找到本周值班信息</div>
+      </div>
+    `;
+    hideDodLoading();
     return;
   }
   
-  // 如果还没有加载数据，先加载
-  if (dodAllData.length === 0) {
-    await loadAllDod();
+  const rowData = dodRow.data;
+  
+  // 调试：打印所有列
+  console.log('=== DOD Row Data ===');
+  console.log('Date Range:', dodRow.dateRange);
+  console.log('All Keys:', Object.keys(rowData));
+  console.log('All Data:', rowData);
+  
+  // 获取所有域（跳过第一列Date）
+  currentDodList = []; // 清空并重新填充
+  for (const key in rowData) {
+    const value = rowData[key];
+    console.log(`Key: "${key}", Value: "${value}", Has Value: ${!!value}`);
+    
+    if (key !== 'Date' && key !== '日期' && key !== '' && key !== 'Domain' && value && value.trim && value.trim()) {
+      // 跳过一些特殊标记
+      if (!key.includes('月份') && !key.includes('年')) {
+        const teamLeader = dodTeamLeaders[key] || '';
+        currentDodList.push({
+          name: key,
+          person: value.trim(),
+          teamLeader: teamLeader
+        });
+        console.log(`✅ Added domain: ${key} = ${value.trim()}, TL: ${teamLeader}`);
+      } else {
+        console.log(`❌ Skipped (special marker): ${key}`);
+      }
+    } else {
+      console.log(`❌ Skipped (empty or Date): ${key}`);
+    }
   }
   
-  // 搜索过滤
-  const filtered = dodAllData.filter(item => {
-    const searchText = JSON.stringify(item).toLowerCase();
-    return searchText.includes(keyword.toLowerCase());
+  console.log('=== Total Domains Found:', currentDodList.length);
+  
+  // 显示所有域
+  renderDodList(currentDodList, dodRow.dateRange);
+}
+
+function filterDodDomains() {
+  const keyword = document.getElementById('dodSearchInput').value.trim().toLowerCase();
+  
+  if (!keyword) {
+    // 没有搜索词，显示全部
+    renderDodList(currentDodList, document.getElementById('dodWeekDate').textContent);
+    return;
+  }
+  
+  // 过滤域名
+  const filtered = currentDodList.filter(domain => 
+    domain.name.toLowerCase().includes(keyword) ||
+    domain.person.toLowerCase().includes(keyword) ||
+    (domain.teamLeader && domain.teamLeader.toLowerCase().includes(keyword))
+  );
+  
+  renderDodList(filtered, document.getElementById('dodWeekDate').textContent);
+}
+
+function renderDodList(domains, dateRange) {
+  const resultsDiv = document.getElementById('dodResults');
+  
+  if (domains.length === 0) {
+    resultsDiv.innerHTML = `
+      <div class="dod-no-results">
+        <span class="dod-no-results-icon">🔍</span>
+        <div class="dod-no-results-text">未找到匹配的域</div>
+      </div>
+    `;
+    return;
+  }
+  
+  let html = '';
+  domains.forEach((domain) => {
+    const initial = domain.person.charAt(0).toUpperCase();
+    const domainIcon = getDomainIcon(domain.name);
+    
+    html += `
+      <div class="dod-domain-card">
+        <div class="dod-domain-header">
+          <div class="dod-domain-name">
+            <span class="dod-domain-icon">${domainIcon}</span>
+            ${escapeHtml(domain.name)}
+          </div>
+          <span class="dod-domain-badge">值班中</span>
+        </div>
+        <div class="dod-person-info">
+          <div class="dod-person-avatar">${initial}</div>
+          <div class="dod-person-details">
+            <div class="dod-person-name">${escapeHtml(domain.person)}</div>
+            <div class="dod-person-meta">
+              <div class="dod-person-meta-item">
+                <span>📅</span>
+                <span>${dateRange}</span>
+              </div>
+              ${domain.teamLeader ? `
+              <div class="dod-person-meta-item">
+                <span>👔</span>
+                <span>TL: ${escapeHtml(domain.teamLeader)}</span>
+              </div>
+              ` : ''}
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
   });
   
-  dodData = filtered;
+  resultsDiv.innerHTML = html;
+  hideDodLoading();
+}
+
+function getDomainIcon(domain) {
+  const domainLower = domain.toLowerCase();
   
-  // 更新统计
-  document.getElementById('dodFilteredCount').textContent = filtered.length;
-  document.getElementById('dodStats').style.display = 'grid';
+  if (domainLower.includes('fpm')) return '📦';
+  if (domainLower.includes('order')) return '📝';
+  if (domainLower.includes('fulfil')) return '🏭';
+  if (domainLower.includes('exception')) return '⚠️';
+  if (domainLower.includes('fee')) return '💰';
+  if (domainLower.includes('driver')) return '🚗';
+  if (domainLower.includes('pickup')) return '📦';
+  if (domainLower.includes('linehaul')) return '🚛';
+  if (domainLower.includes('zone') || domainLower.includes('address')) return '🗺️';
+  if (domainLower.includes('delivery')) return '🚚';
+  if (domainLower.includes('service')) return '🏪';
+  if (domainLower.includes('locker')) return '🔒';
+  if (domainLower.includes('instation')) return '🏢';
+  if (domainLower.includes('network')) return '🌐';
+  if (domainLower.includes('asm') || domainLower.includes('cctv') || domainLower.includes('wcs')) return '📹';
+  if (domainLower.includes('common')) return '🔧';
+  if (domainLower.includes('wfm')) return '📊';
+  if (domainLower.includes('fe')) return '💻';
+  if (domainLower.includes('app')) return '📱';
   
-  // 显示结果
-  displayDodResults(filtered);
+  return '👤';
 }
 
 function parseCSV(csvText) {
-  const lines = csvText.split('\n').filter(line => line.trim());
-  if (lines.length === 0) return [];
+  const rows = [];
+  const lines = csvText.split('\n');
+  let currentRow = [];
+  let currentField = '';
+  let inQuotes = false;
+  let lineBuffer = '';
+  
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    lineBuffer += (lineBuffer ? '\n' : '') + line;
+    
+    // 检查这一行是否完整（引号是否闭合）
+    let quoteCount = 0;
+    for (let char of lineBuffer) {
+      if (char === '"') quoteCount++;
+    }
+    
+    // 如果引号数是奇数，说明还在引号内，继续读取下一行
+    if (quoteCount % 2 !== 0) {
+      continue;
+    }
+    
+    // 引号已闭合，解析这一行
+    currentRow = parseCSVLine(lineBuffer);
+    rows.push(currentRow);
+    
+    // 重置buffer
+    lineBuffer = '';
+  }
+  
+  if (rows.length === 0) return [];
   
   // 第一行是标题
-  const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''));
+  const headers = rows[0];
   
-  // 解析数据行
+  // 转换为对象数组
   const data = [];
-  for (let i = 1; i < lines.length; i++) {
-    const values = parseCSVLine(lines[i]);
-    if (values.length === headers.length) {
-      const item = {};
-      headers.forEach((header, index) => {
-        item[header] = values[index];
-      });
-      data.push(item);
-    }
+  for (let i = 1; i < rows.length; i++) {
+    const values = rows[i];
+    const item = {};
+    headers.forEach((header, index) => {
+      item[header] = values[index] || '';
+    });
+    data.push(item);
   }
   
   return data;
@@ -9166,78 +9500,28 @@ function parseCSVLine(line) {
     
     if (char === '"') {
       if (inQuotes && line[i + 1] === '"') {
+        // 转义的引号
         current += '"';
         i++;
       } else {
+        // 切换引号状态
         inQuotes = !inQuotes;
       }
     } else if (char === ',' && !inQuotes) {
-      values.push(current.trim());
+      // 字段分隔符（不在引号内）
+      values.push(current);
       current = '';
     } else {
+      // 普通字符（包括换行符）
       current += char;
     }
   }
   
-  values.push(current.trim());
-  return values;
-}
-
-function displayDodResults(data) {
-  const resultsDiv = document.getElementById('dodResults');
+  // 添加最后一个字段
+  values.push(current);
   
-  if (data.length === 0) {
-    resultsDiv.innerHTML = `
-      <div class="dod-no-results">
-        <span class="dod-no-results-icon">🔍</span>
-        <div class="dod-no-results-text">未找到匹配的记录</div>
-      </div>
-    `;
-    return;
-  }
-  
-  // 显示前50条结果
-  const displayData = data.slice(0, 50);
-  
-  let html = '';
-  displayData.forEach((item, index) => {
-    html += `
-      <div class="dod-item">
-        <div class="dod-item-header">
-          <div>
-            <h4 class="dod-item-title">${escapeHtml(item['Table Name'] || item['table_name'] || '未知表名')}</h4>
-            <div class="dod-item-meta">
-              ${item['Field Name'] || item['field_name'] ? `<span class="dod-item-tag">字段: ${escapeHtml(item['Field Name'] || item['field_name'])}</span>` : ''}
-            </div>
-          </div>
-        </div>
-        <div class="dod-item-body">
-          ${Object.keys(item).map(key => {
-            if (key !== 'Table Name' && key !== 'Field Name' && key !== 'table_name' && key !== 'field_name' && item[key]) {
-              return `
-                <div class="dod-item-row">
-                  <div class="dod-item-label">${escapeHtml(key)}:</div>
-                  <div class="dod-item-value">${escapeHtml(item[key])}</div>
-                </div>
-              `;
-            }
-            return '';
-          }).join('')}
-        </div>
-      </div>
-    `;
-  });
-  
-  if (data.length > 50) {
-    html += `
-      <div style="text-align: center; padding: 15px; color: #666; font-size: 13px;">
-        显示前 50 条结果，共 ${data.length} 条记录
-      </div>
-    `;
-  }
-  
-  resultsDiv.innerHTML = html;
-  hideDodLoading();
+  // 清理每个字段（去除前后空格和引号）
+  return values.map(v => v.trim().replace(/^"|"$/g, ''));
 }
 
 function showDodLoading() {
@@ -9262,6 +9546,7 @@ function showDodError(message) {
 }
 
 function escapeHtml(text) {
+  if (!text) return '';
   const div = document.createElement('div');
   div.textContent = text;
   return div.innerHTML;

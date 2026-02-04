@@ -6296,7 +6296,7 @@ input:checked + .slider:before {
 
 
 
-/* DOD 查询工具样式 */
+/* DOD 值班查询工具样式 */
 .dod-tool {
   display: flex;
   flex-direction: column;
@@ -6307,20 +6307,15 @@ input:checked + .slider:before {
   margin-bottom: 10px;
 }
 
-.dod-input-row {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
 .dod-input {
-  flex: 1;
+  width: 100%;
   padding: 10px 15px;
   border: 1px solid #ddd;
   border-radius: 6px;
   font-size: 14px;
   outline: none;
   transition: border-color 0.3s;
+  box-sizing: border-box;
 }
 
 .dod-input:focus {
@@ -6328,11 +6323,37 @@ input:checked + .slider:before {
   box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
 }
 
-.dod-stats {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 10px;
-  margin-bottom: 15px;
+.dod-week-info {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: 12px;
+  padding: 20px;
+  color: white;
+  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+}
+
+.dod-week-header {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+}
+
+.dod-week-icon {
+  font-size: 32px;
+}
+
+.dod-week-text {
+  flex: 1;
+}
+
+.dod-week-title {
+  font-size: 18px;
+  font-weight: 600;
+  margin-bottom: 5px;
+}
+
+.dod-week-date {
+  font-size: 13px;
+  opacity: 0.9;
 }
 
 .dod-results-section {
@@ -6391,87 +6412,104 @@ input:checked + .slider:before {
   animation: spin 1s linear infinite;
 }
 
-.dod-item {
+.dod-domain-card {
   background: white;
-  border: 1px solid #e0e0e0;
-  border-radius: 8px;
-  padding: 15px;
-  margin-bottom: 12px;
+  border: 2px solid #e0e0e0;
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 15px;
   transition: all 0.3s;
 }
 
-.dod-item:hover {
+.dod-domain-card:hover {
   border-color: #667eea;
-  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.15);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15);
+  transform: translateY(-2px);
 }
 
-.dod-item:last-child {
+.dod-domain-card:last-child {
   margin-bottom: 0;
 }
 
-.dod-item-header {
+.dod-domain-header {
   display: flex;
+  align-items: center;
   justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 10px;
+  margin-bottom: 15px;
+  padding-bottom: 15px;
+  border-bottom: 2px solid #f0f0f0;
 }
 
-.dod-item-title {
-  font-size: 15px;
-  font-weight: 600;
+.dod-domain-name {
+  font-size: 18px;
+  font-weight: 700;
   color: #333;
-  margin: 0;
-}
-
-.dod-item-meta {
   display: flex;
+  align-items: center;
   gap: 10px;
-  font-size: 12px;
-  color: #666;
-  margin-top: 5px;
 }
 
-.dod-item-tag {
+.dod-domain-icon {
+  font-size: 24px;
+}
+
+.dod-domain-badge {
   display: inline-block;
-  padding: 2px 8px;
-  background: #e3f2fd;
-  color: #1976d2;
-  border-radius: 4px;
-  font-size: 11px;
-}
-
-.dod-item-body {
-  margin-top: 10px;
-}
-
-.dod-item-row {
-  display: flex;
-  margin-bottom: 8px;
-  font-size: 13px;
-}
-
-.dod-item-row:last-child {
-  margin-bottom: 0;
-}
-
-.dod-item-label {
-  min-width: 100px;
+  padding: 4px 12px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border-radius: 20px;
+  font-size: 12px;
   font-weight: 600;
+}
+
+.dod-person-info {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 15px;
+  align-items: center;
+}
+
+.dod-person-avatar {
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  color: white;
+  font-weight: 600;
+}
+
+.dod-person-details {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.dod-person-name {
+  font-size: 16px;
+  font-weight: 600;
+  color: #333;
+}
+
+.dod-person-meta {
+  display: flex;
+  gap: 15px;
+  font-size: 13px;
   color: #666;
 }
 
-.dod-item-value {
-  flex: 1;
-  color: #333;
-  word-break: break-word;
+.dod-person-meta-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
 }
 
-.dod-item-value code {
-  background: #f5f5f5;
-  padding: 2px 6px;
-  border-radius: 3px;
-  font-family: 'Courier New', monospace;
-  font-size: 12px;
+.dod-person-meta-item span:first-child {
+  opacity: 0.7;
 }
 
 .dod-no-results {
