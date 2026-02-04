@@ -30,8 +30,8 @@ document.addEventListener('DOMContentLoaded', function() {
   document.getElementById('addLink').addEventListener('click', addLink);
   document.getElementById('addLinkCategory').addEventListener('click', addLinkCategory);
   document.getElementById('getCurrentTimestamp').addEventListener('click', setCurrentTimestamp);
+  document.getElementById('convertTimestampBtn').addEventListener('click', convertTimestamp);
   document.getElementById('convertToTimestamp').addEventListener('click', convertToTimestamp);
-  document.getElementById('timestampInput').addEventListener('input', convertTimestamp);
   document.getElementById('searchTodos').addEventListener('input', filterTodos);
 });
 
@@ -6099,6 +6099,7 @@ function initGmailTool() {
   const filterSettingsBtn = document.getElementById('gmailFilterSettingsBtn');
   const closeFilterModal = document.getElementById('closeGmailFilterModal');
   const addFilterBtn = document.getElementById('addFilterBtn');
+  const markAllReadBtn = document.getElementById('markAllReadBtn');
   
   if (authorizeBtn) {
     authorizeBtn.addEventListener('click', authorizeGmail);
@@ -6126,6 +6127,10 @@ function initGmailTool() {
   
   if (addFilterBtn) {
     addFilterBtn.addEventListener('click', addBlockedSender);
+  }
+  
+  if (markAllReadBtn) {
+    markAllReadBtn.addEventListener('click', markAllGmailAsRead);
   }
   
   // 回车添加
@@ -6200,6 +6205,7 @@ function showGmailContent() {
   document.getElementById('gmailList').style.display = 'block';
   document.getElementById('gmailError').style.display = 'none';
   document.getElementById('gmailFilterSettingsBtn').style.display = 'inline-block';
+  document.getElementById('markAllReadBtn').style.display = 'inline-block';
 }
 
 function showGmailError(message) {
@@ -6324,6 +6330,99 @@ async function loadGmailMessages() {
   } catch (error) {
     console.error('加载邮件失败:', error);
     showGmailError('加载邮件失败: ' + error.message);
+  }
+}
+
+async function markAllGmailAsRead() {
+  if (!gmailAccessToken) {
+    alert('请先授权 Gmail 访问');
+    return;
+  }
+  
+  // 获取所有未读邮件
+  const unreadMessages = gmailMessages.filter(m => 
+    m.labelIds && m.labelIds.includes('UNREAD')
+  );
+  
+  if (unreadMessages.length === 0) {
+    alert('没有未读邮件');
+    return;
+  }
+  
+  const confirmed = confirm(`确定要将 ${unreadMessages.length} 封未读邮件标记为已读吗？`);
+  if (!confirmed) {
+    return;
+  }
+  
+  const markAllReadBtn = document.getElementById('markAllReadBtn');
+  const originalText = markAllReadBtn.textContent;
+  markAllReadBtn.disabled = true;
+  markAllReadBtn.textContent = '⏳ 处理中...';
+  
+  try {
+    // 批量标记为已读，每批处理20封
+    const batchSize = 20;
+    let successCount = 0;
+    let errorCount = 0;
+    
+    for (let i = 0; i < unreadMessages.length; i += batchSize) {
+      const batch = unreadMessages.slice(i, i + batchSize);
+      
+      const promises = batch.map(async (message) => {
+        try {
+          const response = await fetch(
+            `https://gmail.googleapis.com/gmail/v1/users/me/messages/${message.id}/modify`,
+            {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${gmailAccessToken}`,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                removeLabelIds: ['UNREAD']
+              })
+            }
+          );
+          
+          if (response.ok) {
+            successCount++;
+            // 更新本地缓存
+            const index = gmailMessages.findIndex(m => m.id === message.id);
+            if (index !== -1) {
+              gmailMessages[index].labelIds = gmailMessages[index].labelIds.filter(l => l !== 'UNREAD');
+            }
+          } else {
+            errorCount++;
+            console.error(`标记邮件 ${message.id} 失败:`, response.status);
+          }
+        } catch (error) {
+          errorCount++;
+          console.error(`标记邮件 ${message.id} 失败:`, error);
+        }
+      });
+      
+      await Promise.all(promises);
+      
+      // 更新按钮文本显示进度
+      markAllReadBtn.textContent = `⏳ ${successCount}/${unreadMessages.length}`;
+    }
+    
+    // 刷新显示
+    updateGmailStats();
+    filterGmailMessages();
+    
+    if (errorCount === 0) {
+      showToast(`✅ 已成功标记 ${successCount} 封邮件为已读`);
+    } else {
+      showToast(`⚠️ 成功 ${successCount} 封，失败 ${errorCount} 封`);
+    }
+    
+  } catch (error) {
+    console.error('标记全部已读失败:', error);
+    alert('标记失败: ' + error.message);
+  } finally {
+    markAllReadBtn.disabled = false;
+    markAllReadBtn.textContent = originalText;
   }
 }
 
