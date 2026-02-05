@@ -26,6 +26,7 @@ document.addEventListener('DOMContentLoaded', function() {
   initTodos();
   initFmsLinks();
   initDodTool();
+  initHiveQueryTool();
   
   // 事件监听器
   document.getElementById('addLink').addEventListener('click', addLink);
@@ -7121,6 +7122,28 @@ function initFmsLinks() {
       }
     });
   });
+  
+  // 新的FMS快速入口
+  const envTabs2 = document.querySelectorAll('.fms-env-tab2');
+  const marketsContainers2 = document.querySelectorAll('.fms-markets2');
+  
+  // 为每个标签添加点击事件
+  envTabs2.forEach(tab => {
+    tab.addEventListener('click', function() {
+      const env = this.dataset.env;
+      
+      // 移除所有active状态
+      envTabs2.forEach(t => t.classList.remove('active'));
+      marketsContainers2.forEach(m => m.classList.remove('active'));
+      
+      // 添加当前active状态
+      this.classList.add('active');
+      const targetMarkets = document.querySelector(`.fms-markets2[data-env="${env}"]`);
+      if (targetMarkets) {
+        targetMarkets.classList.add('active');
+      }
+    });
+  });
 }
 
 // ========================================
@@ -9550,4 +9573,289 @@ function escapeHtml(text) {
   const div = document.createElement('div');
   div.textContent = text;
   return div.innerHTML;
+}
+
+// ===== Hive查询工具 =====
+function initHiveQueryTool() {
+  const executeBtn = document.getElementById('executeHiveQuery');
+  const clearBtn = document.getElementById('clearHiveQuery');
+  const copyBtn = document.getElementById('copyHiveResults');
+  
+  if (executeBtn) {
+    executeBtn.addEventListener('click', executeHiveQuery);
+  }
+  
+  if (clearBtn) {
+    clearBtn.addEventListener('click', () => {
+      document.getElementById('hiveSqlInput').value = '';
+      document.getElementById('hiveResults').style.display = 'none';
+      document.getElementById('hiveStatus').className = 'hive-status';
+      document.getElementById('hiveStatus').innerHTML = '';
+    });
+  }
+  
+  if (copyBtn) {
+    copyBtn.addEventListener('click', copyHiveResults);
+  }
+}
+
+async function executeHiveQuery() {
+  const env = document.getElementById('hiveEnv').value;
+  const projectCode = document.getElementById('hiveProjectCode').value.trim();
+  const userAccount = document.getElementById('hiveUserAccount').value.trim();
+  const sql = document.getElementById('hiveSqlInput').value.trim();
+  
+  // 验证输入
+  if (!projectCode) {
+    showHiveStatus('error', '请填写项目代码');
+    return;
+  }
+  
+  if (!userAccount) {
+    showHiveStatus('error', '请填写用户账号');
+    return;
+  }
+  
+  if (!sql) {
+    showHiveStatus('error', '请输入SQL查询语句');
+    return;
+  }
+  
+  // 隐藏之前的结果
+  document.getElementById('hiveResults').style.display = 'none';
+  
+  // 显示提交中状态
+  showHiveStatus('loading', '正在提交查询任务...');
+  
+  try {
+    // 步骤1: 提交Adhoc任务
+    const adhocCode = await submitHiveAdhocTask(env, projectCode, userAccount, sql);
+    
+    // 步骤2: 轮询查询状态
+    await pollHiveTaskStatus(env, adhocCode);
+    
+  } catch (error) {
+    console.error('查询失败:', error);
+    showHiveStatus('error', error.message || '查询失败，请查看控制台了解详情');
+  }
+}
+
+async function submitHiveAdhocTask(env, projectCode, userAccount, sql) {
+  const envUrls = {
+    'dev': 'https://open-api.dev.datasuite.shopee.io',
+    'uat': 'https://open-api.staging.datasuite.shopee.io',
+    'prod': 'https://open-api.datasuite.shopee.io'
+  };
+  
+  const baseUrl = envUrls[env] || envUrls.prod;
+  const url = `${baseUrl}/scheduler/api/v1/system/adhocTask/submit`;
+  
+  // DataSuite认证信息
+  const appKey = 'spx_mart.dataservice.Aurora.i0diJ7MO';
+  const appSecret = 'lm2i10g5qe6nxvvg';
+  const authToken = btoa(`${appKey}:${appSecret}`);
+  
+  // 当前时间作为bizTime
+  const now = new Date();
+  const bizTime = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
+  
+  const requestBody = {
+    adhocExeType: 4,  // 4 = Presto SQL (Hive查询)
+    taskCode: '',
+    adhocSource: 'spx_helper_extension',
+    taskSource: 'spx_helper_extension',
+    attachedResource: '',
+    exePriority: 5,
+    bizTime: bizTime,
+    exeContent: sql,
+    extInfo: {
+      queryEngine: 'Trino'
+    },
+    extraConfig: {},
+    hasOutputConfig: false,
+    idcRegion: 0,  // 0 = SG
+    livySessionId: '',
+    mainResource: '',
+    outputConfigList: '',
+    params: '',
+    predictedMemory: 512,
+    prefixCommand: '',
+    projectCode: projectCode,
+    suffixCommand: '',
+    taskVariable: '',
+    userAccount: userAccount,
+    yarnQueueName: ''
+  };
+  
+  console.log('提交Hive查询任务:', {
+    url,
+    body: requestBody
+  });
+  
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Basic ${authToken}`
+    },
+    body: JSON.stringify(requestBody)
+  });
+  
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error('提交失败响应:', errorText);
+    throw new Error(`提交失败 (${response.status}): ${errorText}`);
+  }
+  
+  const result = await response.json();
+  console.log('提交成功响应:', result);
+  
+  if (!result.success || !result.data) {
+    throw new Error(result.msg || '提交任务失败，未返回adhocCode');
+  }
+  
+  return result.data;  // adhocCode
+}
+
+async function pollHiveTaskStatus(env, adhocCode) {
+  const envUrls = {
+    'dev': 'https://open-api.dev.datasuite.shopee.io',
+    'uat': 'https://open-api.staging.datasuite.shopee.io',
+    'prod': 'https://open-api.datasuite.shopee.io'
+  };
+  
+  const baseUrl = envUrls[env] || envUrls.prod;
+  const url = `${baseUrl}/scheduler/api/v1/system/adhocTask/query?adhocCode=${encodeURIComponent(adhocCode)}`;
+  
+  const appKey = 'spx_mart.dataservice.Aurora.i0diJ7MO';
+  const appSecret = 'lm2i10g5qe6nxvvg';
+  const authToken = btoa(`${appKey}:${appSecret}`);
+  
+  const maxAttempts = 60;  // 最多轮询60次
+  const pollInterval = 3000;  // 每3秒轮询一次
+  
+  showHiveStatus('loading', `任务已提交 (adhocCode: ${adhocCode})，正在执行查询...`);
+  
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    await new Promise(resolve => setTimeout(resolve, pollInterval));
+    
+    console.log(`轮询状态 (第${attempt}次):`, url);
+    
+    try {
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Basic ${authToken}`
+        }
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('查询状态失败:', errorText);
+        throw new Error(`查询状态失败 (${response.status})`);
+      }
+      
+      const result = await response.json();
+      console.log(`状态响应 (第${attempt}次):`, result);
+      
+      if (!result.success || !result.data) {
+        throw new Error(result.msg || '查询状态失败');
+      }
+      
+      const taskData = result.data;
+      const status = taskData.status;
+      
+      // 状态说明:
+      // 0 = 待执行, 1 = 执行中, 2 = 成功, 3 = 失败, 4 = 取消
+      
+      if (status === 2) {
+        // 任务成功
+        showHiveStatus('success', '查询执行成功！');
+        displayHiveResults(taskData);
+        return;
+      } else if (status === 3) {
+        // 任务失败
+        throw new Error(taskData.errorMsg || '查询执行失败');
+      } else if (status === 4) {
+        // 任务取消
+        throw new Error('查询任务已被取消');
+      } else {
+        // 0 或 1: 继续等待
+        const statusText = status === 0 ? '待执行' : '执行中';
+        showHiveStatus('loading', `任务${statusText}... (${attempt}/${maxAttempts})`);
+      }
+      
+    } catch (error) {
+      console.error(`轮询错误 (第${attempt}次):`, error);
+      if (attempt === maxAttempts) {
+        throw error;
+      }
+    }
+  }
+  
+  throw new Error('查询超时，请稍后在DataSuite中查看结果');
+}
+
+function displayHiveResults(taskData) {
+  const resultsDiv = document.getElementById('hiveResults');
+  const contentDiv = document.getElementById('hiveResultsContent');
+  
+  // 构建任务信息
+  let html = '<div class="hive-task-info">';
+  html += `<div class="hive-task-info-label">任务代码:</div><div class="hive-task-info-value">${escapeHtml(taskData.adhocCode || '-')}</div>`;
+  html += `<div class="hive-task-info-label">执行时间:</div><div class="hive-task-info-value">${taskData.duration || 0}ms</div>`;
+  html += `<div class="hive-task-info-label">状态:</div><div class="hive-task-info-value">✅ 成功</div>`;
+  
+  // 如果有输出日志或结果URL
+  if (taskData.logUrl) {
+    html += `<div class="hive-task-info-label">日志:</div><div class="hive-task-info-value"><a href="${escapeHtml(taskData.logUrl)}" target="_blank">查看日志</a></div>`;
+  }
+  
+  html += '</div>';
+  
+  // 显示结果提示
+  html += '<div style="margin-top: 20px; padding: 15px; background: #e3f2fd; border-radius: 6px; font-size: 13px;">';
+  html += '✅ 查询执行成功！<br>';
+  html += '📝 <strong>注意</strong>: DataSuite Adhoc任务的查询结果需要在 <a href="https://datastudio.shopee.io/" target="_blank">DataStudio</a> 中查看。<br>';
+  html += `🔗 任务代码: <strong>${escapeHtml(taskData.adhocCode || '-')}</strong>`;
+  html += '</div>';
+  
+  contentDiv.innerHTML = html;
+  resultsDiv.style.display = 'block';
+}
+
+function copyHiveResults() {
+  const contentDiv = document.getElementById('hiveResultsContent');
+  const text = contentDiv.innerText;
+  
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = document.getElementById('copyHiveResults');
+    const originalText = btn.textContent;
+    btn.textContent = '✅ 已复制';
+    btn.style.background = '#4caf50';
+    
+    setTimeout(() => {
+      btn.textContent = originalText;
+      btn.style.background = '';
+    }, 2000);
+  }).catch(err => {
+    console.error('复制失败:', err);
+    alert('复制失败，请手动复制');
+  });
+}
+
+function showHiveStatus(type, message) {
+  const statusDiv = document.getElementById('hiveStatus');
+  statusDiv.className = `hive-status ${type}`;
+  
+  let icon = '';
+  if (type === 'loading') icon = '⏳';
+  else if (type === 'success') icon = '✅';
+  else if (type === 'error') icon = '❌';
+  
+  statusDiv.innerHTML = `
+    <div class="hive-status-title">${icon} ${type === 'loading' ? '执行中' : type === 'success' ? '成功' : '错误'}</div>
+    <div class="hive-status-content">${escapeHtml(message)}</div>
+  `;
 }

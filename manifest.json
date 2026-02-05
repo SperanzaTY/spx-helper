@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "SPX Helper",
-  "version": "2.9.1",
-  "description": "Shopee大数据开发助手 - 快速链接、代码片段、时区转换、SQL修正、API数据溯源、DOD查询",
+  "version": "2.10.0",
+  "description": "Shopee大数据开发助手 - 快速链接、代码片段、时区转换、SQL修正、API数据溯源、DOD查询、Hive查询",
   "author": "tianyi.liang",
   "permissions": [
     "storage",

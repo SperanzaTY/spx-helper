@@ -361,6 +361,80 @@
                 </div>
               </div>
             </div>
+
+            <!-- FMS 快速入口 -->
+            <div class="quick-access-group">
+              <h3>FMS 快速入口</h3>
+              
+              <!-- 环境标签页 -->
+              <div class="fms-env-tabs">
+                <button class="fms-env-tab2 active" data-env="live">LIVE</button>
+                <button class="fms-env-tab2" data-env="uat">UAT</button>
+                <button class="fms-env-tab2" data-env="test">TEST</button>
+                <button class="fms-env-tab2" data-env="test-stable">TEST-STABLE</button>
+                <button class="fms-env-tab2" data-env="staging">STAGING</button>
+              </div>
+              
+              <!-- 市场链接区域 -->
+              <div class="fms-markets-container2">
+                <!-- LIVE 环境 -->
+                <div class="fms-markets2 active" data-env="live">
+                  <a href="https://spx.shopee.co.id/" target="_blank" class="fms-market-btn">ID</a>
+                  <a href="https://spx.shopee.com.my" target="_blank" class="fms-market-btn">MY</a>
+                  <a href="https://spx.shopee.co.th/" target="_blank" class="fms-market-btn">TH</a>
+                  <a href="https://spx.shopee.ph/" target="_blank" class="fms-market-btn">PH</a>
+                  <a href="https://spx.shopee.vn/" target="_blank" class="fms-market-btn">VN</a>
+                  <a href="https://spx.shopee.sg/" target="_blank" class="fms-market-btn">SG</a>
+                  <a href="https://spx.shopee.tw" target="_blank" class="fms-market-btn">TW</a>
+                  <a href="https://spx.shopee.systems/#/index" target="_blank" class="fms-market-btn">XX</a>
+                  <a href="https://spx.shopee.com.br/#/index" target="_blank" class="fms-market-btn">BR</a>
+                  <a href="https://spx.shopee.com.mx/" target="_blank" class="fms-market-btn">MX</a>
+                </div>
+                
+                <!-- UAT 环境 -->
+                <div class="fms-markets2" data-env="uat">
+                  <a href="https://spx.uat.shopee.co.id/" target="_blank" class="fms-market-btn">ID</a>
+                  <a href="https://spx.uat.shopee.com.my" target="_blank" class="fms-market-btn">MY</a>
+                  <a href="https://spx.uat.shopee.co.th/" target="_blank" class="fms-market-btn">TH</a>
+                  <a href="https://spx.uat.shopee.ph/" target="_blank" class="fms-market-btn">PH</a>
+                  <a href="https://spx.uat.shopee.vn/" target="_blank" class="fms-market-btn">VN</a>
+                  <a href="https://spx.uat.shopee.sg/" target="_blank" class="fms-market-btn">SG</a>
+                  <a href="https://spx.uat.shopee.tw" target="_blank" class="fms-market-btn">TW</a>
+                  <a href="https://spx.uat.shopee.com.br/#/index" target="_blank" class="fms-market-btn">BR</a>
+                  <a href="https://spx.uat.shopee.com.mx/" target="_blank" class="fms-market-btn">MX</a>
+                </div>
+                
+                <!-- TEST 环境 -->
+                <div class="fms-markets2" data-env="test">
+                  <a href="https://spx.test.shopee.co.id/" target="_blank" class="fms-market-btn">ID</a>
+                  <a href="https://spx.test.shopee.com.my" target="_blank" class="fms-market-btn">MY</a>
+                  <a href="https://spx.test.shopee.co.th/" target="_blank" class="fms-market-btn">TH</a>
+                  <a href="https://spx.test.shopee.ph/" target="_blank" class="fms-market-btn">PH</a>
+                  <a href="https://spx.test.shopee.vn/" target="_blank" class="fms-market-btn">VN</a>
+                  <a href="https://spx.test.shopee.sg/" target="_blank" class="fms-market-btn">SG</a>
+                  <a href="https://spx.test.shopee.tw" target="_blank" class="fms-market-btn">TW</a>
+                  <a href="https://spx.test.shopee.com.br/#/index" target="_blank" class="fms-market-btn">BR</a>
+                  <a href="https://spx.test.shopee.com.mx/" target="_blank" class="fms-market-btn">MX</a>
+                </div>
+                
+                <!-- TEST-STABLE 环境 -->
+                <div class="fms-markets2" data-env="test-stable">
+                  <a href="https://spx.test-stable.shopee.co.th/" target="_blank" class="fms-market-btn">TH</a>
+                </div>
+                
+                <!-- STAGING 环境 -->
+                <div class="fms-markets2" data-env="staging">
+                  <a href="https://spx.staging.shopee.co.id/" target="_blank" class="fms-market-btn">ID</a>
+                  <a href="https://spx.staging.shopee.com.my" target="_blank" class="fms-market-btn">MY</a>
+                  <a href="https://spx.staging.shopee.co.th/" target="_blank" class="fms-market-btn">TH</a>
+                  <a href="https://spx.staging.shopee.ph/" target="_blank" class="fms-market-btn">PH</a>
+                  <a href="https://spx.staging.shopee.vn/" target="_blank" class="fms-market-btn">VN</a>
+                  <a href="https://spx.staging.shopee.sg/" target="_blank" class="fms-market-btn">SG</a>
+                  <a href="https://spx.staging.shopee.tw" target="_blank" class="fms-market-btn">TW</a>
+                  <a href="https://spx.staging.shopee.com.br/#/index" target="_blank" class="fms-market-btn">BR</a>
+                </div>
+              </div>
+            </div>
           </div>
 
           <div class="section-header">
@@ -531,6 +605,10 @@
             <button class="utils-grid-btn" data-util="dod">
               <span class="grid-icon">📖</span>
               <span class="grid-label">DOD查询</span>
+            </button>
+            <button class="utils-grid-btn" data-util="hive-query">
+              <span class="grid-icon">🐘</span>
+              <span class="grid-label">Hive查询</span>
             </button>
           </div>
 
@@ -1501,6 +1579,67 @@
               <div id="dodLoading" class="dod-loading" style="display: none;">
                 <div class="loading-spinner"></div>
                 <p>正在加载值班数据...</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Hive查询工具 -->
+          <div id="hive-query-util" class="utils-content">
+            <h3>🐘 Hive 快速查询</h3>
+            
+            <div class="hive-query-tool">
+              <!-- 配置区域 -->
+              <div class="hive-config-section">
+                <div class="hive-form-group">
+                  <label class="hive-label">环境:</label>
+                  <select id="hiveEnv" class="hive-select">
+                    <option value="prod">LIVE-PROD</option>
+                    <option value="uat">LIVE-STAGING</option>
+                    <option value="dev">LIVE-DEV</option>
+                  </select>
+                </div>
+                
+                <div class="hive-form-group">
+                  <label class="hive-label">项目代码:</label>
+                  <input type="text" id="hiveProjectCode" class="hive-input" 
+                         placeholder="如: data_platform" value="data_platform">
+                </div>
+                
+                <div class="hive-form-group">
+                  <label class="hive-label">用户账号:</label>
+                  <input type="text" id="hiveUserAccount" class="hive-input" 
+                         placeholder="如: tianyi.liang" value="">
+                </div>
+              </div>
+              
+              <!-- SQL输入区域 -->
+              <div class="hive-sql-section">
+                <label class="hive-label">SQL查询:</label>
+                <textarea id="hiveSqlInput" class="hive-sql-textarea" 
+                          placeholder="SELECT * FROM spx_mart.dim_spx_station_id LIMIT 10" 
+                          rows="6"></textarea>
+              </div>
+              
+              <!-- 操作按钮 -->
+              <div class="hive-actions">
+                <button id="executeHiveQuery" class="btn btn-primary" style="flex: 1;">
+                  ▶️ 执行查询
+                </button>
+                <button id="clearHiveQuery" class="btn btn-secondary">
+                  🗑️ 清空
+                </button>
+              </div>
+              
+              <!-- 状态显示 -->
+              <div id="hiveStatus" class="hive-status"></div>
+              
+              <!-- 结果区域 -->
+              <div id="hiveResults" class="hive-results" style="display: none;">
+                <div class="hive-results-header">
+                  <h4>查询结果</h4>
+                  <button id="copyHiveResults" class="btn btn-secondary btn-small">📋 复制</button>
+                </div>
+                <div id="hiveResultsContent" class="hive-results-content"></div>
               </div>
             </div>
           </div>
