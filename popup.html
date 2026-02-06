@@ -610,6 +610,10 @@
               <span class="grid-icon">🐘</span>
               <span class="grid-label">Hive查询</span>
             </button>
+            <button class="utils-grid-btn" data-util="api-lineage">
+              <span class="grid-icon">🔗</span>
+              <span class="grid-label">API血缘</span>
+            </button>
           </div>
 
           <!-- 时区转换工具 -->
@@ -1640,6 +1644,69 @@
                   <button id="copyHiveResults" class="btn btn-secondary btn-small">📋 复制</button>
                 </div>
                 <div id="hiveResultsContent" class="hive-results-content"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- API血缘查询工具 -->
+          <div id="api-lineage-util" class="utils-content">
+            <h3>🔗 API血缘查询</h3>
+            
+            <div class="api-lineage-tool">
+              <!-- 查询模式选择 -->
+              <div class="lineage-mode-tabs">
+                <button class="lineage-mode-tab active" data-mode="api-to-table">API → 表</button>
+                <button class="lineage-mode-tab" data-mode="table-to-api">表 → API</button>
+              </div>
+              
+              <!-- API → 表 查询 -->
+              <div id="api-to-table-mode" class="lineage-mode-content active">
+                <div class="lineage-form-group">
+                  <label class="lineage-label">API ID:</label>
+                  <input type="text" id="apiIdInput" class="lineage-input" 
+                         placeholder="如: key_stats__orders_in_system_edd__1d">
+                </div>
+                
+                <div class="lineage-form-group">
+                  <label class="lineage-label">用户账号:</label>
+                  <input type="text" id="lineageUserAccount" class="lineage-input" 
+                         placeholder="如: tianyi.liang" value="">
+                </div>
+                
+                <button id="queryApiToTable" class="btn btn-primary" style="width: 100%;">
+                  🔍 查询该API使用的表
+                </button>
+              </div>
+              
+              <!-- 表 → API 查询 -->
+              <div id="table-to-api-mode" class="lineage-mode-content">
+                <div class="lineage-form-group">
+                  <label class="lineage-label">表名:</label>
+                  <input type="text" id="tableNameInput" class="lineage-input" 
+                         placeholder="如: dws_spx_linehaul_trip_10m_">
+                </div>
+                
+                <div class="lineage-form-group">
+                  <label class="lineage-label">用户账号:</label>
+                  <input type="text" id="lineageUserAccount2" class="lineage-input" 
+                         placeholder="如: tianyi.liang" value="">
+                </div>
+                
+                <button id="queryTableToApi" class="btn btn-primary" style="width: 100%;">
+                  🔍 查询使用该表的API
+                </button>
+              </div>
+              
+              <!-- 状态显示 -->
+              <div id="lineageStatus" class="lineage-status"></div>
+              
+              <!-- 结果区域 -->
+              <div id="lineageResults" class="lineage-results" style="display: none;">
+                <div class="lineage-results-header">
+                  <h4>查询结果</h4>
+                  <button id="copyLineageResults" class="btn btn-secondary btn-small">📋 复制</button>
+                </div>
+                <div id="lineageResultsContent" class="lineage-results-content"></div>
               </div>
             </div>
           </div>

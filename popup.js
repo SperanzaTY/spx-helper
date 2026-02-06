@@ -27,6 +27,7 @@ document.addEventListener('DOMContentLoaded', function() {
   initFmsLinks();
   initDodTool();
   initHiveQueryTool();
+  initApiLineageTool();
   
   // 事件监听器
   document.getElementById('addLink').addEventListener('click', addLink);
@@ -9858,4 +9859,405 @@ function showHiveStatus(type, message) {
     <div class="hive-status-title">${icon} ${type === 'loading' ? '执行中' : type === 'success' ? '成功' : '错误'}</div>
     <div class="hive-status-content">${escapeHtml(message)}</div>
   `;
+}
+
+// ===== API血缘查询工具 =====
+function initApiLineageTool() {
+  // 模式切换
+  const modeTabs = document.querySelectorAll('.lineage-mode-tab');
+  const modeContents = document.querySelectorAll('.lineage-mode-content');
+  
+  modeTabs.forEach(tab => {
+    tab.addEventListener('click', function() {
+      const mode = this.dataset.mode;
+      
+      modeTabs.forEach(t => t.classList.remove('active'));
+      modeContents.forEach(c => c.classList.remove('active'));
+      
+      this.classList.add('active');
+      document.getElementById(`${mode}-mode`).classList.add('active');
+      
+      // 清空之前的结果
+      document.getElementById('lineageResults').style.display = 'none';
+      document.getElementById('lineageStatus').className = 'lineage-status';
+      document.getElementById('lineageStatus').innerHTML = '';
+    });
+  });
+  
+  // API → 表 查询
+  const queryApiToTableBtn = document.getElementById('queryApiToTable');
+  if (queryApiToTableBtn) {
+    queryApiToTableBtn.addEventListener('click', queryApiToTable);
+  }
+  
+  // 表 → API 查询
+  const queryTableToApiBtn = document.getElementById('queryTableToApi');
+  if (queryTableToApiBtn) {
+    queryTableToApiBtn.addEventListener('click', queryTableToApi);
+  }
+  
+  // 复制结果
+  const copyBtn = document.getElementById('copyLineageResults');
+  if (copyBtn) {
+    copyBtn.addEventListener('click', copyLineageResults);
+  }
+}
+
+async function queryApiToTable() {
+  const apiId = document.getElementById('apiIdInput').value.trim();
+  const userAccount = document.getElementById('lineageUserAccount').value.trim();
+  
+  if (!apiId) {
+    showLineageStatus('error', '请输入API ID');
+    return;
+  }
+  
+  if (!userAccount) {
+    showLineageStatus('error', '请输入用户账号');
+    return;
+  }
+  
+  document.getElementById('lineageResults').style.display = 'none';
+  showLineageStatus('loading', '正在查询API使用的表...');
+  
+  try {
+    // 使用您提供的SQL逻辑
+    const sqlQuery = `
+      SELECT 
+        api_id,
+        array_join(array_distinct(regexp_extract_all(biz_sql, '\\{mgmt_db2\\}\\.([a-zA-Z0-9_\\{\\}\\-]+)', 1)), ' , ') as table_name,
+        ds_id
+      FROM (
+        SELECT 
+          *,
+          row_number() over(partition by api_id order by api_version desc) as rn
+        FROM sls_mart.shopee_ssc_data_api_mart_db__api_mart_api_tab__reg_continuous_s0_live
+        WHERE 1=1
+          AND publish_env = 'live'
+      )
+      WHERE rn=1
+        AND api_id = '${apiId}'
+        AND biz_sql LIKE '%mgmt_db2%'
+      ORDER BY api_id ASC
+    `;
+    
+    const results = await queryDataService(sqlQuery, userAccount, apiId);
+    displayApiToTableResults(results);
+    
+  } catch (error) {
+    console.error('查询失败:', error);
+    showLineageStatus('error', error.message || '查询失败，请查看控制台了解详情');
+  }
+}
+
+async function queryTableToApi() {
+  const tableName = document.getElementById('tableNameInput').value.trim();
+  const userAccount = document.getElementById('lineageUserAccount2').value.trim();
+  
+  if (!tableName) {
+    showLineageStatus('error', '请输入表名');
+    return;
+  }
+  
+  if (!userAccount) {
+    showLineageStatus('error', '请输入用户账号');
+    return;
+  }
+  
+  document.getElementById('lineageResults').style.display = 'none';
+  showLineageStatus('loading', '正在查询使用该表的API...');
+  
+  try {
+    // 使用您提供的SQL逻辑
+    const sqlQuery = `
+      SELECT 
+        api_id,
+        ds_id
+      FROM (
+        SELECT 
+          *,
+          row_number() over(partition by api_id order by api_version desc) as rn
+        FROM sls_mart.shopee_ssc_data_api_mart_db__api_mart_api_tab__reg_continuous_s0_live
+        WHERE 1=1
+          AND publish_env = 'live'
+      )
+      WHERE 1=1
+        AND rn=1
+        AND biz_sql LIKE '%${tableName}%'
+        AND publish_env = 'live'
+    `;
+    
+    const results = await queryDataService(sqlQuery, userAccount, tableName);
+    displayTableToApiResults(results);
+    
+  } catch (error) {
+    console.error('查询失败:', error);
+    showLineageStatus('error', error.message || '查询失败，请查看控制台了解详情');
+  }
+}
+
+async function queryDataService(sqlQuery, userAccount, searchParam) {
+  const apiName = 'spx_mart.api_lineage_search';
+  const version = 'hg3ggpdp2lkgqlmc';
+  const personalToken = 'l7Vx4TGfwhmA1gtPn+JmUQ==';
+  const prestoQueueName = 'szsc-scheduled';
+  
+  // 步骤1: 提交查询
+  const submitUrl = `https://open-api.datasuite.shopee.io/dataservice/${apiName}/${version}`;
+  
+  const submitBody = {
+    olapPayload: {
+      expressions: [
+        {
+          parameterName: 'api_id',
+          value: searchParam
+        }
+      ],
+      prestoQueueName: prestoQueueName
+    }
+  };
+  
+  console.log('提交DataService查询:', {
+    url: submitUrl,
+    body: submitBody
+  });
+  
+  const submitResponse = await fetch(submitUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': personalToken,
+      'X-End-User': userAccount
+    },
+    body: JSON.stringify(submitBody)
+  });
+  
+  if (!submitResponse.ok) {
+    const errorText = await submitResponse.text();
+    console.error('提交失败:', errorText);
+    throw new Error(`提交查询失败 (${submitResponse.status})`);
+  }
+  
+  const submitResult = await submitResponse.json();
+  console.log('提交成功:', submitResult);
+  
+  if (!submitResult.jobId) {
+    throw new Error('未返回jobId');
+  }
+  
+  const jobId = submitResult.jobId;
+  
+  // 步骤2: 轮询元数据直到完成
+  showLineageStatus('loading', `任务已提交 (jobId: ${jobId})，正在执行查询...`);
+  
+  const maxAttempts = 60;
+  const pollInterval = 2000;
+  
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    await new Promise(resolve => setTimeout(resolve, pollInterval));
+    
+    const metaUrl = `https://open-api.datasuite.shopee.io/dataservice/result/${jobId}`;
+    
+    const metaResponse = await fetch(metaUrl, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': personalToken,
+        'X-End-User': userAccount
+      }
+    });
+    
+    if (!metaResponse.ok) {
+      throw new Error(`查询元数据失败 (${metaResponse.status})`);
+    }
+    
+    const metaResult = await metaResponse.json();
+    console.log(`元数据 (第${attempt}次):`, metaResult);
+    
+    const status = metaResult.status;
+    
+    if (status === 'FAILED') {
+      throw new Error(metaResult.message || '查询失败');
+    } else if (status === 'FINISH') {
+      // 查询完成，获取结果
+      showLineageStatus('loading', '查询完成，正在获取结果...');
+      return await fetchDataServiceResults(jobId, personalToken, userAccount);
+    } else {
+      // RUNNING: 继续等待
+      showLineageStatus('loading', `查询执行中... (${attempt}/${maxAttempts})`);
+    }
+  }
+  
+  throw new Error('查询超时');
+}
+
+async function fetchDataServiceResults(jobId, personalToken, userAccount) {
+  const allRows = [];
+  let schema = null;
+  let shard = 0;
+  
+  // 获取所有分片的数据
+  while (true) {
+    const shardUrl = `https://open-api.datasuite.shopee.io/dataservice/result/${jobId}/${shard}`;
+    
+    const shardResponse = await fetch(shardUrl, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': personalToken,
+        'X-End-User': userAccount
+      }
+    });
+    
+    if (!shardResponse.ok) {
+      if (shard === 0) {
+        throw new Error(`获取结果失败 (${shardResponse.status})`);
+      }
+      // 没有更多分片了
+      break;
+    }
+    
+    const shardResult = await shardResponse.json();
+    console.log(`分片 ${shard} 结果:`, shardResult);
+    
+    if (shardResult.contentType === 'ERROR_MESSAGE') {
+      throw new Error(shardResult.message || '查询出错');
+    }
+    
+    if (shardResult.contentType === 'QUERY_DATA') {
+      if (!schema && shardResult.resultSchema) {
+        schema = shardResult.resultSchema;
+      }
+      
+      if (shardResult.rows && shardResult.rows.length > 0) {
+        allRows.push(...shardResult.rows);
+      }
+    }
+    
+    shard++;
+    
+    // 安全限制：最多获取100个分片
+    if (shard >= 100) {
+      break;
+    }
+  }
+  
+  return {
+    schema: schema,
+    rows: allRows
+  };
+}
+
+function displayApiToTableResults(results) {
+  const resultsDiv = document.getElementById('lineageResults');
+  const contentDiv = document.getElementById('lineageResultsContent');
+  
+  if (!results.rows || results.rows.length === 0) {
+    contentDiv.innerHTML = '<p style="text-align: center; color: #999; padding: 30px;">未找到相关数据</p>';
+    resultsDiv.style.display = 'block';
+    showLineageStatus('success', '查询完成，未找到结果');
+    return;
+  }
+  
+  let html = '<table class="lineage-results-table">';
+  html += '<thead><tr>';
+  html += '<th>API ID</th>';
+  html += '<th>使用的表</th>';
+  html += '<th>DS ID</th>';
+  html += '</tr></thead>';
+  html += '<tbody>';
+  
+  results.rows.forEach(row => {
+    const values = row.values;
+    html += '<tr>';
+    html += `<td><span class="lineage-api-id">${escapeHtml(values.api_id || '-')}</span></td>`;
+    html += `<td><span class="lineage-table-name">${escapeHtml(values.table_name || '-')}</span></td>`;
+    html += `<td>${escapeHtml(values.ds_id || '-')}</td>`;
+    html += '</tr>';
+  });
+  
+  html += '</tbody></table>';
+  
+  contentDiv.innerHTML = html;
+  resultsDiv.style.display = 'block';
+  showLineageStatus('success', `查询完成！找到 ${results.rows.length} 条结果`);
+}
+
+function displayTableToApiResults(results) {
+  const resultsDiv = document.getElementById('lineageResults');
+  const contentDiv = document.getElementById('lineageResultsContent');
+  
+  if (!results.rows || results.rows.length === 0) {
+    contentDiv.innerHTML = '<p style="text-align: center; color: #999; padding: 30px;">未找到相关数据</p>';
+    resultsDiv.style.display = 'block';
+    showLineageStatus('success', '查询完成，未找到结果');
+    return;
+  }
+  
+  let html = '<table class="lineage-results-table">';
+  html += '<thead><tr>';
+  html += '<th>API ID</th>';
+  html += '<th>DS ID</th>';
+  html += '</tr></thead>';
+  html += '<tbody>';
+  
+  results.rows.forEach(row => {
+    const values = row.values;
+    html += '<tr>';
+    html += `<td><span class="lineage-api-id">${escapeHtml(values.api_id || '-')}</span></td>`;
+    html += `<td>${escapeHtml(values.ds_id || '-')}</td>`;
+    html += '</tr>';
+  });
+  
+  html += '</tbody></table>';
+  
+  contentDiv.innerHTML = html;
+  resultsDiv.style.display = 'block';
+  showLineageStatus('success', `查询完成！找到 ${results.rows.length} 个API`);
+}
+
+function copyLineageResults() {
+  const contentDiv = document.getElementById('lineageResultsContent');
+  const table = contentDiv.querySelector('table');
+  
+  if (!table) {
+    alert('没有可复制的内容');
+    return;
+  }
+  
+  // 提取表格数据为文本
+  let text = '';
+  const rows = table.querySelectorAll('tr');
+  rows.forEach(row => {
+    const cells = row.querySelectorAll('th, td');
+    const rowData = Array.from(cells).map(cell => cell.innerText).join('\t');
+    text += rowData + '\n';
+  });
+  
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = document.getElementById('copyLineageResults');
+    const originalText = btn.textContent;
+    btn.textContent = '✅ 已复制';
+    btn.style.background = '#4caf50';
+    
+    setTimeout(() => {
+      btn.textContent = originalText;
+      btn.style.background = '';
+    }, 2000);
+  }).catch(err => {
+    console.error('复制失败:', err);
+    alert('复制失败，请手动复制');
+  });
+}
+
+function showLineageStatus(type, message) {
+  const statusDiv = document.getElementById('lineageStatus');
+  statusDiv.className = `lineage-status ${type}`;
+  
+  let icon = '';
+  if (type === 'loading') icon = '⏳';
+  else if (type === 'success') icon = '✅';
+  else if (type === 'error') icon = '❌';
+  
+  statusDiv.innerHTML = `${icon} ${escapeHtml(message)}`;
 }
