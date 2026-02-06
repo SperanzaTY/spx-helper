@@ -6746,10 +6746,12 @@ input:checked + .slider:before {
 
 .lineage-results-table {
   width: 100%;
+  max-width: 1200px;
   border-collapse: collapse;
   background: white;
   font-size: 13px;
   box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  table-layout: fixed;
 }
 
 .lineage-results-table th {
@@ -6762,6 +6764,9 @@ input:checked + .slider:before {
   top: 0;
   z-index: 1;
   border-bottom: 2px solid #5568d3;
+  word-wrap: break-word;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .lineage-results-table td {
@@ -6769,6 +6774,31 @@ input:checked + .slider:before {
   border-bottom: 1px solid #e8e8e8;
   color: #333;
   vertical-align: top;
+  word-wrap: break-word;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 400px;
+}
+
+/* API ID 列宽度 */
+.lineage-results-table th:nth-child(1),
+.lineage-results-table td:nth-child(1) {
+  width: 35%;
+  min-width: 250px;
+}
+
+/* 表名/匹配表 列宽度 */
+.lineage-results-table th:nth-child(2),
+.lineage-results-table td:nth-child(2) {
+  width: 40%;
+  min-width: 200px;
+}
+
+/* DS ID 列宽度 */
+.lineage-results-table th:nth-child(3),
+.lineage-results-table td:nth-child(3) {
+  width: 25%;
+  min-width: 150px;
 }
 
 .lineage-results-table tr:hover {

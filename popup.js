@@ -9649,34 +9649,6 @@ function initApiLineageTool() {
     });
   });
   
-  // 环境复选框逻辑（处理"全选"的互斥）
-  const handleEnvCheckboxChange = (groupName) => {
-    const allCheckboxes = document.querySelectorAll(`input[name="${groupName}"]`);
-    const allCheckbox = document.querySelector(`input[name="${groupName}"][value="all"]`);
-    const otherCheckboxes = Array.from(allCheckboxes).filter(cb => cb.value !== 'all');
-    
-    // 如果点击的是"全选"
-    if (event.target === allCheckbox && allCheckbox.checked) {
-      // 取消其他所有选项
-      otherCheckboxes.forEach(cb => cb.checked = false);
-    } else if (event.target !== allCheckbox && event.target.checked) {
-      // 如果选中了其他选项，取消"全选"
-      allCheckbox.checked = false;
-    }
-  };
-  
-  // 为API环境复选框添加事件
-  const apiEnvCheckboxes = document.querySelectorAll('input[name="apiEnv"]');
-  apiEnvCheckboxes.forEach(cb => {
-    cb.addEventListener('change', () => handleEnvCheckboxChange('apiEnv'));
-  });
-  
-  // 为Table环境复选框添加事件
-  const tableEnvCheckboxes = document.querySelectorAll('input[name="tableEnv"]');
-  tableEnvCheckboxes.forEach(cb => {
-    cb.addEventListener('change', () => handleEnvCheckboxChange('tableEnv'));
-  });
-  
   // API → 表 查询
   const queryApiToTableBtn = document.getElementById('queryApiToTable');
   if (queryApiToTableBtn) {
@@ -9714,7 +9686,7 @@ async function queryApiToTable() {
   }
   
   document.getElementById('lineageResults').style.display = 'none';
-  showLineageStatus('loading', `正在查询API使用的表 (${selectedEnvs.includes('all') ? '全部环境' : selectedEnvs.join(', ')})...`);
+  showLineageStatus('loading', `正在查询API使用的表 (${selectedEnvs.join(', ')})...`);
   
   try {
     const searchPattern = `%${apiId}%`;
@@ -9750,7 +9722,7 @@ async function queryTableToApi() {
   }
   
   document.getElementById('lineageResults').style.display = 'none';
-  showLineageStatus('loading', `正在查询使用该表的API (${selectedEnvs.includes('all') ? '全部环境' : selectedEnvs.join(', ')})...`);
+  showLineageStatus('loading', `正在查询使用该表的API (${selectedEnvs.join(', ')})...`);
   
   try {
     // 表 → API 查询：获取所有数据（传%），在前端过滤
@@ -9789,7 +9761,7 @@ function processApiToTableData(results, searchApiId, selectedEnvs) {
     }
     
     // 环境筛选
-    if (!selectedEnvs.includes('all') && !selectedEnvs.includes(publishEnv)) {
+    if (!selectedEnvs.includes(publishEnv)) {
       return;
     }
     
@@ -9880,7 +9852,7 @@ function processTableToApiData(results, searchTable, selectedEnvs) {
     }
     
     // 环境筛选
-    if (!selectedEnvs.includes('all') && !selectedEnvs.includes(publishEnv)) {
+    if (!selectedEnvs.includes(publishEnv)) {
       return;
     }
     
@@ -10234,8 +10206,8 @@ function buildApiDetailHtml(data) {
     html += '</div>';
   }
   
-  // Dynamic Where SQL - 可视化展示
-  if (data.dynamic_where_sql) {
+  // Dynamic Where SQL - 可视化展示（只有数据不为空时才显示）
+  if (data.dynamic_where_sql && data.dynamic_where_sql.trim() !== '' && data.dynamic_where_sql !== 'null') {
     html += '<div class="api-detail-section">';
     html += '<h4 class="api-detail-title">🔍 Dynamic Where 条件</h4>';
     html += parseDynamicWhereConditions(data.dynamic_where_sql);
