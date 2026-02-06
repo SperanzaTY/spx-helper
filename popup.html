@@ -1512,95 +1512,80 @@
 
           <!-- API血缘查询工具 -->
           <div id="api-lineage-util" class="utils-content">
-            <h3>🔗 API血缘查询</h3>
-            
             <div class="api-lineage-tool">
-              <!-- 查询模式选择 -->
-              <div class="lineage-mode-tabs">
-                <button class="lineage-mode-tab active" data-mode="api-to-table">API → 表</button>
-                <button class="lineage-mode-tab" data-mode="table-to-api">表 → API</button>
+              <!-- 紧凑的顶部栏：标题 + 模式切换 -->
+              <div class="lineage-header">
+                <h3 style="margin: 0; font-size: 16px; color: #333;">🔗 API血缘查询</h3>
+                <div class="lineage-mode-tabs-compact">
+                  <button class="lineage-mode-tab active" data-mode="api-to-table">API → 表</button>
+                  <button class="lineage-mode-tab" data-mode="table-to-api">表 → API</button>
+                </div>
               </div>
               
               <!-- API → 表 查询 -->
               <div id="api-to-table-mode" class="lineage-mode-content active">
-                <div class="lineage-form-group">
-                  <label class="lineage-label">API ID:</label>
-                  <input type="text" id="apiIdInput" class="lineage-input" 
-                         placeholder="输入API关键词，支持模糊匹配">
-                </div>
-                
-                <div class="lineage-form-group">
-                  <label class="lineage-label">环境筛选:</label>
-                  <div class="env-checkbox-group">
-                    <label class="env-checkbox-label">
+                <div class="lineage-compact-form">
+                  <div class="lineage-input-row">
+                    <input type="text" id="apiIdInput" class="lineage-input-compact" 
+                           placeholder="输入API关键词">
+                    <button id="queryApiToTable" class="btn-compact btn-primary">🔍 查询</button>
+                  </div>
+                  <div class="env-checkbox-group-compact">
+                    <label class="env-checkbox-label-compact">
                       <input type="checkbox" name="apiEnv" value="live" class="env-checkbox" checked>
                       <span>live</span>
                     </label>
-                    <label class="env-checkbox-label">
+                    <label class="env-checkbox-label-compact">
                       <input type="checkbox" name="apiEnv" value="dev" class="env-checkbox">
                       <span>dev</span>
                     </label>
-                    <label class="env-checkbox-label">
+                    <label class="env-checkbox-label-compact">
                       <input type="checkbox" name="apiEnv" value="test" class="env-checkbox">
                       <span>test</span>
                     </label>
-                    <label class="env-checkbox-label">
+                    <label class="env-checkbox-label-compact">
                       <input type="checkbox" name="apiEnv" value="uat" class="env-checkbox">
                       <span>uat</span>
                     </label>
-                    <label class="env-checkbox-label">
+                    <label class="env-checkbox-label-compact">
                       <input type="checkbox" name="apiEnv" value="staging" class="env-checkbox">
                       <span>staging</span>
                     </label>
                   </div>
                 </div>
-                
-                <button id="queryApiToTable" class="btn btn-primary" style="width: 100%;">
-                  🔍 查询该API使用的表
-                </button>
               </div>
               
               <!-- 表 → API 查询 -->
               <div id="table-to-api-mode" class="lineage-mode-content">
-                <div class="lineage-form-group">
-                  <label class="lineage-label">表名:</label>
-                  <input type="text" id="tableNameInput" class="lineage-input" 
-                         placeholder="输入表名关键词，支持模糊匹配">
-                </div>
-                
-                <div class="lineage-form-group">
-                  <label class="lineage-label">环境筛选:</label>
-                  <div class="env-checkbox-group">
-                    <label class="env-checkbox-label">
+                <div class="lineage-compact-form">
+                  <div class="lineage-input-row">
+                    <input type="text" id="tableNameInput" class="lineage-input-compact" 
+                           placeholder="输入表名关键词">
+                    <button id="queryTableToApi" class="btn-compact btn-primary">🔍 查询</button>
+                    <button id="refreshCache" class="btn-compact btn-secondary" title="清除缓存">🔄</button>
+                  </div>
+                  <div class="env-checkbox-group-compact">
+                    <label class="env-checkbox-label-compact">
                       <input type="checkbox" name="tableEnv" value="live" class="env-checkbox" checked>
                       <span>live</span>
                     </label>
-                    <label class="env-checkbox-label">
+                    <label class="env-checkbox-label-compact">
                       <input type="checkbox" name="tableEnv" value="dev" class="env-checkbox">
                       <span>dev</span>
                     </label>
-                    <label class="env-checkbox-label">
+                    <label class="env-checkbox-label-compact">
                       <input type="checkbox" name="tableEnv" value="test" class="env-checkbox">
                       <span>test</span>
                     </label>
-                    <label class="env-checkbox-label">
+                    <label class="env-checkbox-label-compact">
                       <input type="checkbox" name="tableEnv" value="uat" class="env-checkbox">
                       <span>uat</span>
                     </label>
-                    <label class="env-checkbox-label">
+                    <label class="env-checkbox-label-compact">
                       <input type="checkbox" name="tableEnv" value="staging" class="env-checkbox">
                       <span>staging</span>
                     </label>
                   </div>
-                </div>
-                
-                <div style="display: flex; gap: 8px;">
-                  <button id="queryTableToApi" class="btn btn-primary" style="flex: 1;">
-                    🔍 查询使用该表的API
-                  </button>
-                  <button id="refreshCache" class="btn btn-secondary" style="flex: 0 0 auto;" title="清除缓存重新查询">
-                    🔄
-                  </button>
                 </div>
               </div>
               

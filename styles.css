@@ -6561,11 +6561,159 @@ input:checked + .slider:before {
 .api-lineage-tool {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 12px;
+}
+
+/* 紧凑的顶部栏 */
+.lineage-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+}
+
+.lineage-header h3 {
+  color: white !important;
+  margin: 0 !important;
+  font-size: 16px !important;
+}
+
+/* 紧凑的模式标签 */
+.lineage-mode-tabs-compact {
+  display: flex;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.2);
+  padding: 3px;
+  border-radius: 6px;
+}
+
+.lineage-mode-tabs-compact .lineage-mode-tab {
+  padding: 6px 16px;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.lineage-mode-tabs-compact .lineage-mode-tab:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: white;
+}
+
+.lineage-mode-tabs-compact .lineage-mode-tab.active {
+  background: white;
+  color: #667eea;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* 紧凑的表单容器 */
+.lineage-compact-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  background: white;
+  border-radius: 8px;
+  border: 1px solid #e8e8e8;
+}
+
+/* 输入行 */
+.lineage-input-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.lineage-input-compact {
+  flex: 1;
+  padding: 8px 12px;
+  border: 2px solid #e8e8e8;
+  border-radius: 6px;
+  font-size: 13px;
+  outline: none;
+  transition: all 0.2s ease;
+}
+
+.lineage-input-compact:focus {
+  border-color: #667eea;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.lineage-input-compact::placeholder {
+  color: #aaa;
+}
+
+/* 紧凑按钮 */
+.btn-compact {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.btn-compact.btn-primary {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+.btn-compact.btn-primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
+.btn-compact.btn-secondary {
+  background: #f5f5f5;
+  color: #666;
+}
+
+.btn-compact.btn-secondary:hover {
+  background: #e8e8e8;
+}
+
+/* 紧凑的环境复选框组 */
+.env-checkbox-group-compact {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.env-checkbox-label-compact {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  background: #f8f9fa;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 12px;
+  user-select: none;
+}
+
+.env-checkbox-label-compact:hover {
+  border-color: #667eea;
+  background: #f0f2ff;
+}
+
+.env-checkbox-label-compact input:checked + span {
+  color: #667eea;
+  font-weight: 600;
 }
 
 .lineage-mode-tabs {
-  display: flex;
+  display: none; /* 使用新的紧凑版本 */
   gap: 10px;
   padding: 5px;
   background: #f5f7fa;
