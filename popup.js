@@ -9629,29 +9629,14 @@ async function queryApiToTable() {
   showLineageStatus('loading', '正在查询API使用的表...');
   
   try {
-    // 使用您提供的SQL逻辑，支持模糊匹配
     const searchPattern = `%${apiId}%`;
-    const sqlQuery = `
-      SELECT 
-        api_id,
-        array_join(array_distinct(regexp_extract_all(biz_sql, '\\{mgmt_db2\\}\\.([a-zA-Z0-9_\\{\\}\\-]+)', 1)), ' , ') as table_name,
-        ds_id
-      FROM (
-        SELECT 
-          *,
-          row_number() over(partition by api_id order by api_version desc) as rn
-        FROM sls_mart.shopee_ssc_data_api_mart_db__api_mart_api_tab__reg_continuous_s0_live
-        WHERE 1=1
-          AND publish_env = 'live'
-      )
-      WHERE rn=1
-        AND api_id LIKE '${searchPattern}'
-        AND biz_sql LIKE '%mgmt_db2%'
-      ORDER BY api_id ASC
-    `;
     
-    const results = await queryDataService(sqlQuery, searchPattern);
-    displayApiToTableResults(results);
+    // DataService API 只查询原始数据
+    const results = await queryDataService(searchPattern);
+    
+    // 在前端处理数据
+    const processedResults = processApiToTableData(results, apiId);
+    displayApiToTableResults(processedResults);
     
   } catch (error) {
     console.error('查询失败:', error);
@@ -9671,28 +9656,14 @@ async function queryTableToApi() {
   showLineageStatus('loading', '正在查询使用该表的API...');
   
   try {
-    // 使用您提供的SQL逻辑，支持模糊匹配
     const searchPattern = `%${tableName}%`;
-    const sqlQuery = `
-      SELECT 
-        api_id,
-        ds_id
-      FROM (
-        SELECT 
-          *,
-          row_number() over(partition by api_id order by api_version desc) as rn
-        FROM sls_mart.shopee_ssc_data_api_mart_db__api_mart_api_tab__reg_continuous_s0_live
-        WHERE 1=1
-          AND publish_env = 'live'
-      )
-      WHERE 1=1
-        AND rn=1
-        AND biz_sql LIKE '${searchPattern}'
-        AND publish_env = 'live'
-    `;
     
-    const results = await queryDataService(sqlQuery, searchPattern);
-    displayTableToApiResults(results);
+    // DataService API 只查询原始数据
+    const results = await queryDataService(searchPattern);
+    
+    // 在前端处理数据
+    const processedResults = processTableToApiData(results, tableName);
+    displayTableToApiResults(processedResults);
     
   } catch (error) {
     console.error('查询失败:', error);
@@ -9700,12 +9671,156 @@ async function queryTableToApi() {
   }
 }
 
-async function queryDataService(sqlQuery, searchParam) {
+// 处理 API → 表 的数据
+function processApiToTableData(results, searchApiId) {
+  if (!results.rows || results.rows.length === 0) {
+    return { rows: [] };
+  }
+  
+  console.log('原始数据:', results);
+  
+  // 按 api_id 分组
+  const groupedByApiId = {};
+  results.rows.forEach(row => {
+    const values = row.values;
+    const apiId = values.api_id;
+    const publishEnv = values.publish_env;
+    
+    // 只处理 live 环境的数据
+    if (publishEnv !== 'live') {
+      return;
+    }
+    
+    // 筛选匹配的 API
+    if (!apiId || !apiId.toLowerCase().includes(searchApiId.toLowerCase())) {
+      return;
+    }
+    
+    if (!groupedByApiId[apiId]) {
+      groupedByApiId[apiId] = [];
+    }
+    groupedByApiId[apiId].push(values);
+  });
+  
+  console.log('分组后数据:', groupedByApiId);
+  
+  // 对每个 api_id，按 api_version 降序排序，取最新版本
+  const processedRows = [];
+  Object.keys(groupedByApiId).forEach(apiId => {
+    const versions = groupedByApiId[apiId];
+    
+    // 按 api_version 降序排序
+    versions.sort((a, b) => {
+      const versionA = parseInt(a.api_version) || 0;
+      const versionB = parseInt(b.api_version) || 0;
+      return versionB - versionA;
+    });
+    
+    // 取最新版本
+    const latestVersion = versions[0];
+    const bizSql = latestVersion.biz_sql || '';
+    const dsId = latestVersion.ds_id;
+    
+    // 检查是否包含 mgmt_db2
+    if (!bizSql.includes('mgmt_db2')) {
+      return;
+    }
+    
+    // 用正则提取表名: {mgmt_db2}.表名
+    const regex = /\{mgmt_db2\}\.([a-zA-Z0-9_\{\}\-]+)/g;
+    const tableNames = [];
+    let match;
+    while ((match = regex.exec(bizSql)) !== null) {
+      tableNames.push(match[1]);
+    }
+    
+    // 去重
+    const uniqueTableNames = [...new Set(tableNames)];
+    const tableNameStr = uniqueTableNames.join(' , ');
+    
+    processedRows.push({
+      values: {
+        api_id: apiId,
+        table_name: tableNameStr || '-',
+        ds_id: dsId
+      }
+    });
+  });
+  
+  console.log('处理后数据:', processedRows);
+  
+  return { rows: processedRows };
+}
+
+// 处理 表 → API 的数据
+function processTableToApiData(results, searchTable) {
+  if (!results.rows || results.rows.length === 0) {
+    return { rows: [] };
+  }
+  
+  console.log('原始数据:', results);
+  
+  // 按 api_id 分组
+  const groupedByApiId = {};
+  results.rows.forEach(row => {
+    const values = row.values;
+    const apiId = values.api_id;
+    const publishEnv = values.publish_env;
+    const bizSql = values.biz_sql || '';
+    
+    // 只处理 live 环境的数据
+    if (publishEnv !== 'live') {
+      return;
+    }
+    
+    // 筛选包含指定表名的 API
+    if (!bizSql.toLowerCase().includes(searchTable.toLowerCase())) {
+      return;
+    }
+    
+    if (!groupedByApiId[apiId]) {
+      groupedByApiId[apiId] = [];
+    }
+    groupedByApiId[apiId].push(values);
+  });
+  
+  console.log('分组后数据:', groupedByApiId);
+  
+  // 对每个 api_id，按 api_version 降序排序，取最新版本
+  const processedRows = [];
+  Object.keys(groupedByApiId).forEach(apiId => {
+    const versions = groupedByApiId[apiId];
+    
+    // 按 api_version 降序排序
+    versions.sort((a, b) => {
+      const versionA = parseInt(a.api_version) || 0;
+      const versionB = parseInt(b.api_version) || 0;
+      return versionB - versionA;
+    });
+    
+    // 取最新版本
+    const latestVersion = versions[0];
+    const dsId = latestVersion.ds_id;
+    
+    processedRows.push({
+      values: {
+        api_id: apiId,
+        ds_id: dsId
+      }
+    });
+  });
+  
+  console.log('处理后数据:', processedRows);
+  
+  return { rows: processedRows };
+}
+
+async function queryDataService(searchParam) {
   const apiName = 'spx_mart.api_lineage_search';
   const version = 'hg3ggpdp2lkgqlmc';
   const personalToken = 'l7Vx4TGfwhmA1gtPn+JmUQ==';
   const prestoQueueName = 'szsc-scheduled';
-  const endUser = 'tianyi.liang'; // 固定使用的用户账号
+  const endUser = 'tianyi.liang';
   
   // 步骤1: 提交查询
   const submitUrl = `https://open-api.datasuite.shopee.io/dataservice/${apiName}/${version}`;
@@ -9724,7 +9839,7 @@ async function queryDataService(sqlQuery, searchParam) {
   
   console.log('提交DataService查询:', {
     url: submitUrl,
-    body: submitBody
+    searchParam: searchParam
   });
   
   const submitResponse = await fetch(submitUrl, {
