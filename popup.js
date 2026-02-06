@@ -1506,6 +1506,33 @@ function initUtils() {
     });
   });
   
+  // 工具栏固定功能
+  const togglePinBtn = document.getElementById('toggleUtilsPin');
+  const utilsCategories = document.getElementById('utilsCategories');
+  
+  if (togglePinBtn && utilsCategories) {
+    // 从localStorage恢复固定状态
+    const isPinned = localStorage.getItem('utilsCategoriesPinned') === 'true';
+    if (isPinned) {
+      utilsCategories.classList.add('pinned');
+      togglePinBtn.classList.add('active');
+      togglePinBtn.textContent = '📌 已固定';
+    }
+    
+    togglePinBtn.addEventListener('click', function() {
+      const isPinned = utilsCategories.classList.toggle('pinned');
+      this.classList.toggle('active');
+      
+      if (isPinned) {
+        this.textContent = '📌 已固定';
+        localStorage.setItem('utilsCategoriesPinned', 'true');
+      } else {
+        this.textContent = '📌 固定';
+        localStorage.setItem('utilsCategoriesPinned', 'false');
+      }
+    });
+  }
+  
   // 工具切换
   const utilsBtns = document.querySelectorAll('.utils-grid-btn');
   const utilsContents = document.querySelectorAll('.utils-content');

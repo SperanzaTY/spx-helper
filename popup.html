@@ -473,10 +473,15 @@
       <!-- 实用工具 Tab -->
       <div id="utils-tab" class="tab-pane">
         <div class="section">
-          <h2>🛠️ 实用工具</h2>
+          <div class="utils-header">
+            <h2>🛠️ 实用工具</h2>
+            <button id="toggleUtilsPin" class="btn-pin" title="固定/取消固定工具栏">
+              📌 固定
+            </button>
+          </div>
           
           <!-- 工具选择器 - 分类折叠菜单 -->
-          <div class="utils-categories">
+          <div class="utils-categories" id="utilsCategories">
             <!-- 通用工具分类 -->
             <div class="utils-category">
               <button class="category-header active" data-category="general">
