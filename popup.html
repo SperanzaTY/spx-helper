@@ -606,10 +606,6 @@
               <span class="grid-icon">📖</span>
               <span class="grid-label">DOD查询</span>
             </button>
-            <button class="utils-grid-btn" data-util="hive-query">
-              <span class="grid-icon">🐘</span>
-              <span class="grid-label">Hive查询</span>
-            </button>
             <button class="utils-grid-btn" data-util="api-lineage">
               <span class="grid-icon">🔗</span>
               <span class="grid-label">API血缘</span>
@@ -1583,67 +1579,6 @@
               <div id="dodLoading" class="dod-loading" style="display: none;">
                 <div class="loading-spinner"></div>
                 <p>正在加载值班数据...</p>
-              </div>
-            </div>
-          </div>
-
-          <!-- Hive查询工具 -->
-          <div id="hive-query-util" class="utils-content">
-            <h3>🐘 Hive 快速查询</h3>
-            
-            <div class="hive-query-tool">
-              <!-- 配置区域 -->
-              <div class="hive-config-section">
-                <div class="hive-form-group">
-                  <label class="hive-label">环境:</label>
-                  <select id="hiveEnv" class="hive-select">
-                    <option value="prod">LIVE-PROD</option>
-                    <option value="uat">LIVE-STAGING</option>
-                    <option value="dev">LIVE-DEV</option>
-                  </select>
-                </div>
-                
-                <div class="hive-form-group">
-                  <label class="hive-label">项目代码:</label>
-                  <input type="text" id="hiveProjectCode" class="hive-input" 
-                         placeholder="如: data_platform" value="data_platform">
-                </div>
-                
-                <div class="hive-form-group">
-                  <label class="hive-label">用户账号:</label>
-                  <input type="text" id="hiveUserAccount" class="hive-input" 
-                         placeholder="如: tianyi.liang" value="">
-                </div>
-              </div>
-              
-              <!-- SQL输入区域 -->
-              <div class="hive-sql-section">
-                <label class="hive-label">SQL查询:</label>
-                <textarea id="hiveSqlInput" class="hive-sql-textarea" 
-                          placeholder="SELECT * FROM spx_mart.dim_spx_station_id LIMIT 10" 
-                          rows="6"></textarea>
-              </div>
-              
-              <!-- 操作按钮 -->
-              <div class="hive-actions">
-                <button id="executeHiveQuery" class="btn btn-primary" style="flex: 1;">
-                  ▶️ 执行查询
-                </button>
-                <button id="clearHiveQuery" class="btn btn-secondary">
-                  🗑️ 清空
-                </button>
-              </div>
-              
-              <!-- 状态显示 -->
-              <div id="hiveStatus" class="hive-status"></div>
-              
-              <!-- 结果区域 -->
-              <div id="hiveResults" class="hive-results" style="display: none;">
-                <div class="hive-results-header">
-                  <h4>查询结果</h4>
-                  <button id="copyHiveResults" class="btn btn-secondary btn-small">📋 复制</button>
-                </div>
-                <div id="hiveResultsContent" class="hive-results-content"></div>
               </div>
             </div>
           </div>
