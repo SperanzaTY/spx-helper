@@ -9619,15 +9619,9 @@ function initApiLineageTool() {
 
 async function queryApiToTable() {
   const apiId = document.getElementById('apiIdInput').value.trim();
-  const userAccount = document.getElementById('lineageUserAccount').value.trim();
   
   if (!apiId) {
     showLineageStatus('error', '请输入API ID');
-    return;
-  }
-  
-  if (!userAccount) {
-    showLineageStatus('error', '请输入用户账号');
     return;
   }
   
@@ -9635,7 +9629,8 @@ async function queryApiToTable() {
   showLineageStatus('loading', '正在查询API使用的表...');
   
   try {
-    // 使用您提供的SQL逻辑
+    // 使用您提供的SQL逻辑，支持模糊匹配
+    const searchPattern = `%${apiId}%`;
     const sqlQuery = `
       SELECT 
         api_id,
@@ -9650,12 +9645,12 @@ async function queryApiToTable() {
           AND publish_env = 'live'
       )
       WHERE rn=1
-        AND api_id = '${apiId}'
+        AND api_id LIKE '${searchPattern}'
         AND biz_sql LIKE '%mgmt_db2%'
       ORDER BY api_id ASC
     `;
     
-    const results = await queryDataService(sqlQuery, userAccount, apiId);
+    const results = await queryDataService(sqlQuery, searchPattern);
     displayApiToTableResults(results);
     
   } catch (error) {
@@ -9666,15 +9661,9 @@ async function queryApiToTable() {
 
 async function queryTableToApi() {
   const tableName = document.getElementById('tableNameInput').value.trim();
-  const userAccount = document.getElementById('lineageUserAccount2').value.trim();
   
   if (!tableName) {
     showLineageStatus('error', '请输入表名');
-    return;
-  }
-  
-  if (!userAccount) {
-    showLineageStatus('error', '请输入用户账号');
     return;
   }
   
@@ -9682,7 +9671,8 @@ async function queryTableToApi() {
   showLineageStatus('loading', '正在查询使用该表的API...');
   
   try {
-    // 使用您提供的SQL逻辑
+    // 使用您提供的SQL逻辑，支持模糊匹配
+    const searchPattern = `%${tableName}%`;
     const sqlQuery = `
       SELECT 
         api_id,
@@ -9697,11 +9687,11 @@ async function queryTableToApi() {
       )
       WHERE 1=1
         AND rn=1
-        AND biz_sql LIKE '%${tableName}%'
+        AND biz_sql LIKE '${searchPattern}'
         AND publish_env = 'live'
     `;
     
-    const results = await queryDataService(sqlQuery, userAccount, tableName);
+    const results = await queryDataService(sqlQuery, searchPattern);
     displayTableToApiResults(results);
     
   } catch (error) {
@@ -9710,11 +9700,12 @@ async function queryTableToApi() {
   }
 }
 
-async function queryDataService(sqlQuery, userAccount, searchParam) {
+async function queryDataService(sqlQuery, searchParam) {
   const apiName = 'spx_mart.api_lineage_search';
   const version = 'hg3ggpdp2lkgqlmc';
   const personalToken = 'l7Vx4TGfwhmA1gtPn+JmUQ==';
   const prestoQueueName = 'szsc-scheduled';
+  const endUser = 'tianyi.liang'; // 固定使用的用户账号
   
   // 步骤1: 提交查询
   const submitUrl = `https://open-api.datasuite.shopee.io/dataservice/${apiName}/${version}`;
@@ -9741,7 +9732,7 @@ async function queryDataService(sqlQuery, userAccount, searchParam) {
     headers: {
       'Content-Type': 'application/json',
       'Authorization': personalToken,
-      'X-End-User': userAccount
+      'X-End-User': endUser
     },
     body: JSON.stringify(submitBody)
   });
@@ -9777,7 +9768,7 @@ async function queryDataService(sqlQuery, userAccount, searchParam) {
       headers: {
         'Content-Type': 'application/json',
         'Authorization': personalToken,
-        'X-End-User': userAccount
+        'X-End-User': endUser
       }
     });
     
@@ -9795,7 +9786,7 @@ async function queryDataService(sqlQuery, userAccount, searchParam) {
     } else if (status === 'FINISH') {
       // 查询完成，获取结果
       showLineageStatus('loading', '查询完成，正在获取结果...');
-      return await fetchDataServiceResults(jobId, personalToken, userAccount);
+      return await fetchDataServiceResults(jobId, personalToken, endUser);
     } else {
       // RUNNING: 继续等待
       showLineageStatus('loading', `查询执行中... (${attempt}/${maxAttempts})`);
