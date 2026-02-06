@@ -10297,55 +10297,8 @@ function parseDynamicWhereConditions(dynamicWhere) {
     return '<p style="color: #999; font-style: italic; padding: 10px;">无动态条件</p>';
   }
   
-  try {
-    // 尝试解析JSON格式的表格数据
-    const conditions = JSON.parse(dynamicWhere);
-    console.log('解析成功:', conditions);
-    console.log('是否数组:', Array.isArray(conditions));
-    console.log('数组长度:', conditions.length);
-    
-    if (!Array.isArray(conditions) || conditions.length === 0) {
-      console.log('不是有效的数组或长度为0，显示原始文本');
-      return `<pre class="api-detail-sql">${escapeHtml(dynamicWhere)}</pre>`;
-    }
-    
-    // 构建表格（类似截图中的样式）
-    let html = '<div class="dynamic-where-table-wrapper">';
-    html += '<table class="dynamic-where-table">';
-    html += '<thead><tr>';
-    html += '<th>Variable</th>';
-    html += '<th>Request Param</th>';
-    html += '<th>Rule</th>';
-    html += '<th>SQL</th>';
-    html += '</tr></thead>';
-    html += '<tbody>';
-    
-    conditions.forEach(cond => {
-      console.log('处理条件:', cond);
-      html += '<tr>';
-      html += `<td><code class="var-code">${escapeHtml(cond.variable || '-')}</code></td>`;
-      html += `<td><code class="var-code">${escapeHtml(cond['request param'] || cond.requestParam || '-')}</code></td>`;
-      html += `<td><span class="rule-badge">${escapeHtml(cond.rule || '-')}</span></td>`;
-      
-      // SQL列高亮参数
-      let sqlText = escapeHtml(cond.sql || '-');
-      sqlText = sqlText.replace(/\$\{([^}]+)\}/g, '<span class="where-param-highlight">${$1}</span>');
-      html += `<td class="sql-cell">${sqlText}</td>`;
-      html += '</tr>';
-    });
-    
-    html += '</tbody></table>';
-    html += '</div>';
-    
-    console.log('表格HTML生成成功');
-    return html;
-    
-  } catch (e) {
-    // JSON解析失败，显示原始文本
-    console.error('解析Dynamic Where失败:', e);
-    console.log('显示为原始文本');
-    return `<pre class="api-detail-sql">${escapeHtml(dynamicWhere)}</pre>`;
-  }
+  // 直接显示为黑色文本，不做复杂解析
+  return `<pre class="api-detail-sql" style="color: #333; background: #f8f9fa; padding: 12px; border-radius: 6px; font-size: 12px; line-height: 1.6; overflow-x: auto;">${escapeHtml(dynamicWhere)}</pre>`;
 }
 
 // 附加行点击事件
