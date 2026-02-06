@@ -9576,6 +9576,83 @@ function escapeHtml(text) {
 }
 
 // ===== API血缘查询工具 =====
+
+// DS ID 映射表
+const DS_ID_MAPPING = {
+  51: { name: 'test-clickhouse', db: 'shopee_ssc_dw-cluster_anyshards_2replicas_001_online' },
+  52: { name: 'uat-clickhouse', db: 'shopee_ssc_dw-cluster_anyshards_2replicas_001_online' },
+  53: { name: 'live-clickhouse-sbs-mart', db: 'ssc_sbs_mart-cluster_ssc_data_kanban_2replicas_online' },
+  54: { name: 'live-clickhouse-isc-mart', db: 'ssc_isc_mart-cluster_ssc_data_kanban_2replicas_online' },
+  55: { name: 'staging-clickhouse', db: 'shopee_ssc_dw-cluster_anyshards_2replicas_001_online' },
+  56: { name: 'presto_nolive', db: 'zhihuang.lin' },
+  57: { name: 'live-clickhouse-wms-mart', db: 'ssc_wms_mart-cluster_ssc_data_kanban_2replicas_online' },
+  58: { name: 'nonlive-clickhouse-fbs-mart', db: 'Shopee_DE_fbs_mart_dev-cluster_anyshards_2replicas_001_online' },
+  59: { name: 'live_smartsorting_clickhouse', db: 'shopee_szsc_spx_smart_sorting-cluster_ssc_data_spx_smartsorting_2replicas_online' },
+  60: { name: 'wms_mart_ck_online', db: 'ssc_wms_mart-cluster_ssc_data_wms_2replicas_online' },
+  61: { name: 'live-wms-mart-realtime-clickhouse', db: 'ssc_wms_mart-cluster_ssc_data_wms_realtimemart_2replicas_online' },
+  62: { name: 'wms_realtime_mysql_test', db: 'sz_sc_test2' },
+  63: { name: 'wms_realtime_mysql_staging', db: 'supply_chain_stag' },
+  64: { name: 'wms_realtime_mysql_live', db: 'ssc_data_wms_read' },
+  65: { name: 'live-clickhouse-fbs-mart', db: 'Shopee_DE_fbs_mart-cluster_ssc_data_kanban_2replicas_online' },
+  66: { name: 'szsc_wms_biz_db_live', db: 'shopee_ssc_biz-cluster_shopee_ssc_biz_szsc_online' },
+  67: { name: 'shopee_ssc_biz_test', db: 'staging_shopee_ssc_biz-cluster_anyshards_2replicas_001_online' },
+  68: { name: 'soclivedashboard_test', db: 'sz_sc_test2' },
+  69: { name: 'soclivedashboard_uat', db: 'supply_chain_uat' },
+  70: { name: 'soclivedashboard_staging', db: 'shopee_stag_all3' },
+  71: { name: 'soclivedashboard_live', db: 'sscdata_spx_r' },
+  73: { name: 'apimart_presto_datasource', db: 'zhihuang.lin' },
+  74: { name: 'shopee_ssc_biz_http_test', db: 'staging_shopee_ssc_biz-cluster_anyshards_2replicas_001_online' },
+  75: { name: 'szsc_wms_biz_db_http_live', db: 'shopee_ssc_biz-cluster_shopee_ssc_biz_szsc_online' },
+  80: { name: 'presto_presonal_qa_tangyi', db: 'yi.tang' },
+  81: { name: 'uat-clickhouse-spx-mart-public', db: 'spx_mart-cluster_anyshards_2replicas_001_online' },
+  82: { name: 'staging-sls_mart_smart_routing', db: 'staging_sls_mart-cluster_2_shards_poc_1_replica' },
+  84: { name: 'live-clickhouse-spx-mart-public-https', db: 'spx_mart-cluster_2replicas_storage_online' },
+  85: { name: 'live_starrocks_spx', db: 'spx_mart' },
+  86: { name: 'live-clickhouse-spx-mart-public-k8s-https', db: 'spx_mart-cluster_szsc_spx_mart_online' },
+  87: { name: 'live-clickhouse-spx-mart-public-k8s', db: 'spx_mart-cluster_szsc_spx_mart_online' },
+  88: { name: 'live_spx_smartsort_ddc_clickhouse', db: 'spx_mart-cluster_szsc_spx_smartsort_online' },
+  89: { name: 'uat-clickhouse-spx-mart-public-k8s-https', db: 'staging_spx_mart-cluster_mpp_poc01_2replicas_online' },
+  90: { name: 'test-clickhouse-spx-mart-public-k8s-https', db: 'spx_mart-cluster_szsc_data_shared_online' },
+  91: { name: 'clickhouse-smartsorting-new', db: 'spx_mart-cluster_szsc_spx_smartsort_online' },
+  92: { name: 'ch_sbs_mart', db: 'sbs_mart-cluster_ssc_data_wms_realtimemart_2replicas_online' },
+  93: { name: 'ch_ofp_mart', db: 'ofp_mart-cluster_ssc_data_wms_realtimemart_2replicas_online' },
+  94: { name: 'spx_lm_key_metrics_dashboard_live', db: 'spx_mart-cluster_ssc_data_kanban_2replicas_online' },
+  95: { name: 'uat-clickhouse-spx-mart-public', db: 'staging_spx_mart-cluster_anyshards_2replicas_001_online' },
+  96: { name: 'live-clickhouse-wms-mart-pub-k8s-https', db: 'wms_mart-cluster_szsc_data_shared_online' },
+  97: { name: 'live-clickhouse-wms-mart-ddc-k8s-https', db: 'wms_mart-cluster_szsc_sbs_mart_online' },
+  98: { name: 'live-clickhouse-isc-mart-pub-k8s-https', db: 'isc_mart-cluster_szsc_data_shared_online' },
+  99: { name: 'live-clickhouse-isc-mart-ddc-k8s-https', db: 'isc_mart-cluster_szsc_sbs_mart_online' },
+  100: { name: 'live-clickhouse-sbs-mart-pub-k8s-https', db: 'sbs_mart-cluster_szsc_data_shared_online' },
+  101: { name: 'live-clickhouse-sbs-mart-ddc-k8s-https', db: 'sbs_mart-cluster_szsc_sbs_mart_online' },
+  102: { name: 'live-clickhouse-fbs-mart-pub-k8s-https', db: 'fbs_mart-cluster_szsc_data_shared_online' },
+  103: { name: 'live-clickhouse-fbs-mart-ddc-k8s-https', db: 'fbs_mart-cluster_szsc_sbs_mart_online' },
+  104: { name: 'spx_mart_pub', db: 'spx_mart-cluster_szsc_data_shared_online' },
+  105: { name: 'spx_mart_public_dev_db', db: 'staging_spx_mart-cluster_mpp_poc01_2replicas_online' },
+  106: { name: 'spx_mart_public_uat_db', db: 'staging_spx_mart-cluster_mpp_poc01_2replicas_online' },
+  107: { name: 'spx_mart_manage_app', db: 'spx_mart-cluster_szsc_spx_mart_online_2' },
+  108: { name: 'spx_mart_lm', db: 'spx_mart-cluster_szsc_spx_mart_online_3' },
+  109: { name: 'live_starrocks_public', db: 'spx_mart' },
+  110: { name: 'live-readonly-clickhouse-spx_mart_manage_app-k8s-https', db: 'spx_mart-cluster_szsc_spx_mart_online_5' },
+  111: { name: 'live-wms_mart-manage-app-k8s-https', db: 'wms_mart-cluster_szsc_sbs_mart_online_1' },
+  112: { name: 'nonlive-wms_mart-manage-app-k8s-https', db: 'wms_mart-cluster_szsc_sbs_mart_online_2' },
+  113: { name: 'test-spx_mart_pub-k8s-https', db: 'spx_mart-cluster_szsc_spx_mart_online_4' },
+  114: { name: 'live-spx_mart_manage_app-k8s-https_online_6', db: 'spx_mart-cluster_szsc_spx_mart_online_6' },
+  115: { name: 'live-readonly-clickhouse-spx_mart_manage_app-k8s-https_online_7', db: 'spx_mart-cluster_szsc_spx_mart_online_7' },
+  116: { name: 'spx_mart_manage_app_staging', db: 'spx_mart-cluster_szsc_spx_mart_online_8' },
+  117: { name: 'ck_sls_mart_ddc', db: 'sls_mart-cluster_szsc_sls_mart_online' },
+  119: { name: 'live-readonly-clickhouse-spx_mart_manage_app-k8s-https-ytl', db: 'spx_mart-cluster_szsc_spx_mart_online_5' },
+  122: { name: 'live-readonly-clickhouse-spx_mart_manage_app-k8s-https_online_7_ytl', db: 'spx_mart-cluster_szsc_spx_mart_online_7' }
+};
+
+// 获取数据源名称
+function getDsName(dsId) {
+  const ds = DS_ID_MAPPING[dsId];
+  if (!ds) {
+    return `DS-${dsId}`;
+  }
+  return ds.name;
+}
+
 function initApiLineageTool() {
   // 模式切换
   const modeTabs = document.querySelectorAll('.lineage-mode-tab');
@@ -9981,16 +10058,19 @@ function displayApiToTableResults(results) {
   html += '<thead><tr>';
   html += '<th>API ID</th>';
   html += '<th>使用的表</th>';
-  html += '<th>DS ID</th>';
+  html += '<th>数据源</th>';
   html += '</tr></thead>';
   html += '<tbody>';
   
   results.rows.forEach(row => {
     const values = row.values;
+    const dsId = values.ds_id;
+    const dsName = getDsName(dsId);
+    
     html += '<tr>';
     html += `<td><span class="lineage-api-id">${escapeHtml(values.api_id || '-')}</span></td>`;
     html += `<td><span class="lineage-table-name">${escapeHtml(values.table_name || '-')}</span></td>`;
-    html += `<td>${escapeHtml(values.ds_id || '-')}</td>`;
+    html += `<td title="DS ID: ${dsId}">${escapeHtml(dsName)}</td>`;
     html += '</tr>';
   });
   
@@ -10015,15 +10095,18 @@ function displayTableToApiResults(results) {
   let html = '<table class="lineage-results-table">';
   html += '<thead><tr>';
   html += '<th>API ID</th>';
-  html += '<th>DS ID</th>';
+  html += '<th>数据源</th>';
   html += '</tr></thead>';
   html += '<tbody>';
   
   results.rows.forEach(row => {
     const values = row.values;
+    const dsId = values.ds_id;
+    const dsName = getDsName(dsId);
+    
     html += '<tr>';
     html += `<td><span class="lineage-api-id">${escapeHtml(values.api_id || '-')}</span></td>`;
-    html += `<td>${escapeHtml(values.ds_id || '-')}</td>`;
+    html += `<td title="DS ID: ${dsId}">${escapeHtml(dsName)}</td>`;
     html += '</tr>';
   });
   
