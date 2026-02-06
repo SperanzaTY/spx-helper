@@ -9649,39 +9649,33 @@ function initApiLineageTool() {
     });
   });
   
-  // 环境筛选器逻辑（处理"全选"的互斥）
-  const apiEnvFilter = document.getElementById('apiEnvFilter');
-  const tableEnvFilter = document.getElementById('tableEnvFilter');
-  
-  const handleEnvFilterChange = (selectElement) => {
-    const selectedOptions = Array.from(selectElement.selectedOptions);
-    const selectedValues = selectedOptions.map(opt => opt.value);
+  // 环境复选框逻辑（处理"全选"的互斥）
+  const handleEnvCheckboxChange = (groupName) => {
+    const allCheckboxes = document.querySelectorAll(`input[name="${groupName}"]`);
+    const allCheckbox = document.querySelector(`input[name="${groupName}"][value="all"]`);
+    const otherCheckboxes = Array.from(allCheckboxes).filter(cb => cb.value !== 'all');
     
-    // 如果选中了"全选"
-    if (selectedValues.includes('all')) {
-      // 取消其他选项
-      Array.from(selectElement.options).forEach(opt => {
-        if (opt.value !== 'all') {
-          opt.selected = false;
-        }
-      });
-    } else if (selectedValues.length > 1 && selectedValues.length < selectElement.options.length - 1) {
-      // 如果选中了多个非"全选"选项，取消"全选"
-      Array.from(selectElement.options).forEach(opt => {
-        if (opt.value === 'all') {
-          opt.selected = false;
-        }
-      });
+    // 如果点击的是"全选"
+    if (event.target === allCheckbox && allCheckbox.checked) {
+      // 取消其他所有选项
+      otherCheckboxes.forEach(cb => cb.checked = false);
+    } else if (event.target !== allCheckbox && event.target.checked) {
+      // 如果选中了其他选项，取消"全选"
+      allCheckbox.checked = false;
     }
   };
   
-  if (apiEnvFilter) {
-    apiEnvFilter.addEventListener('change', () => handleEnvFilterChange(apiEnvFilter));
-  }
+  // 为API环境复选框添加事件
+  const apiEnvCheckboxes = document.querySelectorAll('input[name="apiEnv"]');
+  apiEnvCheckboxes.forEach(cb => {
+    cb.addEventListener('change', () => handleEnvCheckboxChange('apiEnv'));
+  });
   
-  if (tableEnvFilter) {
-    tableEnvFilter.addEventListener('change', () => handleEnvFilterChange(tableEnvFilter));
-  }
+  // 为Table环境复选框添加事件
+  const tableEnvCheckboxes = document.querySelectorAll('input[name="tableEnv"]');
+  tableEnvCheckboxes.forEach(cb => {
+    cb.addEventListener('change', () => handleEnvCheckboxChange('tableEnv'));
+  });
   
   // API → 表 查询
   const queryApiToTableBtn = document.getElementById('queryApiToTable');
@@ -9704,16 +9698,15 @@ function initApiLineageTool() {
 
 async function queryApiToTable() {
   const apiId = document.getElementById('apiIdInput').value.trim();
-  const envFilter = document.getElementById('apiEnvFilter');
   
   if (!apiId) {
     showLineageStatus('error', '请输入API ID');
     return;
   }
   
-  // 获取选中的环境
-  const selectedOptions = Array.from(envFilter.selectedOptions);
-  const selectedEnvs = selectedOptions.map(opt => opt.value);
+  // 获取选中的环境（从复选框）
+  const checkedBoxes = document.querySelectorAll('input[name="apiEnv"]:checked');
+  const selectedEnvs = Array.from(checkedBoxes).map(cb => cb.value);
   
   if (selectedEnvs.length === 0) {
     showLineageStatus('error', '请至少选择一个环境');
@@ -9741,16 +9734,15 @@ async function queryApiToTable() {
 
 async function queryTableToApi() {
   const tableName = document.getElementById('tableNameInput').value.trim();
-  const envFilter = document.getElementById('tableEnvFilter');
   
   if (!tableName) {
     showLineageStatus('error', '请输入表名');
     return;
   }
   
-  // 获取选中的环境
-  const selectedOptions = Array.from(envFilter.selectedOptions);
-  const selectedEnvs = selectedOptions.map(opt => opt.value);
+  // 获取选中的环境（从复选框）
+  const checkedBoxes = document.querySelectorAll('input[name="tableEnv"]:checked');
+  const selectedEnvs = Array.from(checkedBoxes).map(cb => cb.value);
   
   if (selectedEnvs.length === 0) {
     showLineageStatus('error', '请至少选择一个环境');

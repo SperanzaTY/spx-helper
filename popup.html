@@ -1531,15 +1531,32 @@
                 
                 <div class="lineage-form-group">
                   <label class="lineage-label">环境筛选:</label>
-                  <select id="apiEnvFilter" class="lineage-select" multiple size="6">
-                    <option value="all" selected>全选</option>
-                    <option value="live">live</option>
-                    <option value="dev">dev</option>
-                    <option value="test">test</option>
-                    <option value="uat">uat</option>
-                    <option value="staging">staging</option>
-                  </select>
-                  <span class="lineage-hint">按住 Ctrl/Cmd 多选</span>
+                  <div class="env-checkbox-group">
+                    <label class="env-checkbox-label">
+                      <input type="checkbox" name="apiEnv" value="all" class="env-checkbox">
+                      <span>全选</span>
+                    </label>
+                    <label class="env-checkbox-label">
+                      <input type="checkbox" name="apiEnv" value="live" class="env-checkbox" checked>
+                      <span>live</span>
+                    </label>
+                    <label class="env-checkbox-label">
+                      <input type="checkbox" name="apiEnv" value="dev" class="env-checkbox">
+                      <span>dev</span>
+                    </label>
+                    <label class="env-checkbox-label">
+                      <input type="checkbox" name="apiEnv" value="test" class="env-checkbox">
+                      <span>test</span>
+                    </label>
+                    <label class="env-checkbox-label">
+                      <input type="checkbox" name="apiEnv" value="uat" class="env-checkbox">
+                      <span>uat</span>
+                    </label>
+                    <label class="env-checkbox-label">
+                      <input type="checkbox" name="apiEnv" value="staging" class="env-checkbox">
+                      <span>staging</span>
+                    </label>
+                  </div>
                 </div>
                 
                 <button id="queryApiToTable" class="btn btn-primary" style="width: 100%;">
@@ -1557,15 +1574,32 @@
                 
                 <div class="lineage-form-group">
                   <label class="lineage-label">环境筛选:</label>
-                  <select id="tableEnvFilter" class="lineage-select" multiple size="6">
-                    <option value="all" selected>全选</option>
-                    <option value="live">live</option>
-                    <option value="dev">dev</option>
-                    <option value="test">test</option>
-                    <option value="uat">uat</option>
-                    <option value="staging">staging</option>
-                  </select>
-                  <span class="lineage-hint">按住 Ctrl/Cmd 多选</span>
+                  <div class="env-checkbox-group">
+                    <label class="env-checkbox-label">
+                      <input type="checkbox" name="tableEnv" value="all" class="env-checkbox">
+                      <span>全选</span>
+                    </label>
+                    <label class="env-checkbox-label">
+                      <input type="checkbox" name="tableEnv" value="live" class="env-checkbox" checked>
+                      <span>live</span>
+                    </label>
+                    <label class="env-checkbox-label">
+                      <input type="checkbox" name="tableEnv" value="dev" class="env-checkbox">
+                      <span>dev</span>
+                    </label>
+                    <label class="env-checkbox-label">
+                      <input type="checkbox" name="tableEnv" value="test" class="env-checkbox">
+                      <span>test</span>
+                    </label>
+                    <label class="env-checkbox-label">
+                      <input type="checkbox" name="tableEnv" value="uat" class="env-checkbox">
+                      <span>uat</span>
+                    </label>
+                    <label class="env-checkbox-label">
+                      <input type="checkbox" name="tableEnv" value="staging" class="env-checkbox">
+                      <span>staging</span>
+                    </label>
+                  </div>
                 </div>
                 
                 <button id="queryTableToApi" class="btn btn-primary" style="width: 100%;">
