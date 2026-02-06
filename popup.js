@@ -10379,13 +10379,26 @@ function copyLineageResults() {
     return;
   }
   
-  // 提取表格数据为文本
+  // 提取表格数据为文本，排除明细行
   let text = '';
   const rows = table.querySelectorAll('tr');
   rows.forEach(row => {
+    // 跳过明细行（lineage-detail-row）
+    if (row.classList.contains('lineage-detail-row')) {
+      return;
+    }
+    
     const cells = row.querySelectorAll('th, td');
-    const rowData = Array.from(cells).map(cell => cell.innerText).join('\t');
-    text += rowData + '\n';
+    const rowData = Array.from(cells).map(cell => {
+      // 获取文本，但排除展开图标
+      const text = cell.innerText || cell.textContent;
+      // 移除展开图标（▼ ▲）
+      return text.replace(/[▼▲]/g, '').trim();
+    }).join('\t');
+    
+    if (rowData.trim()) {
+      text += rowData + '\n';
+    }
   });
   
   navigator.clipboard.writeText(text).then(() => {
