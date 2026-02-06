@@ -10178,6 +10178,17 @@ function buildApiDetailHtml(data) {
   html += `<div class="api-detail-item"><label>区域:</label><span>${escapeHtml(data.regions || '-')}</span></div>`;
   html += `<div class="api-detail-item"><label>版本:</label><span>v${escapeHtml(data.api_version || '-')}</span></div>`;
   html += `<div class="api-detail-item"><label>响应类型:</label><span>${escapeHtml(data.response_data_type || '-')}</span></div>`;
+  
+  // 时间信息
+  if (data.ctime) {
+    const createTime = formatTimestamp(data.ctime);
+    html += `<div class="api-detail-item"><label>创建时间:</label><span>${createTime}</span></div>`;
+  }
+  if (data.mtime) {
+    const modifyTime = formatTimestamp(data.mtime);
+    html += `<div class="api-detail-item"><label>最后修改:</label><span class="time-highlight">${modifyTime}</span></div>`;
+  }
+  
   html += '</div>';
   html += '</div>';
   
@@ -10189,11 +10200,125 @@ function buildApiDetailHtml(data) {
     html += '</div>';
   }
   
-  // Dynamic Where SQL - 重要的接口逻辑
+  // Dynamic Where SQL - 可视化展示
   if (data.dynamic_where_sql) {
     html += '<div class="api-detail-section">';
     html += '<h4 class="api-detail-title">🔍 Dynamic Where 条件</h4>';
-    html += `<pre class="api-detail-sql">${escapeHtml(data.dynamic_where_sql)}</pre>`;
+    html += parseDynamicWhereConditions(data.dynamic_where_sql);
+    html += '</div>';
+  }
+  
+  html += '</div>';
+  return html;
+}
+
+// 格式化时间戳
+function formatTimestamp(timestamp) {
+  if (!timestamp) return '-';
+  
+  // 如果是毫秒时间戳
+  const ts = timestamp > 10000000000 ? timestamp : timestamp * 1000;
+  const date = new Date(ts);
+  
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const hour = String(date.getHours()).padStart(2, '0');
+  const minute = String(date.getMinutes()).padStart(2, '0');
+  const second = String(date.getSeconds()).padStart(2, '0');
+  
+  return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
+}
+
+// 解析并可视化展示Dynamic Where条件
+function parseDynamicWhereConditions(dynamicWhere) {
+  if (!dynamicWhere || dynamicWhere.trim() === '') {
+    return '<p style="color: #999; font-style: italic;">无动态条件</p>';
+  }
+  
+  try {
+    // 尝试解析JSON格式
+    const conditions = JSON.parse(dynamicWhere);
+    
+    if (Array.isArray(conditions) && conditions.length > 0) {
+      let html = '<div class="dynamic-where-cards">';
+      
+      conditions.forEach((cond, index) => {
+        html += '<div class="where-condition-card">';
+        html += `<div class="where-card-header">条件 ${index + 1}</div>`;
+        html += '<div class="where-card-body">';
+        
+        // 显示条件的各个属性
+        Object.keys(cond).forEach(key => {
+          const value = cond[key];
+          html += `<div class="where-card-row">`;
+          html += `<span class="where-card-key">${escapeHtml(key)}:</span>`;
+          
+          // 如果值包含${xxx}参数，高亮显示
+          const valueStr = String(value);
+          if (valueStr.includes('${')) {
+            const highlighted = valueStr.replace(/\$\{([^}]+)\}/g, '<span class="where-param-highlight">${$1}</span>');
+            html += `<span class="where-card-value">${highlighted}</span>`;
+          } else {
+            html += `<span class="where-card-value">${escapeHtml(valueStr)}</span>`;
+          }
+          
+          html += `</div>`;
+        });
+        
+        html += '</div>';
+        html += '</div>';
+      });
+      
+      html += '</div>';
+      return html;
+    }
+  } catch (e) {
+    // 不是JSON格式，按文本处理
+  }
+  
+  // 按 AND/OR 分割条件（文本格式）
+  const parts = dynamicWhere.split(/\s+(AND|OR)\s+/gi);
+  let html = '<div class="dynamic-where-cards">';
+  let conditionIndex = 0;
+  
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i].trim();
+    if (!part || ['AND', 'OR'].includes(part.toUpperCase())) {
+      continue;
+    }
+    
+    conditionIndex++;
+    
+    // 提取参数 ${xxx}
+    const paramMatches = part.match(/\$\{([^}]+)\}/g);
+    const params = paramMatches ? paramMatches.map(p => p.replace(/[${}]/g, '')) : [];
+    
+    html += '<div class="where-condition-card">';
+    html += `<div class="where-card-header">条件 ${conditionIndex}</div>`;
+    html += '<div class="where-card-body">';
+    
+    // 显示条件文本，高亮参数
+    let highlightedText = escapeHtml(part);
+    params.forEach(param => {
+      highlightedText = highlightedText.replace(
+        new RegExp(`\\$\\{${param}\\}`, 'g'),
+        `<span class="where-param-highlight">\${${param}}</span>`
+      );
+    });
+    
+    html += `<div class="where-condition-text">${highlightedText}</div>`;
+    
+    if (params.length > 0) {
+      html += '<div class="where-condition-params">';
+      html += '<div style="font-size: 11px; color: #999; margin-bottom: 5px;">必需参数:</div>';
+      params.forEach(param => {
+        html += `<span class="where-param-tag">📌 ${escapeHtml(param)}</span>`;
+      });
+      html += '</div>';
+    }
+    
+    html += '</div>';
     html += '</div>';
   }
   
