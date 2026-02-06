@@ -9656,10 +9656,8 @@ async function queryTableToApi() {
   showLineageStatus('loading', '正在查询使用该表的API...');
   
   try {
-    const searchPattern = `%${tableName}%`;
-    
-    // DataService API 只查询原始数据
-    const results = await queryDataService(searchPattern);
+    // 表 → API 查询：获取所有数据（传%），在前端过滤
+    const results = await queryDataService('%');
     
     // 在前端处理数据
     const processedResults = processTableToApiData(results, tableName);
