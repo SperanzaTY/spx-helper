@@ -1697,14 +1697,88 @@ input:checked + .slider:before {
 
 /* 实用工具 */
 /* 工具网格选择器 */
+/* 工具分类容器 */
+.utils-categories {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.utils-category {
+  background: white;
+  border-radius: 12px;
+  border: 2px solid #e9ecef;
+  overflow: hidden;
+  transition: all 0.3s ease;
+}
+
+.utils-category:hover {
+  border-color: #667eea;
+  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.1);
+}
+
+/* 分类标题 */
+.category-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 14px;
+  font-weight: 600;
+  color: #333;
+}
+
+.category-header:hover {
+  background: linear-gradient(135deg, #e9ecef 0%, #dee2e6 100%);
+}
+
+.category-header.active {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+.category-icon {
+  font-size: 18px;
+}
+
+.category-title {
+  flex: 1;
+  text-align: left;
+}
+
+.category-toggle {
+  font-size: 12px;
+  transition: transform 0.3s ease;
+}
+
+.category-header.active .category-toggle {
+  transform: rotate(0deg);
+}
+
+/* 分类内容 */
+.category-content {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.3s ease;
+}
+
+.category-content.active {
+  max-height: 2000px;
+}
+
+/* 工具网格 */
 .utils-grid {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
   gap: 10px;
-  margin-bottom: 20px;
   padding: 15px;
-  background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-  border-radius: 12px;
+  background: #f8f9fa;
 }
 
 .utils-grid-btn {

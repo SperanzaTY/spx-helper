@@ -1481,6 +1481,32 @@ function exportSingleNote() {
 
 // ===== 实用工具切换 =====
 function initUtils() {
+  // 工具分类折叠
+  const categoryHeaders = document.querySelectorAll('.category-header');
+  categoryHeaders.forEach(header => {
+    header.addEventListener('click', function() {
+      const category = this.parentElement;
+      const content = category.querySelector('.category-content');
+      const toggle = this.querySelector('.category-toggle');
+      
+      // 切换展开/折叠状态
+      const isActive = this.classList.contains('active');
+      
+      if (isActive) {
+        // 折叠
+        this.classList.remove('active');
+        content.classList.remove('active');
+        toggle.textContent = '▶';
+      } else {
+        // 展开
+        this.classList.add('active');
+        content.classList.add('active');
+        toggle.textContent = '▼';
+      }
+    });
+  });
+  
+  // 工具切换
   const utilsBtns = document.querySelectorAll('.utils-grid-btn');
   const utilsContents = document.querySelectorAll('.utils-content');
   
@@ -1488,7 +1514,7 @@ function initUtils() {
     btn.addEventListener('click', function() {
       const utilName = this.dataset.util;
       
-      // 更新按钮状态
+      // 更新按钮状态（跨分类）
       utilsBtns.forEach(b => b.classList.remove('active'));
       this.classList.add('active');
       

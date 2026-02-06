@@ -475,68 +475,93 @@
         <div class="section">
           <h2>🛠️ 实用工具</h2>
           
-          <!-- 工具选择器 - 网格图标式 -->
-          <div class="utils-grid">
-            <button class="utils-grid-btn active" data-util="timezone">
-              <span class="grid-icon">⏰</span>
-              <span class="grid-label">时区转换</span>
-            </button>
-            <button class="utils-grid-btn" data-util="api-tracker">
-              <span class="grid-icon">🔍</span>
-              <span class="grid-label">API溯源</span>
-            </button>
-            <button class="utils-grid-btn" data-util="json">
-              <span class="grid-icon">📋</span>
-              <span class="grid-label">JSON</span>
-            </button>
-            <button class="utils-grid-btn" data-util="sql">
-              <span class="grid-icon">🗃️</span>
-              <span class="grid-label">SQL</span>
-            </button>
-            <button class="utils-grid-btn" data-util="cron">
-              <span class="grid-icon">⏱️</span>
-              <span class="grid-label">Cron</span>
-            </button>
-            <button class="utils-grid-btn" data-util="regex">
-              <span class="grid-icon">🔍</span>
-              <span class="grid-label">正则</span>
-            </button>
-            <button class="utils-grid-btn" data-util="diff">
-              <span class="grid-icon">📝</span>
-              <span class="grid-label">文本对比</span>
-            </button>
-            <button class="utils-grid-btn" data-util="case">
-              <span class="grid-icon">🔤</span>
-              <span class="grid-label">命名转换</span>
-            </button>
-            <button class="utils-grid-btn" data-util="mermaid">
-              <span class="grid-icon">📊</span>
-              <span class="grid-label">Mermaid</span>
-            </button>
-            <button class="utils-grid-btn" data-util="http">
-              <span class="grid-icon">🌐</span>
-              <span class="grid-label">HTTP</span>
-            </button>
-            <button class="utils-grid-btn" data-util="decision">
-              <span class="grid-icon">🎡</span>
-              <span class="grid-label">Roll</span>
-            </button>
-            <button class="utils-grid-btn" data-util="station">
-              <span class="grid-icon">📍</span>
-              <span class="grid-label">站点查询</span>
-            </button>
-            <button class="utils-grid-btn" data-util="data-sync">
-              <span class="grid-icon">🔄</span>
-              <span class="grid-label">数据同步</span>
-            </button>
-            <button class="utils-grid-btn" data-util="dod">
-              <span class="grid-icon">📖</span>
-              <span class="grid-label">DOD查询</span>
-            </button>
-            <button class="utils-grid-btn" data-util="api-lineage">
-              <span class="grid-icon">🔗</span>
-              <span class="grid-label">API血缘</span>
-            </button>
+          <!-- 工具选择器 - 分类折叠菜单 -->
+          <div class="utils-categories">
+            <!-- 通用工具分类 -->
+            <div class="utils-category">
+              <button class="category-header active" data-category="general">
+                <span class="category-icon">🔧</span>
+                <span class="category-title">通用工具</span>
+                <span class="category-toggle">▼</span>
+              </button>
+              <div class="category-content active">
+                <div class="utils-grid">
+                  <button class="utils-grid-btn active" data-util="timezone">
+                    <span class="grid-icon">⏰</span>
+                    <span class="grid-label">时区转换</span>
+                  </button>
+                  <button class="utils-grid-btn" data-util="json">
+                    <span class="grid-icon">📋</span>
+                    <span class="grid-label">JSON</span>
+                  </button>
+                  <button class="utils-grid-btn" data-util="sql">
+                    <span class="grid-icon">🗃️</span>
+                    <span class="grid-label">SQL</span>
+                  </button>
+                  <button class="utils-grid-btn" data-util="cron">
+                    <span class="grid-icon">⏱️</span>
+                    <span class="grid-label">Cron</span>
+                  </button>
+                  <button class="utils-grid-btn" data-util="regex">
+                    <span class="grid-icon">🔍</span>
+                    <span class="grid-label">正则</span>
+                  </button>
+                  <button class="utils-grid-btn" data-util="diff">
+                    <span class="grid-icon">📝</span>
+                    <span class="grid-label">文本对比</span>
+                  </button>
+                  <button class="utils-grid-btn" data-util="case">
+                    <span class="grid-icon">🔤</span>
+                    <span class="grid-label">命名转换</span>
+                  </button>
+                  <button class="utils-grid-btn" data-util="mermaid">
+                    <span class="grid-icon">📊</span>
+                    <span class="grid-label">Mermaid</span>
+                  </button>
+                  <button class="utils-grid-btn" data-util="http">
+                    <span class="grid-icon">🌐</span>
+                    <span class="grid-label">HTTP</span>
+                  </button>
+                  <button class="utils-grid-btn" data-util="decision">
+                    <span class="grid-icon">🎡</span>
+                    <span class="grid-label">Roll</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+            
+            <!-- App工具分类 -->
+            <div class="utils-category">
+              <button class="category-header" data-category="app">
+                <span class="category-icon">📱</span>
+                <span class="category-title">App 工具</span>
+                <span class="category-toggle">▶</span>
+              </button>
+              <div class="category-content">
+                <div class="utils-grid">
+                  <button class="utils-grid-btn" data-util="api-tracker">
+                    <span class="grid-icon">🔍</span>
+                    <span class="grid-label">API溯源</span>
+                  </button>
+                  <button class="utils-grid-btn" data-util="station">
+                    <span class="grid-icon">📍</span>
+                    <span class="grid-label">站点查询</span>
+                  </button>
+                  <button class="utils-grid-btn" data-util="data-sync">
+                    <span class="grid-icon">🔄</span>
+                    <span class="grid-label">数据同步</span>
+                  </button>
+                  <button class="utils-grid-btn" data-util="dod">
+                    <span class="grid-icon">📖</span>
+                    <span class="grid-label">DOD查询</span>
+                  </button>
+                  <button class="utils-grid-btn" data-util="api-lineage">
+                    <span class="grid-icon">🔗</span>
+                    <span class="grid-label">API血缘</span>
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
 
           <!-- 时区转换工具 -->
