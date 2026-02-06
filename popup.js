@@ -9814,7 +9814,9 @@ function processApiToTableData(results, searchApiId) {
         api_id: apiId,
         table_name: tableNameStr || '-',
         ds_id: dsId
-      }
+      },
+      // 保存完整的原始数据用于下钻
+      rawData: latestVersion
     });
   });
   
@@ -9896,7 +9898,9 @@ function processTableToApiData(results, searchTable) {
         api_id: apiId,
         matched_tables: tableNameStr || '-',
         ds_id: dsId
-      }
+      },
+      // 保存完整的原始数据用于下钻
+      rawData: latestVersion
     });
   });
   
@@ -10071,21 +10075,31 @@ function displayApiToTableResults(results) {
   
   let html = '<table class="lineage-results-table">';
   html += '<thead><tr>';
-  html += '<th>API ID</th>';
-  html += '<th>使用的表</th>';
-  html += '<th>数据源</th>';
+  html += '<th style="width: 35%;">API ID</th>';
+  html += '<th style="width: 45%;">使用的表</th>';
+  html += '<th style="width: 20%;">数据源</th>';
   html += '</tr></thead>';
   html += '<tbody>';
   
-  results.rows.forEach(row => {
+  results.rows.forEach((row, index) => {
     const values = row.values;
+    const rawData = row.rawData || {};
     const dsId = values.ds_id;
     const dsName = getDsName(dsId);
+    const apiId = values.api_id || '-';
     
-    html += '<tr>';
-    html += `<td><span class="lineage-api-id">${escapeHtml(values.api_id || '-')}</span></td>`;
+    // 主行 - 可点击展开
+    html += `<tr class="lineage-row-clickable" data-index="${index}">`;
+    html += `<td><span class="lineage-api-id">${escapeHtml(apiId)}</span> <span class="lineage-expand-icon">▼</span></td>`;
     html += `<td><span class="lineage-table-name">${escapeHtml(values.table_name || '-')}</span></td>`;
     html += `<td title="DS ID: ${dsId}">${escapeHtml(dsName)}</td>`;
+    html += '</tr>';
+    
+    // 详情行 - 默认隐藏
+    html += `<tr class="lineage-detail-row" data-index="${index}" style="display: none;">`;
+    html += '<td colspan="3">';
+    html += buildApiDetailHtml(rawData);
+    html += '</td>';
     html += '</tr>';
   });
   
@@ -10094,6 +10108,9 @@ function displayApiToTableResults(results) {
   contentDiv.innerHTML = html;
   resultsDiv.style.display = 'block';
   showLineageStatus('success', `查询完成！找到 ${results.rows.length} 条结果`);
+  
+  // 添加点击事件
+  attachRowClickEvents();
 }
 
 function displayTableToApiResults(results) {
@@ -10109,21 +10126,31 @@ function displayTableToApiResults(results) {
   
   let html = '<table class="lineage-results-table">';
   html += '<thead><tr>';
-  html += '<th>API ID</th>';
-  html += '<th>匹配的表</th>';
-  html += '<th>数据源</th>';
+  html += '<th style="width: 35%;">API ID</th>';
+  html += '<th style="width: 45%;">匹配的表</th>';
+  html += '<th style="width: 20%;">数据源</th>';
   html += '</tr></thead>';
   html += '<tbody>';
   
-  results.rows.forEach(row => {
+  results.rows.forEach((row, index) => {
     const values = row.values;
+    const rawData = row.rawData || {};
     const dsId = values.ds_id;
     const dsName = getDsName(dsId);
+    const apiId = values.api_id || '-';
     
-    html += '<tr>';
-    html += `<td><span class="lineage-api-id">${escapeHtml(values.api_id || '-')}</span></td>`;
+    // 主行 - 可点击展开
+    html += `<tr class="lineage-row-clickable" data-index="${index}">`;
+    html += `<td><span class="lineage-api-id">${escapeHtml(apiId)}</span> <span class="lineage-expand-icon">▼</span></td>`;
     html += `<td><span class="lineage-table-name">${escapeHtml(values.matched_tables || '-')}</span></td>`;
     html += `<td title="DS ID: ${dsId}">${escapeHtml(dsName)}</td>`;
+    html += '</tr>';
+    
+    // 详情行 - 默认隐藏
+    html += `<tr class="lineage-detail-row" data-index="${index}" style="display: none;">`;
+    html += '<td colspan="3">';
+    html += buildApiDetailHtml(rawData);
+    html += '</td>';
     html += '</tr>';
   });
   
@@ -10132,6 +10159,79 @@ function displayTableToApiResults(results) {
   contentDiv.innerHTML = html;
   resultsDiv.style.display = 'block';
   showLineageStatus('success', `查询完成！找到 ${results.rows.length} 个API`);
+  
+  // 添加点击事件
+  attachRowClickEvents();
+}
+
+// 构建API详情HTML
+function buildApiDetailHtml(data) {
+  let html = '<div class="api-detail-panel">';
+  
+  // 基本信息
+  html += '<div class="api-detail-section">';
+  html += '<h4 class="api-detail-title">📋 基本信息</h4>';
+  html += '<div class="api-detail-grid">';
+  html += `<div class="api-detail-item"><label>API描述:</label><span>${escapeHtml(data.api_desc || '-')}</span></div>`;
+  html += `<div class="api-detail-item"><label>负责人:</label><span>${escapeHtml(data.owner_email || '-')}</span></div>`;
+  html += `<div class="api-detail-item"><label>业务组:</label><span>${escapeHtml(data.biz_group || '-')}</span></div>`;
+  html += `<div class="api-detail-item"><label>区域:</label><span>${escapeHtml(data.regions || '-')}</span></div>`;
+  html += `<div class="api-detail-item"><label>版本:</label><span>v${escapeHtml(data.api_version || '-')}</span></div>`;
+  html += `<div class="api-detail-item"><label>请求方法:</label><span>${escapeHtml(data.request_method || '-')}</span></div>`;
+  html += '</div>';
+  html += '</div>';
+  
+  // SQL逻辑
+  if (data.biz_sql) {
+    html += '<div class="api-detail-section">';
+    html += '<h4 class="api-detail-title">💻 SQL逻辑</h4>';
+    html += `<pre class="api-detail-sql">${escapeHtml(data.biz_sql)}</pre>`;
+    html += '</div>';
+  }
+  
+  // 技术信息
+  html += '<div class="api-detail-section">';
+  html += '<h4 class="api-detail-title">⚙️ 技术信息</h4>';
+  html += '<div class="api-detail-grid">';
+  html += `<div class="api-detail-item"><label>API URL:</label><span class="api-url">${escapeHtml(data.api_url || '-')}</span></div>`;
+  html += `<div class="api-detail-item"><label>响应类型:</label><span>${escapeHtml(data.response_data_type || '-')}</span></div>`;
+  html += `<div class="api-detail-item"><label>响应字段:</label><span>${escapeHtml(data.response_data_field || '-')}</span></div>`;
+  html += `<div class="api-detail-item"><label>缓存:</label><span>${data.whether_api_cache ? `✅ ${data.api_cache_interval}s` : '❌'}</span></div>`;
+  html += '</div>';
+  html += '</div>';
+  
+  // 链接
+  if (data.jira) {
+    html += '<div class="api-detail-section">';
+    html += '<h4 class="api-detail-title">🔗 相关链接</h4>';
+    html += `<a href="${escapeHtml(data.jira)}" target="_blank" class="api-detail-link">📝 JIRA Issue</a>`;
+    html += '</div>';
+  }
+  
+  html += '</div>';
+  return html;
+}
+
+// 附加行点击事件
+function attachRowClickEvents() {
+  const clickableRows = document.querySelectorAll('.lineage-row-clickable');
+  clickableRows.forEach(row => {
+    row.addEventListener('click', function() {
+      const index = this.dataset.index;
+      const detailRow = document.querySelector(`.lineage-detail-row[data-index="${index}"]`);
+      const icon = this.querySelector('.lineage-expand-icon');
+      
+      if (detailRow.style.display === 'none') {
+        detailRow.style.display = 'table-row';
+        icon.textContent = '▲';
+        icon.style.color = '#667eea';
+      } else {
+        detailRow.style.display = 'none';
+        icon.textContent = '▼';
+        icon.style.color = '#999';
+      }
+    });
+  });
 }
 
 function copyLineageResults() {
