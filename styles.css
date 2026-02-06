@@ -88,7 +88,7 @@
   flex-wrap: wrap;
 }
 
-.fms-env-tab {
+.fms-env-tab2 {
   flex: 1;
   min-width: 90px;
   padding: 8px 12px;
@@ -104,13 +104,13 @@
   letter-spacing: 0.5px;
 }
 
-.fms-env-tab:hover {
+.fms-env-tab2:hover {
   background: rgba(255, 255, 255, 0.3);
   border-color: rgba(255, 255, 255, 0.5);
   transform: translateY(-1px);
 }
 
-.fms-env-tab.active {
+.fms-env-tab2.active {
   background: white;
   color: #667eea;
   border-color: white;
@@ -118,21 +118,21 @@
 }
 
 /* 市场链接容器 */
-.fms-markets-container {
+.fms-markets-container2 {
   background: white;
   border-radius: 10px;
   padding: 12px;
   min-height: 60px;
 }
 
-.fms-markets {
+.fms-markets2 {
   display: none;
   flex-wrap: wrap;
   gap: 8px;
   animation: fadeIn 0.3s ease;
 }
 
-.fms-markets.active {
+.fms-markets2.active {
   display: flex;
 }
 
@@ -6555,24 +6555,6 @@ input:checked + .slider:before {
   color: #667eea;
   border-color: white;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-}
-
-.fms-markets-container2 {
-  background: white;
-  border-radius: 10px;
-  padding: 12px;
-  min-height: 60px;
-}
-
-.fms-markets2 {
-  display: none;
-  flex-wrap: wrap;
-  gap: 8px;
-  animation: fadeIn 0.3s ease;
-}
-
-.fms-markets2.active {
-  display: flex;
 }
 
 /* API血缘查询工具样式 */
