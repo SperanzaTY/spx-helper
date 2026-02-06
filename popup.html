@@ -1594,9 +1594,14 @@
                   </div>
                 </div>
                 
-                <button id="queryTableToApi" class="btn btn-primary" style="width: 100%;">
-                  🔍 查询使用该表的API
-                </button>
+                <div style="display: flex; gap: 8px;">
+                  <button id="queryTableToApi" class="btn btn-primary" style="flex: 1;">
+                    🔍 查询使用该表的API
+                  </button>
+                  <button id="refreshCache" class="btn btn-secondary" style="flex: 0 0 auto;" title="清除缓存重新查询">
+                    🔄
+                  </button>
+                </div>
               </div>
               
               <!-- 状态显示 -->

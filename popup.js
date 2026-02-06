@@ -9627,6 +9627,22 @@ function getDsName(dsId) {
   return DS_ID_MAPPING[dsId] || `DS-${dsId}`;
 }
 
+// 查询结果缓存
+let queryCache = {
+  data: null,
+  timestamp: null,
+  ttl: 5 * 60 * 1000 // 5分钟缓存
+};
+
+// 检查缓存是否有效
+function isCacheValid() {
+  if (!queryCache.data || !queryCache.timestamp) {
+    return false;
+  }
+  const now = Date.now();
+  return (now - queryCache.timestamp) < queryCache.ttl;
+}
+
 function initApiLineageTool() {
   // 模式切换
   const modeTabs = document.querySelectorAll('.lineage-mode-tab');
@@ -9665,6 +9681,16 @@ function initApiLineageTool() {
   const copyBtn = document.getElementById('copyLineageResults');
   if (copyBtn) {
     copyBtn.addEventListener('click', copyLineageResults);
+  }
+  
+  // 刷新缓存
+  const refreshCacheBtn = document.getElementById('refreshCache');
+  if (refreshCacheBtn) {
+    refreshCacheBtn.addEventListener('click', () => {
+      queryCache.data = null;
+      queryCache.timestamp = null;
+      alert('缓存已清除，下次查询将重新获取数据');
+    });
   }
 }
 
@@ -9725,8 +9751,26 @@ async function queryTableToApi() {
   showLineageStatus('loading', `正在查询使用该表的API (${selectedEnvs.join(', ')})...`);
   
   try {
-    // 表 → API 查询：获取所有数据（传%），在前端过滤
-    const results = await queryDataService('%');
+    let results;
+    
+    // 检查是否有缓存
+    if (isCacheValid()) {
+      console.log('使用缓存数据');
+      showLineageStatus('loading', `正在查询使用该表的API (使用缓存数据)...`);
+      results = queryCache.data;
+    } else {
+      console.log('缓存失效，重新查询');
+      showLineageStatus('loading', `正在查询使用该表的API (首次查询，请稍候)...`);
+      
+      // 查询所有数据并缓存
+      const searchPattern = '%';
+      results = await queryDataService(searchPattern);
+      
+      // 更新缓存
+      queryCache.data = results;
+      queryCache.timestamp = Date.now();
+      console.log('查询结果已缓存，5分钟内有效');
+    }
     
     // 在前端处理数据（传入环境筛选）
     const processedResults = processTableToApiData(results, tableName, selectedEnvs);
@@ -9974,11 +10018,18 @@ async function queryDataService(searchParam) {
   // 步骤2: 轮询元数据直到完成
   showLineageStatus('loading', `任务已提交 (jobId: ${jobId})，正在执行查询...`);
   
-  const maxAttempts = 60;
-  const pollInterval = 2000;
+  const maxAttempts = 120; // 增加最大尝试次数
+  let pollInterval = 1000; // 初始1秒轮询
   
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     await new Promise(resolve => setTimeout(resolve, pollInterval));
+    
+    // 动态调整轮询间隔：前10次1秒，之后2秒，30次后3秒
+    if (attempt > 30) {
+      pollInterval = 3000;
+    } else if (attempt > 10) {
+      pollInterval = 2000;
+    }
     
     const metaUrl = `https://open-api.datasuite.shopee.io/dataservice/result/${jobId}`;
     
@@ -9996,7 +10047,7 @@ async function queryDataService(searchParam) {
     }
     
     const metaResult = await metaResponse.json();
-    console.log(`元数据 (第${attempt}次):`, metaResult);
+    console.log(`元数据 (第${attempt}次, ${pollInterval}ms间隔):`, metaResult);
     
     const status = metaResult.status;
     
