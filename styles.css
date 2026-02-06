@@ -6648,6 +6648,42 @@ input:checked + .slider:before {
   font-family: system-ui, -apple-system, sans-serif;
 }
 
+.lineage-select {
+  padding: 8px 12px;
+  border: 2px solid #e8e8e8;
+  border-radius: 8px;
+  font-size: 13px;
+  outline: none;
+  transition: all 0.3s ease;
+  font-family: system-ui, -apple-system, sans-serif;
+  background: white;
+  cursor: pointer;
+}
+
+.lineage-select:focus {
+  border-color: #667eea;
+  box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.1);
+  background: #fafbff;
+}
+
+.lineage-select option {
+  padding: 6px 10px;
+}
+
+.lineage-select option:checked {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  font-weight: 600;
+}
+
+.lineage-hint {
+  display: block;
+  font-size: 11px;
+  color: #999;
+  margin-top: 4px;
+  font-style: italic;
+}
+
 .lineage-status {
   padding: 15px;
   border-radius: 8px;

@@ -9649,6 +9649,40 @@ function initApiLineageTool() {
     });
   });
   
+  // 环境筛选器逻辑（处理"全选"的互斥）
+  const apiEnvFilter = document.getElementById('apiEnvFilter');
+  const tableEnvFilter = document.getElementById('tableEnvFilter');
+  
+  const handleEnvFilterChange = (selectElement) => {
+    const selectedOptions = Array.from(selectElement.selectedOptions);
+    const selectedValues = selectedOptions.map(opt => opt.value);
+    
+    // 如果选中了"全选"
+    if (selectedValues.includes('all')) {
+      // 取消其他选项
+      Array.from(selectElement.options).forEach(opt => {
+        if (opt.value !== 'all') {
+          opt.selected = false;
+        }
+      });
+    } else if (selectedValues.length > 1 && selectedValues.length < selectElement.options.length - 1) {
+      // 如果选中了多个非"全选"选项，取消"全选"
+      Array.from(selectElement.options).forEach(opt => {
+        if (opt.value === 'all') {
+          opt.selected = false;
+        }
+      });
+    }
+  };
+  
+  if (apiEnvFilter) {
+    apiEnvFilter.addEventListener('change', () => handleEnvFilterChange(apiEnvFilter));
+  }
+  
+  if (tableEnvFilter) {
+    tableEnvFilter.addEventListener('change', () => handleEnvFilterChange(tableEnvFilter));
+  }
+  
   // API → 表 查询
   const queryApiToTableBtn = document.getElementById('queryApiToTable');
   if (queryApiToTableBtn) {
@@ -9670,14 +9704,24 @@ function initApiLineageTool() {
 
 async function queryApiToTable() {
   const apiId = document.getElementById('apiIdInput').value.trim();
+  const envFilter = document.getElementById('apiEnvFilter');
   
   if (!apiId) {
     showLineageStatus('error', '请输入API ID');
     return;
   }
   
+  // 获取选中的环境
+  const selectedOptions = Array.from(envFilter.selectedOptions);
+  const selectedEnvs = selectedOptions.map(opt => opt.value);
+  
+  if (selectedEnvs.length === 0) {
+    showLineageStatus('error', '请至少选择一个环境');
+    return;
+  }
+  
   document.getElementById('lineageResults').style.display = 'none';
-  showLineageStatus('loading', '正在查询API使用的表...');
+  showLineageStatus('loading', `正在查询API使用的表 (${selectedEnvs.includes('all') ? '全部环境' : selectedEnvs.join(', ')})...`);
   
   try {
     const searchPattern = `%${apiId}%`;
@@ -9685,8 +9729,8 @@ async function queryApiToTable() {
     // DataService API 只查询原始数据
     const results = await queryDataService(searchPattern);
     
-    // 在前端处理数据
-    const processedResults = processApiToTableData(results, apiId);
+    // 在前端处理数据（传入环境筛选）
+    const processedResults = processApiToTableData(results, apiId, selectedEnvs);
     displayApiToTableResults(processedResults);
     
   } catch (error) {
@@ -9697,21 +9741,31 @@ async function queryApiToTable() {
 
 async function queryTableToApi() {
   const tableName = document.getElementById('tableNameInput').value.trim();
+  const envFilter = document.getElementById('tableEnvFilter');
   
   if (!tableName) {
     showLineageStatus('error', '请输入表名');
     return;
   }
   
+  // 获取选中的环境
+  const selectedOptions = Array.from(envFilter.selectedOptions);
+  const selectedEnvs = selectedOptions.map(opt => opt.value);
+  
+  if (selectedEnvs.length === 0) {
+    showLineageStatus('error', '请至少选择一个环境');
+    return;
+  }
+  
   document.getElementById('lineageResults').style.display = 'none';
-  showLineageStatus('loading', '正在查询使用该表的API...');
+  showLineageStatus('loading', `正在查询使用该表的API (${selectedEnvs.includes('all') ? '全部环境' : selectedEnvs.join(', ')})...`);
   
   try {
     // 表 → API 查询：获取所有数据（传%），在前端过滤
     const results = await queryDataService('%');
     
-    // 在前端处理数据
-    const processedResults = processTableToApiData(results, tableName);
+    // 在前端处理数据（传入环境筛选）
+    const processedResults = processTableToApiData(results, tableName, selectedEnvs);
     displayTableToApiResults(processedResults);
     
   } catch (error) {
@@ -9721,12 +9775,13 @@ async function queryTableToApi() {
 }
 
 // 处理 API → 表 的数据
-function processApiToTableData(results, searchApiId) {
+function processApiToTableData(results, searchApiId, selectedEnvs) {
   if (!results.rows || results.rows.length === 0) {
     return { rows: [] };
   }
   
   console.log('原始数据:', results);
+  console.log('选中环境:', selectedEnvs);
   
   // 按 api_id 分组
   const groupedByApiId = {};
@@ -9734,9 +9789,15 @@ function processApiToTableData(results, searchApiId) {
     const values = row.values;
     const apiId = values.api_id;
     const apiStatus = values.api_status;
+    const publishEnv = values.publish_env;
     
     // 只处理 online 状态的API
     if (apiStatus !== 'online') {
+      return;
+    }
+    
+    // 环境筛选
+    if (!selectedEnvs.includes('all') && !selectedEnvs.includes(publishEnv)) {
       return;
     }
     
@@ -9804,12 +9865,13 @@ function processApiToTableData(results, searchApiId) {
 }
 
 // 处理 表 → API 的数据
-function processTableToApiData(results, searchTable) {
+function processTableToApiData(results, searchTable, selectedEnvs) {
   if (!results.rows || results.rows.length === 0) {
     return { rows: [] };
   }
   
   console.log('原始数据:', results);
+  console.log('选中环境:', selectedEnvs);
   
   // 按 api_id 分组
   const groupedByApiId = {};
@@ -9817,10 +9879,16 @@ function processTableToApiData(results, searchTable) {
     const values = row.values;
     const apiId = values.api_id;
     const apiStatus = values.api_status;
+    const publishEnv = values.publish_env;
     const bizSql = values.biz_sql || '';
     
     // 只处理 online 状态的API
     if (apiStatus !== 'online') {
+      return;
+    }
+    
+    // 环境筛选
+    if (!selectedEnvs.includes('all') && !selectedEnvs.includes(publishEnv)) {
       return;
     }
     
@@ -10206,6 +10274,10 @@ function formatTimestamp(timestamp) {
 
 // 解析并可视化展示Dynamic Where条件
 function parseDynamicWhereConditions(dynamicWhere) {
+  console.log('=== Dynamic Where 解析 ===');
+  console.log('原始值:', dynamicWhere);
+  console.log('数据类型:', typeof dynamicWhere);
+  
   if (!dynamicWhere || dynamicWhere.trim() === '') {
     return '<p style="color: #999; font-style: italic; padding: 10px;">无动态条件</p>';
   }
@@ -10213,8 +10285,12 @@ function parseDynamicWhereConditions(dynamicWhere) {
   try {
     // 尝试解析JSON格式的表格数据
     const conditions = JSON.parse(dynamicWhere);
+    console.log('解析成功:', conditions);
+    console.log('是否数组:', Array.isArray(conditions));
+    console.log('数组长度:', conditions.length);
     
     if (!Array.isArray(conditions) || conditions.length === 0) {
+      console.log('不是有效的数组或长度为0，显示原始文本');
       return `<pre class="api-detail-sql">${escapeHtml(dynamicWhere)}</pre>`;
     }
     
@@ -10230,6 +10306,7 @@ function parseDynamicWhereConditions(dynamicWhere) {
     html += '<tbody>';
     
     conditions.forEach(cond => {
+      console.log('处理条件:', cond);
       html += '<tr>';
       html += `<td><code class="var-code">${escapeHtml(cond.variable || '-')}</code></td>`;
       html += `<td><code class="var-code">${escapeHtml(cond['request param'] || cond.requestParam || '-')}</code></td>`;
@@ -10245,11 +10322,13 @@ function parseDynamicWhereConditions(dynamicWhere) {
     html += '</tbody></table>';
     html += '</div>';
     
+    console.log('表格HTML生成成功');
     return html;
     
   } catch (e) {
     // JSON解析失败，显示原始文本
     console.error('解析Dynamic Where失败:', e);
+    console.log('显示为原始文本');
     return `<pre class="api-detail-sql">${escapeHtml(dynamicWhere)}</pre>`;
   }
 }

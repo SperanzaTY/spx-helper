@@ -1529,6 +1529,19 @@
                          placeholder="输入API关键词，支持模糊匹配">
                 </div>
                 
+                <div class="lineage-form-group">
+                  <label class="lineage-label">环境筛选:</label>
+                  <select id="apiEnvFilter" class="lineage-select" multiple size="6">
+                    <option value="all" selected>全选</option>
+                    <option value="live">live</option>
+                    <option value="dev">dev</option>
+                    <option value="test">test</option>
+                    <option value="uat">uat</option>
+                    <option value="staging">staging</option>
+                  </select>
+                  <span class="lineage-hint">按住 Ctrl/Cmd 多选</span>
+                </div>
+                
                 <button id="queryApiToTable" class="btn btn-primary" style="width: 100%;">
                   🔍 查询该API使用的表
                 </button>
@@ -1540,6 +1553,19 @@
                   <label class="lineage-label">表名:</label>
                   <input type="text" id="tableNameInput" class="lineage-input" 
                          placeholder="输入表名关键词，支持模糊匹配">
+                </div>
+                
+                <div class="lineage-form-group">
+                  <label class="lineage-label">环境筛选:</label>
+                  <select id="tableEnvFilter" class="lineage-select" multiple size="6">
+                    <option value="all" selected>全选</option>
+                    <option value="live">live</option>
+                    <option value="dev">dev</option>
+                    <option value="test">test</option>
+                    <option value="uat">uat</option>
+                    <option value="staging">staging</option>
+                  </select>
+                  <span class="lineage-hint">按住 Ctrl/Cmd 多选</span>
                 </div>
                 
                 <button id="queryTableToApi" class="btn btn-primary" style="width: 100%;">
