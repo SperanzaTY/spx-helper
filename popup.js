@@ -10297,8 +10297,55 @@ function parseDynamicWhereConditions(dynamicWhere) {
     return '<p style="color: #999; font-style: italic; padding: 10px;">无动态条件</p>';
   }
   
-  // 直接显示为黑色文本，不做复杂解析
-  return `<pre class="api-detail-sql" style="color: #333; background: #f8f9fa; padding: 12px; border-radius: 6px; font-size: 12px; line-height: 1.6; overflow-x: auto;">${escapeHtml(dynamicWhere)}</pre>`;
+  try {
+    // 尝试解析JSON格式的表格数据
+    const conditions = JSON.parse(dynamicWhere);
+    console.log('解析成功:', conditions);
+    console.log('是否数组:', Array.isArray(conditions));
+    
+    if (!Array.isArray(conditions) || conditions.length === 0) {
+      console.log('不是有效的数组或长度为0，显示原始文本');
+      return `<pre class="api-detail-sql" style="color: #333; background: #f8f9fa; padding: 12px; border-radius: 6px; font-size: 12px; line-height: 1.6;">${escapeHtml(dynamicWhere)}</pre>`;
+    }
+    
+    // 构建简洁的表格
+    let html = '<div style="overflow-x: auto; margin-top: 8px;">';
+    html += '<table style="width: 100%; border-collapse: collapse; background: white; border: 1px solid #e0e0e0;">';
+    html += '<thead>';
+    html += '<tr style="background: #f5f5f5;">';
+    html += '<th style="padding: 10px; text-align: left; border: 1px solid #e0e0e0; font-weight: 600; color: #333; font-size: 13px;">Variable</th>';
+    html += '<th style="padding: 10px; text-align: left; border: 1px solid #e0e0e0; font-weight: 600; color: #333; font-size: 13px;">Param</th>';
+    html += '<th style="padding: 10px; text-align: left; border: 1px solid #e0e0e0; font-weight: 600; color: #333; font-size: 13px;">Rule</th>';
+    html += '<th style="padding: 10px; text-align: left; border: 1px solid #e0e0e0; font-weight: 600; color: #333; font-size: 13px;">Value</th>';
+    html += '<th style="padding: 10px; text-align: left; border: 1px solid #e0e0e0; font-weight: 600; color: #333; font-size: 13px;">SQL</th>';
+    html += '</tr>';
+    html += '</thead>';
+    html += '<tbody>';
+    
+    conditions.forEach((cond, index) => {
+      console.log('处理条件:', cond);
+      const bgColor = index % 2 === 0 ? '#ffffff' : '#fafafa';
+      html += `<tr style="background: ${bgColor};">`;
+      html += `<td style="padding: 10px; border: 1px solid #e0e0e0; color: #333; font-size: 12px; font-family: monospace;">${escapeHtml(cond.variable || '-')}</td>`;
+      html += `<td style="padding: 10px; border: 1px solid #e0e0e0; color: #333; font-size: 12px; font-family: monospace;">${escapeHtml(cond.param || '-')}</td>`;
+      html += `<td style="padding: 10px; border: 1px solid #e0e0e0; color: #333; font-size: 12px; font-family: monospace;">${escapeHtml(cond.rule || '-')}</td>`;
+      html += `<td style="padding: 10px; border: 1px solid #e0e0e0; color: #333; font-size: 12px; font-family: monospace;">${escapeHtml(cond.value || '-')}</td>`;
+      html += `<td style="padding: 10px; border: 1px solid #e0e0e0; color: #333; font-size: 12px; font-family: monospace; word-break: break-all;">${escapeHtml(cond.sql || '-')}</td>`;
+      html += '</tr>';
+    });
+    
+    html += '</tbody></table>';
+    html += '</div>';
+    
+    console.log('表格HTML生成成功');
+    return html;
+    
+  } catch (e) {
+    // JSON解析失败，显示原始文本
+    console.error('解析Dynamic Where失败:', e);
+    console.log('显示为原始文本');
+    return `<pre class="api-detail-sql" style="color: #333; background: #f8f9fa; padding: 12px; border-radius: 6px; font-size: 12px; line-height: 1.6;">${escapeHtml(dynamicWhere)}</pre>`;
+  }
 }
 
 // 附加行点击事件
