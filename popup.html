@@ -9,6 +9,16 @@
 </head>
 <body>
   <div class="container">
+    <!-- 独立窗口模式提示 -->
+    <div id="windowModeHint" class="window-mode-hint" style="display: none;">
+      <div class="hint-content">
+        <span class="hint-icon">💡</span>
+        <span class="hint-text">提示：开启独立窗口模式后，扩展将以可拖动窗口形式打开，点击网页后不会自动关闭</span>
+        <button id="enableWindowMode" class="hint-btn">🪟 立即开启</button>
+        <button id="closeHint" class="hint-close">×</button>
+      </div>
+    </div>
+    
     <header>
       <div class="header-main">
         <h1>⚡ SPX Helper</h1>
@@ -27,7 +37,7 @@
           <div class="setting-item">
             <div class="setting-info">
               <div class="setting-label">🪟 独立窗口模式</div>
-              <div class="setting-desc">启用后，点击扩展图标将打开独立窗口，可常驻桌面</div>
+              <div class="setting-desc">启用后，点击扩展图标将打开独立窗口，窗口可拖动、调整大小、常驻桌面，点击网页后不会自动关闭</div>
             </div>
             <label class="switch">
               <input type="checkbox" id="windowModeSwitch">
@@ -473,12 +483,7 @@
       <!-- 实用工具 Tab -->
       <div id="utils-tab" class="tab-pane">
         <div class="section">
-          <div class="utils-header">
-            <h2>🛠️ 实用工具</h2>
-            <button id="toggleUtilsPin" class="btn-pin" title="固定/取消固定工具栏">
-              📌 固定
-            </button>
-          </div>
+          <h2>🛠️ 实用工具</h2>
           
           <!-- 工具选择器 - 分类折叠菜单 -->
           <div class="utils-categories" id="utilsCategories">

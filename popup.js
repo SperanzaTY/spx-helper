@@ -80,6 +80,44 @@ function initSettings() {
     versionElement.textContent = 'v' + manifest.version;
   }
   
+  // 检查是否显示独立窗口模式提示
+  chrome.storage.local.get(['windowMode', 'windowModeHintDismissed'], function(result) {
+    const windowModeHint = document.getElementById('windowModeHint');
+    const isInWindowMode = new URLSearchParams(window.location.search).get('mode') === 'window';
+    
+    // 如果不在窗口模式、窗口模式未启用、且用户未关闭过提示
+    if (!isInWindowMode && !result.windowMode && !result.windowModeHintDismissed) {
+      if (windowModeHint) {
+        windowModeHint.style.display = 'block';
+      }
+    }
+    
+    if (windowModeSwitch) {
+      windowModeSwitch.checked = result.windowMode || false;
+    }
+  });
+  
+  // 快速开启窗口模式
+  const enableWindowModeBtn = document.getElementById('enableWindowMode');
+  if (enableWindowModeBtn) {
+    enableWindowModeBtn.addEventListener('click', function() {
+      if (windowModeSwitch) {
+        windowModeSwitch.checked = true;
+        windowModeSwitch.dispatchEvent(new Event('change'));
+      }
+      document.getElementById('windowModeHint').style.display = 'none';
+    });
+  }
+  
+  // 关闭提示
+  const closeHintBtn = document.getElementById('closeHint');
+  if (closeHintBtn) {
+    closeHintBtn.addEventListener('click', function() {
+      document.getElementById('windowModeHint').style.display = 'none';
+      chrome.storage.local.set({ windowModeHintDismissed: true });
+    });
+  }
+  
   // 加载当前设置
   chrome.storage.local.get(['windowMode'], function(result) {
     if (windowModeSwitch) {
@@ -1505,33 +1543,6 @@ function initUtils() {
       }
     });
   });
-  
-  // 工具栏固定功能
-  const togglePinBtn = document.getElementById('toggleUtilsPin');
-  const utilsCategories = document.getElementById('utilsCategories');
-  
-  if (togglePinBtn && utilsCategories) {
-    // 从localStorage恢复固定状态
-    const isPinned = localStorage.getItem('utilsCategoriesPinned') === 'true';
-    if (isPinned) {
-      utilsCategories.classList.add('pinned');
-      togglePinBtn.classList.add('active');
-      togglePinBtn.textContent = '📌 已固定';
-    }
-    
-    togglePinBtn.addEventListener('click', function() {
-      const isPinned = utilsCategories.classList.toggle('pinned');
-      this.classList.toggle('active');
-      
-      if (isPinned) {
-        this.textContent = '📌 已固定';
-        localStorage.setItem('utilsCategoriesPinned', 'true');
-      } else {
-        this.textContent = '📌 固定';
-        localStorage.setItem('utilsCategoriesPinned', 'false');
-      }
-    });
-  }
   
   // 工具切换
   const utilsBtns = document.querySelectorAll('.utils-grid-btn');
