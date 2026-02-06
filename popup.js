@@ -9872,10 +9872,29 @@ function processTableToApiData(results, searchTable) {
     // 取最新版本
     const latestVersion = versions[0];
     const dsId = latestVersion.ds_id;
+    const bizSql = latestVersion.biz_sql || '';
+    
+    // 提取所有表名
+    const regex = /\{mgmt_db2\}\.([a-zA-Z0-9_\{\}\-]+)/g;
+    const allTableNames = [];
+    let match;
+    while ((match = regex.exec(bizSql)) !== null) {
+      allTableNames.push(match[1]);
+    }
+    
+    // 筛选匹配搜索关键词的表名
+    const matchedTables = allTableNames.filter(table => 
+      table.toLowerCase().includes(searchTable.toLowerCase())
+    );
+    
+    // 去重
+    const uniqueMatchedTables = [...new Set(matchedTables)];
+    const tableNameStr = uniqueMatchedTables.join(' , ');
     
     processedRows.push({
       values: {
         api_id: apiId,
+        matched_tables: tableNameStr || '-',
         ds_id: dsId
       }
     });
@@ -10091,6 +10110,7 @@ function displayTableToApiResults(results) {
   let html = '<table class="lineage-results-table">';
   html += '<thead><tr>';
   html += '<th>API ID</th>';
+  html += '<th>匹配的表</th>';
   html += '<th>数据源</th>';
   html += '</tr></thead>';
   html += '<tbody>';
@@ -10102,6 +10122,7 @@ function displayTableToApiResults(results) {
     
     html += '<tr>';
     html += `<td><span class="lineage-api-id">${escapeHtml(values.api_id || '-')}</span></td>`;
+    html += `<td><span class="lineage-table-name">${escapeHtml(values.matched_tables || '-')}</span></td>`;
     html += `<td title="DS ID: ${dsId}">${escapeHtml(dsName)}</td>`;
     html += '</tr>';
   });
