@@ -9755,10 +9755,10 @@ function processApiToTableData(results, searchApiId) {
   results.rows.forEach(row => {
     const values = row.values;
     const apiId = values.api_id;
-    const publishEnv = values.publish_env;
+    const apiStatus = values.api_status;
     
-    // 只处理 live 环境的数据
-    if (publishEnv !== 'live') {
+    // 只处理 online 状态的API
+    if (apiStatus !== 'online') {
       return;
     }
     
@@ -9838,11 +9838,11 @@ function processTableToApiData(results, searchTable) {
   results.rows.forEach(row => {
     const values = row.values;
     const apiId = values.api_id;
-    const publishEnv = values.publish_env;
+    const apiStatus = values.api_status;
     const bizSql = values.biz_sql || '';
     
-    // 只处理 live 环境的数据
-    if (publishEnv !== 'live') {
+    // 只处理 online 状态的API
+    if (apiStatus !== 'online') {
       return;
     }
     
@@ -10179,11 +10179,7 @@ function buildApiDetailHtml(data) {
   html += `<div class="api-detail-item"><label>版本:</label><span>v${escapeHtml(data.api_version || '-')}</span></div>`;
   html += `<div class="api-detail-item"><label>响应类型:</label><span>${escapeHtml(data.response_data_type || '-')}</span></div>`;
   
-  // 时间信息
-  if (data.ctime) {
-    const createTime = formatTimestamp(data.ctime);
-    html += `<div class="api-detail-item"><label>创建时间:</label><span>${createTime}</span></div>`;
-  }
+  // 最后修改时间
   if (data.mtime) {
     const modifyTime = formatTimestamp(data.mtime);
     html += `<div class="api-detail-item"><label>最后修改:</label><span class="time-highlight">${modifyTime}</span></div>`;
@@ -10233,97 +10229,51 @@ function formatTimestamp(timestamp) {
 // 解析并可视化展示Dynamic Where条件
 function parseDynamicWhereConditions(dynamicWhere) {
   if (!dynamicWhere || dynamicWhere.trim() === '') {
-    return '<p style="color: #999; font-style: italic;">无动态条件</p>';
+    return '<p style="color: #999; font-style: italic; padding: 10px;">无动态条件</p>';
   }
   
   try {
-    // 尝试解析JSON格式
+    // 尝试解析JSON格式的表格数据
     const conditions = JSON.parse(dynamicWhere);
     
-    if (Array.isArray(conditions) && conditions.length > 0) {
-      let html = '<div class="dynamic-where-cards">';
-      
-      conditions.forEach((cond, index) => {
-        html += '<div class="where-condition-card">';
-        html += `<div class="where-card-header">条件 ${index + 1}</div>`;
-        html += '<div class="where-card-body">';
-        
-        // 显示条件的各个属性
-        Object.keys(cond).forEach(key => {
-          const value = cond[key];
-          html += `<div class="where-card-row">`;
-          html += `<span class="where-card-key">${escapeHtml(key)}:</span>`;
-          
-          // 如果值包含${xxx}参数，高亮显示
-          const valueStr = String(value);
-          if (valueStr.includes('${')) {
-            const highlighted = valueStr.replace(/\$\{([^}]+)\}/g, '<span class="where-param-highlight">${$1}</span>');
-            html += `<span class="where-card-value">${highlighted}</span>`;
-          } else {
-            html += `<span class="where-card-value">${escapeHtml(valueStr)}</span>`;
-          }
-          
-          html += `</div>`;
-        });
-        
-        html += '</div>';
-        html += '</div>';
-      });
-      
-      html += '</div>';
-      return html;
-    }
-  } catch (e) {
-    // 不是JSON格式，按文本处理
-  }
-  
-  // 按 AND/OR 分割条件（文本格式）
-  const parts = dynamicWhere.split(/\s+(AND|OR)\s+/gi);
-  let html = '<div class="dynamic-where-cards">';
-  let conditionIndex = 0;
-  
-  for (let i = 0; i < parts.length; i++) {
-    const part = parts[i].trim();
-    if (!part || ['AND', 'OR'].includes(part.toUpperCase())) {
-      continue;
+    if (!Array.isArray(conditions) || conditions.length === 0) {
+      return `<pre class="api-detail-sql">${escapeHtml(dynamicWhere)}</pre>`;
     }
     
-    conditionIndex++;
+    // 构建表格（类似截图中的样式）
+    let html = '<div class="dynamic-where-table-wrapper">';
+    html += '<table class="dynamic-where-table">';
+    html += '<thead><tr>';
+    html += '<th>Variable</th>';
+    html += '<th>Request Param</th>';
+    html += '<th>Rule</th>';
+    html += '<th>SQL</th>';
+    html += '</tr></thead>';
+    html += '<tbody>';
     
-    // 提取参数 ${xxx}
-    const paramMatches = part.match(/\$\{([^}]+)\}/g);
-    const params = paramMatches ? paramMatches.map(p => p.replace(/[${}]/g, '')) : [];
-    
-    html += '<div class="where-condition-card">';
-    html += `<div class="where-card-header">条件 ${conditionIndex}</div>`;
-    html += '<div class="where-card-body">';
-    
-    // 显示条件文本，高亮参数
-    let highlightedText = escapeHtml(part);
-    params.forEach(param => {
-      highlightedText = highlightedText.replace(
-        new RegExp(`\\$\\{${param}\\}`, 'g'),
-        `<span class="where-param-highlight">\${${param}}</span>`
-      );
+    conditions.forEach(cond => {
+      html += '<tr>';
+      html += `<td><code class="var-code">${escapeHtml(cond.variable || '-')}</code></td>`;
+      html += `<td><code class="var-code">${escapeHtml(cond['request param'] || cond.requestParam || '-')}</code></td>`;
+      html += `<td><span class="rule-badge">${escapeHtml(cond.rule || '-')}</span></td>`;
+      
+      // SQL列高亮参数
+      let sqlText = escapeHtml(cond.sql || '-');
+      sqlText = sqlText.replace(/\$\{([^}]+)\}/g, '<span class="where-param-highlight">${$1}</span>');
+      html += `<td class="sql-cell">${sqlText}</td>`;
+      html += '</tr>';
     });
     
-    html += `<div class="where-condition-text">${highlightedText}</div>`;
-    
-    if (params.length > 0) {
-      html += '<div class="where-condition-params">';
-      html += '<div style="font-size: 11px; color: #999; margin-bottom: 5px;">必需参数:</div>';
-      params.forEach(param => {
-        html += `<span class="where-param-tag">📌 ${escapeHtml(param)}</span>`;
-      });
-      html += '</div>';
-    }
-    
+    html += '</tbody></table>';
     html += '</div>';
-    html += '</div>';
+    
+    return html;
+    
+  } catch (e) {
+    // JSON解析失败，显示原始文本
+    console.error('解析Dynamic Where失败:', e);
+    return `<pre class="api-detail-sql">${escapeHtml(dynamicWhere)}</pre>`;
   }
-  
-  html += '</div>';
-  return html;
 }
 
 // 附加行点击事件

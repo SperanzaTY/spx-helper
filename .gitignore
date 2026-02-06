@@ -44,7 +44,5 @@ coverage/
 .env.local
 
 # 密钥文件
-key.pem
-
-# Playwright
+key.pem# Playwright
 .playwright-mcp/
