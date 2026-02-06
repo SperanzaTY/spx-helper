@@ -10177,7 +10177,7 @@ function buildApiDetailHtml(data) {
   html += `<div class="api-detail-item"><label>业务组:</label><span>${escapeHtml(data.biz_group || '-')}</span></div>`;
   html += `<div class="api-detail-item"><label>区域:</label><span>${escapeHtml(data.regions || '-')}</span></div>`;
   html += `<div class="api-detail-item"><label>版本:</label><span>v${escapeHtml(data.api_version || '-')}</span></div>`;
-  html += `<div class="api-detail-item"><label>请求方法:</label><span>${escapeHtml(data.request_method || '-')}</span></div>`;
+  html += `<div class="api-detail-item"><label>响应类型:</label><span>${escapeHtml(data.response_data_type || '-')}</span></div>`;
   html += '</div>';
   html += '</div>';
   
@@ -10189,22 +10189,11 @@ function buildApiDetailHtml(data) {
     html += '</div>';
   }
   
-  // 技术信息
-  html += '<div class="api-detail-section">';
-  html += '<h4 class="api-detail-title">⚙️ 技术信息</h4>';
-  html += '<div class="api-detail-grid">';
-  html += `<div class="api-detail-item"><label>API URL:</label><span class="api-url">${escapeHtml(data.api_url || '-')}</span></div>`;
-  html += `<div class="api-detail-item"><label>响应类型:</label><span>${escapeHtml(data.response_data_type || '-')}</span></div>`;
-  html += `<div class="api-detail-item"><label>响应字段:</label><span>${escapeHtml(data.response_data_field || '-')}</span></div>`;
-  html += `<div class="api-detail-item"><label>缓存:</label><span>${data.whether_api_cache ? `✅ ${data.api_cache_interval}s` : '❌'}</span></div>`;
-  html += '</div>';
-  html += '</div>';
-  
-  // 链接
-  if (data.jira) {
+  // Dynamic Where SQL - 重要的接口逻辑
+  if (data.dynamic_where_sql) {
     html += '<div class="api-detail-section">';
-    html += '<h4 class="api-detail-title">🔗 相关链接</h4>';
-    html += `<a href="${escapeHtml(data.jira)}" target="_blank" class="api-detail-link">📝 JIRA Issue</a>`;
+    html += '<h4 class="api-detail-title">🔍 Dynamic Where 条件</h4>';
+    html += `<pre class="api-detail-sql">${escapeHtml(data.dynamic_where_sql)}</pre>`;
     html += '</div>';
   }
   
