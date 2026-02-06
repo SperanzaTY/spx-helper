@@ -6758,22 +6758,12 @@ input:checked + .slider:before {
 
 .lineage-table-name {
   font-family: 'Monaco', 'Courier New', monospace;
-  color: #e91e63;
-  font-weight: 600;
+  color: #333;
   font-size: 12px;
-  background: #fff0f5;
-  padding: 2px 6px;
-  border-radius: 3px;
-  display: inline-block;
 }
 
 .lineage-api-id {
   font-family: 'Monaco', 'Courier New', monospace;
-  color: #4caf50;
-  font-weight: 600;
+  color: #333;
   font-size: 12px;
-  background: #f1f8f4;
-  padding: 2px 6px;
-  border-radius: 3px;
-  display: inline-block;
 }
