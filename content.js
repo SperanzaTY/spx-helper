@@ -12,8 +12,13 @@ class APIDataTracker {
     this.tableConfigs = []; // 新增：存储 Table 配置
     this.inspectorMode = false;
     this.highlightedElement = null;
+    this.selectedText = ''; // 新增：存储用户选取的文本
+    this.selectionFloatingBtn = null; // 新增：文本选取浮动按钮
     
     console.log('🔍 [SPX Helper] Content Script 已加载');
+    
+    // 监听文本选取
+    this.initTextSelectionListener();
     
     // 监听来自页面的消息
     window.addEventListener('message', (event) => {
@@ -47,6 +52,245 @@ class APIDataTracker {
         this.analyzeFieldMappings();
       }
     });
+  }
+  
+  // ========================================
+  // 文本选取监听器
+  // ========================================
+  initTextSelectionListener() {
+    document.addEventListener('mouseup', (e) => {
+      // 如果检查器模式开启，不处理文本选取（避免冲突）
+      if (this.inspectorMode) return;
+      
+      // 获取选中的文本
+      const selection = window.getSelection();
+      const selectedText = selection.toString().trim();
+      
+      // 如果没有选中文本或文本太短，隐藏按钮
+      if (!selectedText || selectedText.length < 1) {
+        this.hideSelectionFloatingBtn();
+        return;
+      }
+      
+      // 如果是在我们自己的 UI 元素上选择，忽略
+      const range = selection.getRangeAt(0);
+      const container = range.commonAncestorContainer;
+      const element = container.nodeType === Node.TEXT_NODE 
+        ? container.parentElement 
+        : container;
+      
+      if (this.isOurElement(element)) {
+        return;
+      }
+      
+      this.selectedText = selectedText;
+      console.log('📝 [SPX Helper] 用户选取文本:', selectedText);
+      
+      // 显示浮动按钮
+      this.showSelectionFloatingBtn(e.clientX, e.clientY);
+    });
+    
+    // 点击页面其他地方时隐藏按钮
+    document.addEventListener('mousedown', (e) => {
+      if (this.selectionFloatingBtn && !this.selectionFloatingBtn.contains(e.target)) {
+        // 延迟隐藏，避免点击按钮时被隐藏
+        setTimeout(() => {
+          const selection = window.getSelection();
+          if (!selection.toString().trim()) {
+            this.hideSelectionFloatingBtn();
+          }
+        }, 100);
+      }
+    });
+  }
+  
+  // ========================================
+  // 显示文本选取浮动按钮
+  // ========================================
+  showSelectionFloatingBtn(x, y) {
+    // 移除旧按钮
+    this.hideSelectionFloatingBtn();
+    
+    const btn = document.createElement('div');
+    btn.id = 'spx-selection-floating-btn';
+    btn.className = 'spx-selection-floating-btn';
+    btn.style.cssText = `
+      position: fixed;
+      top: ${y + 10}px;
+      left: ${x + 10}px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 8px 15px;
+      border-radius: 20px;
+      font-size: 12px;
+      cursor: pointer;
+      z-index: 2147483647;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      transition: all 0.2s;
+      user-select: none;
+    `;
+    btn.innerHTML = `
+      <span style="font-size: 14px;">🔍</span>
+      <span>查找来源</span>
+    `;
+    
+    // 悬停效果
+    btn.addEventListener('mouseenter', () => {
+      btn.style.transform = 'scale(1.05)';
+      btn.style.boxShadow = '0 6px 16px rgba(0,0,0,0.4)';
+    });
+    btn.addEventListener('mouseleave', () => {
+      btn.style.transform = 'scale(1)';
+      btn.style.boxShadow = '0 4px 12px rgba(0,0,0,0.3)';
+    });
+    
+    // 点击按钮搜索数据来源
+    btn.addEventListener('click', () => {
+      this.searchSelectedText();
+    });
+    
+    document.body.appendChild(btn);
+    this.selectionFloatingBtn = btn;
+    
+    console.log('✅ [SPX Helper] 显示文本选取浮动按钮');
+  }
+  
+  // ========================================
+  // 隐藏文本选取浮动按钮
+  // ========================================
+  hideSelectionFloatingBtn() {
+    if (this.selectionFloatingBtn) {
+      this.selectionFloatingBtn.remove();
+      this.selectionFloatingBtn = null;
+    }
+  }
+  
+  // ========================================
+  // 搜索选中的文本
+  // ========================================
+  searchSelectedText() {
+    if (!this.selectedText) {
+      console.warn('⚠️ [SPX Helper] 没有选中的文本');
+      return;
+    }
+    
+    console.log('🔎 [SPX Helper] 开始搜索选中文本:', this.selectedText);
+    
+    // 格式化文本（去除千分位、货币符号等）
+    const normalizedTexts = this.normalizeSelectedText(this.selectedText);
+    console.log('📝 [SPX Helper] 格式化后的文本:', normalizedTexts);
+    
+    // 在 API 记录中搜索
+    const sources = this.findDataSources(normalizedTexts);
+    
+    if (sources.length === 0) {
+      this.showNoSourcePanel();
+    } else {
+      // 显示搜索结果面板（使用 showDataSourcePanel）
+      this.showDataSourcePanel(null, sources);
+    }
+    
+    // 隐藏浮动按钮
+    this.hideSelectionFloatingBtn();
+  }
+  
+  // ========================================
+  // 格式化选中的文本（去除千分位、符号等）
+  // ========================================
+  normalizeSelectedText(text) {
+    const normalized = [];
+    
+    // 1. 原始文本
+    normalized.push(text);
+    
+    // 2. 去除千分位逗号（1,234,567 → 1234567）
+    const withoutComma = text.replace(/,/g, '');
+    if (withoutComma !== text) {
+      normalized.push(withoutComma);
+    }
+    
+    // 3. 去除货币符号和空格（$1,234.56 → 1234.56）
+    const withoutCurrency = text.replace(/[$€¥₹£\s,]/g, '');
+    if (withoutCurrency !== text && withoutCurrency !== withoutComma) {
+      normalized.push(withoutCurrency);
+    }
+    
+    // 4. 只保留数字和小数点（1,234.56% → 1234.56）
+    const digitsOnly = text.replace(/[^0-9.]/g, '');
+    if (digitsOnly && digitsOnly !== withoutCurrency) {
+      normalized.push(digitsOnly);
+    }
+    
+    // 5. 只保留数字（1234.56 → 123456）
+    const pureDigits = text.replace(/[^0-9]/g, '');
+    if (pureDigits && pureDigits.length >= 2) {
+      normalized.push(pureDigits);
+    }
+    
+    // 去重
+    return [...new Set(normalized)].filter(t => t && t.length > 0);
+  }
+  
+  // ========================================
+  // 显示"未找到来源"面板
+  // ========================================
+  showNoSourcePanel() {
+    // 移除旧面板
+    const oldPanel = document.getElementById('spx-api-no-source-panel');
+    if (oldPanel) oldPanel.remove();
+    
+    const panel = document.createElement('div');
+    panel.id = 'spx-api-no-source-panel';
+    panel.style.cssText = `
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 400px;
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+      z-index: 2147483647;
+      padding: 30px;
+      text-align: center;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    `;
+    
+    panel.innerHTML = `
+      <div style="font-size: 48px; margin-bottom: 15px;">🔍</div>
+      <h3 style="margin: 0 0 10px 0; color: #333;">未找到数据来源</h3>
+      <p style="color: #666; margin: 0 0 15px 0; font-size: 14px;">
+        选中的文本: <strong style="color: #667eea;">${this.selectedText}</strong>
+      </p>
+      <p style="color: #999; font-size: 12px; margin: 0 0 20px 0;">
+        可能原因：<br>
+        1. API 响应中不包含此数据<br>
+        2. 数据格式不匹配<br>
+        3. 页面加载时未捕获到 API 请求
+      </p>
+      <button id="spx-no-source-close-btn" style="
+        background: #667eea;
+        color: white;
+        border: none;
+        border-radius: 8px;
+        padding: 10px 20px;
+        cursor: pointer;
+        font-size: 14px;
+      ">知道了</button>
+    `;
+    
+    document.body.appendChild(panel);
+    
+    // 关闭按钮
+    document.getElementById('spx-no-source-close-btn').addEventListener('click', () => {
+      panel.remove();
+    });
+    
+    console.log('⚠️ [SPX Helper] 显示"未找到来源"面板');
   }
   
   // ========================================
@@ -784,7 +1028,7 @@ class APIDataTracker {
         current.id === 'spx-api-source-panel' || current.id === 'spx-api-no-source-panel' ||
         current.id === 'spx-api-tracker-tooltip' || current.id === 'spx-api-tracker-element-info' ||
         current.id === 'spx-close-panel' || current.id === 'spx-no-source-close-btn' ||
-        current.id === 'spx-exit-inspector'
+        current.id === 'spx-exit-inspector' || current.id === 'spx-selection-floating-btn'
       )) {
         return true;
       }
@@ -793,7 +1037,7 @@ class APIDataTracker {
         let classNames = (typeof current.className === 'string') 
           ? current.className 
           : (current.className.baseVal || '');
-        if (classNames && (classNames.includes('spx-') || classNames.includes('spx-api-tracker'))) {
+        if (classNames && (classNames.includes('spx-') || classNames.includes('spx-api-tracker') || classNames.includes('spx-selection-floating'))) {
           return true;
         }
       }
