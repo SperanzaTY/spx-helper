@@ -1519,28 +1519,75 @@ function exportSingleNote() {
 
 // ===== 实用工具切换 =====
 function initUtils() {
+  // 从 storage 读取工具分类的展开状态
+  chrome.storage.local.get(['utilsCategoryExpanded'], function(result) {
+    const utilsCategoryExpanded = result.utilsCategoryExpanded || {};
+    
+    // 初始化工具分类的展开状态
+    const categoryHeaders = document.querySelectorAll('.utils-categories .category-header');
+    categoryHeaders.forEach(header => {
+      const category = header.parentElement;
+      const content = category.querySelector('.category-content');
+      const toggle = header.querySelector('.category-toggle');
+      
+      // 获取分类 ID
+      const categoryId = header.dataset.category;
+      if (!categoryId) return;
+      
+      // 读取之前保存的状态，默认：通用工具展开，App工具收起
+      const defaultExpanded = categoryId === 'general';
+      const isExpanded = utilsCategoryExpanded[categoryId] !== undefined 
+        ? utilsCategoryExpanded[categoryId] 
+        : defaultExpanded;
+      
+      // 应用状态
+      if (isExpanded) {
+        header.classList.add('active');
+        content.classList.add('active');
+        if (toggle) toggle.textContent = '▼';
+      } else {
+        header.classList.remove('active');
+        content.classList.remove('active');
+        if (toggle) toggle.textContent = '▶';
+      }
+    });
+  });
+  
   // 工具分类折叠
-  const categoryHeaders = document.querySelectorAll('.category-header');
+  const categoryHeaders = document.querySelectorAll('.utils-categories .category-header');
   categoryHeaders.forEach(header => {
     header.addEventListener('click', function() {
       const category = this.parentElement;
       const content = category.querySelector('.category-content');
       const toggle = this.querySelector('.category-toggle');
       
+      // 获取分类 ID
+      const categoryId = this.dataset.category;
+      if (!categoryId) return;
+      
       // 切换展开/折叠状态
       const isActive = this.classList.contains('active');
+      const newExpanded = !isActive;
       
       if (isActive) {
         // 折叠
         this.classList.remove('active');
         content.classList.remove('active');
-        toggle.textContent = '▶';
+        if (toggle) toggle.textContent = '▶';
       } else {
         // 展开
         this.classList.add('active');
         content.classList.add('active');
-        toggle.textContent = '▼';
+        if (toggle) toggle.textContent = '▼';
       }
+      
+      // 保存状态到 storage
+      chrome.storage.local.get(['utilsCategoryExpanded'], function(result) {
+        const utilsCategoryExpanded = result.utilsCategoryExpanded || {};
+        utilsCategoryExpanded[categoryId] = newExpanded;
+        chrome.storage.local.set({ utilsCategoryExpanded: utilsCategoryExpanded });
+        console.log('💾 保存工具分类状态:', categoryId, newExpanded);
+      });
     });
   });
   
