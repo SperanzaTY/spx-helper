@@ -9052,6 +9052,224 @@ document.getElementById('refreshAPIListBtn')?.addEventListener('click', function
   }, 500);
 });
 
+// ========================================
+// 字段映射分析功能
+// ========================================
+let latestFieldMappings = null;
+let latestTableConfig = null;
+
+// 监听来自 content script 的字段映射分析结果
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.action === 'FIELD_MAPPINGS_ANALYZED') {
+    latestFieldMappings = message.mappings;
+    latestTableConfig = message.tableConfig;
+    
+    console.log('📊 [Popup] 收到字段映射分析结果:', latestFieldMappings);
+    
+    // 自动显示映射结果
+    displayFieldMappings();
+  }
+  
+  if (message.action === 'TABLE_CONFIG_CAPTURED') {
+    console.log('📊 [Popup] 收到 Table 配置:', message.config);
+  }
+});
+
+// 分析映射按钮
+document.getElementById('analyzeMappingsBtn')?.addEventListener('click', async function() {
+  const btn = this;
+  const originalText = btn.innerHTML;
+  btn.innerHTML = '🔄 分析中...';
+  btn.disabled = true;
+  
+  try {
+    const tabs = await chrome.tabs.query({});
+    const webTabs = tabs.filter(tab => {
+      return tab.url && 
+             !tab.url.startsWith('chrome://') && 
+             !tab.url.startsWith('chrome-extension://') &&
+             !tab.url.startsWith('edge://') &&
+             !tab.url.startsWith('about:');
+    });
+    
+    webTabs.sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0));
+    const tab = webTabs[0];
+    
+    if (!tab || !tab.id) {
+      showToast('❌ 无法获取网页标签页');
+      btn.innerHTML = originalText;
+      btn.disabled = false;
+      return;
+    }
+    
+    chrome.tabs.sendMessage(tab.id, { action: 'ANALYZE_FIELD_MAPPINGS' }, (response) => {
+      if (chrome.runtime.lastError) {
+        console.error('分析映射失败:', chrome.runtime.lastError);
+        document.getElementById('fieldMappingsList').innerHTML = `
+          <div style="text-align: center; color: #ef4444; padding: 20px;">
+            ❌ 分析失败：${chrome.runtime.lastError.message}
+          </div>`;
+      } else {
+        console.log('✅ 字段映射分析请求已发送');
+      }
+      
+      btn.innerHTML = originalText;
+      btn.disabled = false;
+    });
+  } catch (error) {
+    console.error('分析映射失败:', error);
+    showToast('❌ 分析失败');
+    btn.innerHTML = originalText;
+    btn.disabled = false;
+  }
+});
+
+// 显示字段映射结果
+function displayFieldMappings() {
+  const container = document.getElementById('fieldMappingsList');
+  
+  if (!latestFieldMappings || latestFieldMappings.length === 0) {
+    container.innerHTML = `
+      <div style="text-align: center; color: #f59e0b; padding: 20px;">
+        ⚠️ 未找到匹配的字段映射<br>
+        <small style="color: #999; margin-top: 5px; display: block;">
+          可能原因：1) 页面上没有表格组件 2) API 响应数据结构不匹配
+        </small>
+      </div>`;
+    return;
+  }
+  
+  let html = '';
+  
+  latestFieldMappings.forEach((mapping, index) => {
+    const urlShort = mapping.apiUrl.length > 50 
+      ? mapping.apiUrl.substring(0, 47) + '...' 
+      : mapping.apiUrl;
+    
+    html += `
+      <div style="background: white; border-radius: 8px; padding: 12px; margin-bottom: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <div>
+            <span style="background: #10b981; color: white; padding: 2px 8px; border-radius: 4px; font-size: 11px; margin-right: 5px;">
+              ${mapping.apiMethod}
+            </span>
+            <span style="background: #667eea; color: white; padding: 2px 8px; border-radius: 4px; font-size: 11px;">
+              匹配率: ${mapping.matchRate}
+            </span>
+          </div>
+          <button class="view-mapping-detail-btn" data-index="${index}" style="background: #f3f4f6; border: none; border-radius: 4px; padding: 4px 10px; cursor: pointer; font-size: 11px; color: #667eea;">
+            查看详情 ▼
+          </button>
+        </div>
+        <div style="font-size: 11px; color: #666; margin-bottom: 8px; word-break: break-all;">
+          ${urlShort}
+        </div>
+        <div style="font-size: 12px; color: #333;">
+          <strong>匹配字段 (${mapping.matched.length}):</strong>
+          <div style="margin-top: 5px; display: flex; flex-wrap: wrap; gap: 5px;">
+            ${mapping.matched.slice(0, 10).map(field => 
+              `<span style="background: #d1fae5; color: #065f46; padding: 2px 6px; border-radius: 3px; font-size: 10px;">${field}</span>`
+            ).join('')}
+            ${mapping.matched.length > 10 ? `<span style="color: #999; font-size: 10px;">+${mapping.matched.length - 10} more</span>` : ''}
+          </div>
+        </div>
+        <div class="mapping-detail-${index}" style="display: none; margin-top: 10px; padding-top: 10px; border-top: 1px solid #e5e7eb;">
+          <div style="font-size: 11px; margin-bottom: 8px;">
+            <strong style="color: #f59e0b;">API 独有字段 (${mapping.apiOnly.length}):</strong>
+            <div style="margin-top: 5px; display: flex; flex-wrap: wrap; gap: 5px;">
+              ${mapping.apiOnly.map(field => 
+                `<span style="background: #fef3c7; color: #92400e; padding: 2px 6px; border-radius: 3px; font-size: 10px;">${field}</span>`
+              ).join('')}
+            </div>
+          </div>
+          <div style="font-size: 11px;">
+            <strong style="color: #ef4444;">UI 独有字段 (${mapping.uiOnly.length}):</strong>
+            <div style="margin-top: 5px; display: flex; flex-wrap: wrap; gap: 5px;">
+              ${mapping.uiOnly.map(field => 
+                `<span style="background: #fee2e2; color: #991b1b; padding: 2px 6px; border-radius: 3px; font-size: 10px;">${field}</span>`
+              ).join('')}
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  });
+  
+  container.innerHTML = html;
+  
+  // 添加详情切换事件
+  container.querySelectorAll('.view-mapping-detail-btn').forEach(btn => {
+    btn.addEventListener('click', function() {
+      const index = this.dataset.index;
+      const detailDiv = document.querySelector(`.mapping-detail-${index}`);
+      
+      if (detailDiv.style.display === 'none') {
+        detailDiv.style.display = 'block';
+        this.textContent = '收起详情 ▲';
+      } else {
+        detailDiv.style.display = 'none';
+        this.textContent = '查看详情 ▼';
+      }
+    });
+  });
+}
+
+// 导出 CSV
+document.getElementById('exportMappingsCSV')?.addEventListener('click', function() {
+  if (!latestFieldMappings || !latestTableConfig) {
+    showToast('⚠️ 请先分析字段映射');
+    return;
+  }
+  
+  let csv = 'UI列名,dataIndex,API URL,API Method,匹配状态,数据类型\n';
+  
+  latestTableConfig.columns.forEach(col => {
+    const uiTitle = col.title || '';
+    const dataIndex = col.dataIndex || '';
+    
+    latestFieldMappings.forEach(mapping => {
+      const matched = mapping.matched.includes(dataIndex);
+      const status = matched ? '✅ 匹配' : '❌ 未匹配';
+      const url = mapping.apiUrl;
+      const method = mapping.apiMethod;
+      
+      csv += `"${uiTitle}","${dataIndex}","${url}","${method}","${status}","未知"\n`;
+    });
+  });
+  
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `field-mapping-${Date.now()}.csv`;
+  link.click();
+  
+  showToast('✅ CSV 已导出');
+});
+
+// 导出 JSON
+document.getElementById('exportMappingsJSON')?.addEventListener('click', function() {
+  if (!latestFieldMappings || !latestTableConfig) {
+    showToast('⚠️ 请先分析字段映射');
+    return;
+  }
+  
+  const exportData = {
+    timestamp: new Date().toISOString(),
+    tableConfig: latestTableConfig,
+    fieldMappings: latestFieldMappings
+  };
+  
+  const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `field-mapping-${Date.now()}.json`;
+  link.click();
+  
+  showToast('✅ JSON 已导出');
+});
+
 // API 溯源工具打开时加载记录
 document.querySelectorAll('[data-util="api-tracker"]').forEach(btn => {
   btn.addEventListener('click', () => {

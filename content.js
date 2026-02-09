@@ -9,6 +9,7 @@
 class APIDataTracker {
   constructor() {
     this.apiRecords = new Map();
+    this.tableConfigs = []; // 新增：存储 Table 配置
     this.inspectorMode = false;
     this.highlightedElement = null;
     
@@ -28,7 +29,98 @@ class APIDataTracker {
           record: record
         }).catch(() => {});
       }
+      
+      // 新增：接收 Table 配置
+      if (event.data.type === 'SPX_TABLE_CONFIG_CAPTURED') {
+        const config = event.data.config;
+        this.tableConfigs.push(config);
+        
+        console.log('📊 [SPX Helper] Content Script 收到 Table 配置:', config);
+        
+        // 通知 popup
+        chrome.runtime.sendMessage({
+          action: 'TABLE_CONFIG_CAPTURED',
+          config: config
+        }).catch(() => {});
+        
+        // 自动分析 UI → API 映射
+        this.analyzeFieldMappings();
+      }
     });
+  }
+  
+  // ========================================
+  // 自动分析 UI → API 字段映射
+  // ========================================
+  analyzeFieldMappings() {
+    if (this.tableConfigs.length === 0 || this.apiRecords.size === 0) {
+      console.log('⏳ [SPX Helper] 等待更多数据进行映射分析');
+      return;
+    }
+    
+    const latestTableConfig = this.tableConfigs[this.tableConfigs.length - 1];
+    const uiFields = latestTableConfig.columns.map(col => col.dataIndex).filter(Boolean);
+    
+    console.log('🔗 [SPX Helper] 开始分析字段映射');
+    console.log('   UI 字段:', uiFields);
+    
+    const mappings = [];
+    
+    // 遍历所有 API 记录
+    this.apiRecords.forEach((record) => {
+      const apiResponse = record.responseData;
+      
+      // 提取 API 响应中的字段（通常在 data.list[0] 或 data 中）
+      let apiFields = [];
+      
+      if (apiResponse?.data?.list && apiResponse.data.list.length > 0) {
+        apiFields = Object.keys(apiResponse.data.list[0]);
+      } else if (apiResponse?.data && typeof apiResponse.data === 'object') {
+        apiFields = Object.keys(apiResponse.data);
+      } else if (Array.isArray(apiResponse) && apiResponse.length > 0) {
+        apiFields = Object.keys(apiResponse[0]);
+      }
+      
+      if (apiFields.length === 0) {
+        console.log('   ⏭️ 跳过（无法提取字段）:', record.url);
+        return;
+      }
+      
+      console.log('   📡 API 字段:', apiFields.slice(0, 10), '...');
+      
+      // 匹配分析
+      const matched = uiFields.filter(f => apiFields.includes(f));
+      const apiOnly = apiFields.filter(f => !uiFields.includes(f));
+      const uiOnly = uiFields.filter(f => !apiFields.includes(f));
+      
+      if (matched.length > 0) {
+        mappings.push({
+          apiUrl: record.url,
+          apiMethod: record.method,
+          timestamp: record.requestTime,
+          matched: matched,
+          apiOnly: apiOnly.slice(0, 10),
+          uiOnly: uiOnly,
+          matchRate: (matched.length / uiFields.length * 100).toFixed(1) + '%'
+        });
+        
+        console.log('   ✅ 匹配成功:', matched.length, '/', uiFields.length, '字段');
+        console.log('      匹配字段:', matched.slice(0, 5));
+      }
+    });
+    
+    if (mappings.length > 0) {
+      console.log('🎯 [SPX Helper] 字段映射分析完成:', mappings.length, '个 API');
+      
+      // 通知 popup
+      chrome.runtime.sendMessage({
+        action: 'FIELD_MAPPINGS_ANALYZED',
+        mappings: mappings,
+        tableConfig: latestTableConfig
+      }).catch(() => {});
+    } else {
+      console.log('⚠️ [SPX Helper] 未找到匹配的字段映射');
+    }
   }
   
   // ========================================
@@ -789,6 +881,17 @@ class APIDataTracker {
         } else {
           sendResponse({ record: null });
         }
+      }
+      
+      // 新增：获取 Table 配置
+      if (request.action === 'GET_TABLE_CONFIGS') {
+        sendResponse({ configs: this.tableConfigs });
+      }
+      
+      // 新增：手动触发字段映射分析
+      if (request.action === 'ANALYZE_FIELD_MAPPINGS') {
+        this.analyzeFieldMappings();
+        sendResponse({ success: true });
       }
       
       return true;
