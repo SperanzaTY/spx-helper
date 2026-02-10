@@ -9,9 +9,6 @@
   // 创建全局 API 记录器
   window.__spxAPIRecords = new Map();
   
-  // 创建全局 Table 配置记录器
-  window.__spxTableConfigs = [];
-  
   // API 过滤配置（默认值）
   let apiFilterKeywords = ['api_mart'];  // 默认只拦截包含 api_mart 的接口
   
@@ -43,70 +40,6 @@
     return apiFilterKeywords.some(keyword => url.includes(keyword));
   }
   
-  // ========================================
-  // Hook React 组件（捕获 Table columns）
-  // ========================================
-  function hookReact() {
-    if (typeof React !== 'undefined' && React.createElement) {
-      const originalCreateElement = React.createElement;
-      
-      React.createElement = function(type, props, ...children) {
-        // 捕获带有 columns 的组件（通常是 Table）
-        if (props && props.columns && Array.isArray(props.columns)) {
-          const tableConfig = {
-            timestamp: Date.now(),
-            componentType: typeof type === 'string' ? type : type?.name || 'Unknown',
-            columns: props.columns.map(col => ({
-              title: col.title,
-              dataIndex: col.dataIndex || col.key,
-              key: col.key,
-              hasRender: !!col.render,
-              hasCustomRender: !!col.render && col.render.toString().length > 50
-            })),
-            rowKey: props.rowKey,
-            dataSourceLength: props.dataSource?.length
-          };
-          
-          window.__spxTableConfigs.push(tableConfig);
-          
-          console.log('📊 [SPX Helper] 捕获 Table 配置:', tableConfig);
-          
-          // 通知 content script
-          window.postMessage({
-            type: 'SPX_TABLE_CONFIG_CAPTURED',
-            config: tableConfig
-          }, '*');
-        }
-        
-        return originalCreateElement.apply(this, [type, props, ...children]);
-      };
-      
-      console.log('✅ [SPX Helper] React.createElement 已 Hook');
-    }
-  }
-  
-  // 尝试立即 Hook
-  hookReact();
-  
-  // 如果 React 还未加载，等待加载后再 Hook
-  if (typeof React === 'undefined') {
-    console.log('⏳ [SPX Helper] React 尚未加载，等待...');
-    
-    // 监听全局 React 对象
-    Object.defineProperty(window, 'React', {
-      configurable: true,
-      get() {
-        return this._react;
-      },
-      set(value) {
-        this._react = value;
-        if (value && value.createElement) {
-          console.log('✅ [SPX Helper] React 已加载，开始 Hook');
-          hookReact();
-        }
-      }
-    });
-  }
   
   // 保存原始 fetch
   const originalFetch = window.fetch;
