@@ -3,6 +3,8 @@
 // Content Script - UI 管理器
 // ========================================
 
+console.log('🚀 [SPX Helper] Content Script 开始加载...');
+
 // 注意：API 拦截由 injected.js 完成（运行在 MAIN world）
 // 这个脚本负责 UI 交互（运行在 ISOLATED world）
 
