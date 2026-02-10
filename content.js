@@ -1246,8 +1246,24 @@ class APIDataTracker {
       // 显示加载面板
       this.showAIAnalysisPanel('loading', source);
       
-      // 构建分析提示词
-      const prompt = this.buildAPIAnalysisPrompt(source);
+      // 尝试提取API ID
+      const apiId = this.extractAPIId(source.apiRecord.url);
+      
+      // 查询API血缘信息（如果能提取到API ID）
+      let lineageInfo = null;
+      if (apiId) {
+        console.log('🔍 [SPX Helper] 提取到API ID:', apiId);
+        try {
+          lineageInfo = await this.queryAPILineage(apiId);
+          console.log('✅ [SPX Helper] API血缘查询成功:', lineageInfo);
+        } catch (err) {
+          console.warn('⚠️ [SPX Helper] API血缘查询失败:', err.message);
+          // 血缘查询失败不影响主流程
+        }
+      }
+      
+      // 构建分析提示词（包含血缘信息）
+      const prompt = this.buildAPIAnalysisPrompt(source, lineageInfo);
       
       // 调用AI API
       const analysis = await this.callAIAPI(prompt);
@@ -1259,6 +1275,41 @@ class APIDataTracker {
       console.error('❌ [SPX Helper] 调用AI失败:', err);
       this.showAIAnalysisPanel('error', source, err.message);
     }
+  }
+  
+  extractAPIId(url) {
+    // 尝试从URL中提取API ID
+    // 例如: /api_mart/order/get_detail -> order/get_detail
+    // 或: /api_mart/order/get_detail?v=1 -> order/get_detail
+    
+    const match = url.match(/\/api_mart\/([^?#]+)/);
+    if (match) {
+      return match[1].replace(/\/$/, ''); // 移除末尾的斜杠
+    }
+    
+    return null;
+  }
+  
+  async queryAPILineage(apiId) {
+    // 调用API血缘查询
+    return new Promise((resolve, reject) => {
+      chrome.runtime.sendMessage({
+        action: 'QUERY_API_LINEAGE',
+        apiId: apiId
+      }, response => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+          return;
+        }
+        
+        if (!response || !response.success) {
+          reject(new Error(response?.error || 'API血缘查询失败'));
+          return;
+        }
+        
+        resolve(response.lineageInfo);
+      });
+    });
   }
   
   async callAIAPI(prompt) {
@@ -1435,13 +1486,24 @@ class APIDataTracker {
     return div.innerHTML;
   }
   
-  buildAPIAnalysisPrompt(source) {
+  buildAPIAnalysisPrompt(source, lineageInfo = null) {
     const record = source.apiRecord;
     
     // 截取响应数据（避免太长）
     let responsePreview = JSON.stringify(record.responseData, null, 2);
     if (responsePreview.length > 2000) {
       responsePreview = responsePreview.substring(0, 2000) + '\n... (数据已截断)';
+    }
+    
+    // 构建血缘信息部分
+    let lineageSection = '';
+    if (lineageInfo && lineageInfo.tables && lineageInfo.tables.length > 0) {
+      lineageSection = `
+
+🗄️ **数据血缘信息**
+- 数据源: ${lineageInfo.dsName || lineageInfo.dsId || '未知'}
+- 使用的表: ${lineageInfo.tables.join(', ')}
+${lineageInfo.bizSql ? `- 业务SQL:\n\`\`\`sql\n${lineageInfo.bizSql.substring(0, 500)}${lineageInfo.bizSql.length > 500 ? '\n... (SQL已截断)' : ''}\n\`\`\`` : ''}`;
     }
     
     // 构建详细的分析提示
@@ -1453,8 +1515,11 @@ class APIDataTracker {
 - 状态码: ${record.status}
 - 响应时间: ${record.duration}ms
 - 请求时间: ${record.requestTime}
+${lineageInfo && lineageInfo.apiId ? `- API ID: ${lineageInfo.apiId}` : ''}
+${lineageSection}
+${record.requestPayload ? `
 
-${record.requestPayload ? `📤 **请求参数**
+📤 **请求参数**
 \`\`\`json
 ${JSON.stringify(record.requestPayload, null, 2)}
 \`\`\`` : ''}
@@ -1468,10 +1533,10 @@ ${responsePreview}
 ${source.matchPaths.length > 0 ? source.matchPaths.map(p => `- ${p}`).join('\n') : '（无）'}
 
 请帮我分析：
-1. 这个接口的主要功能和用途
+1. 这个接口的主要功能和用途${lineageInfo ? '（结合数据血缘信息）' : ''}
 2. 响应数据的结构和关键字段含义
 3. 匹配到的字段 ${source.matches.map(m => `"${m}"`).join(', ')} 的业务含义
-4. 是否有异常或需要注意的地方`;
+4. ${lineageInfo ? '数据来源和表结构的关系' : ''}${lineageInfo ? '\n5. ' : '4. '}是否有异常或需要注意的地方`;
 
     return prompt;
   }

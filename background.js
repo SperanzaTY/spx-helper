@@ -347,6 +347,109 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
     sendResponse({ success: true });
   }
   
+  // 查询API血缘
+  if (request.action === 'QUERY_API_LINEAGE') {
+    console.log('🔍 Background: 收到API血缘查询请求, API ID:', request.apiId);
+    
+    const apiId = request.apiId;
+    const searchPattern = `%${apiId}%`;
+    
+    // DataService API配置
+    const DATA_SERVICE_URL = 'https://data.ssc.shopeemobile.com/api/v2/service/shopee_ssc_data_kanban_data_service_spx_dev_01/query';
+    
+    const requestBody = {
+      "query": `SELECT 
+        a.api_id,
+        a.api_version,
+        a.api_status,
+        a.biz_sql,
+        a.ds_id,
+        a.publish_env
+      FROM dual_default.spx_apimart_management a
+      WHERE a.api_id LIKE '${searchPattern}'
+        AND a.api_status = 'online'
+      ORDER BY a.api_version DESC
+      LIMIT 1`
+    };
+    
+    console.log('📤 Background: 发送API血缘查询');
+    
+    fetch(DATA_SERVICE_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(requestBody)
+    })
+      .then(async response => {
+        if (!response.ok) {
+          throw new Error(`API血缘查询失败: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        console.log('📥 Background: API血缘数据:', data);
+        
+        if (!data.rows || data.rows.length === 0) {
+          sendResponse({
+            success: false,
+            error: '未找到API血缘信息'
+          });
+          return;
+        }
+        
+        // 解析第一条记录（最新版本）
+        const row = data.rows[0].values;
+        const bizSql = row.biz_sql || '';
+        const dsId = row.ds_id;
+        
+        // 提取表名
+        const regex = /\{mgmt_db2\}\.([a-zA-Z0-9_\{\}\-]+)/g;
+        const tables = [];
+        let match;
+        while ((match = regex.exec(bizSql)) !== null) {
+          tables.push(match[1]);
+        }
+        
+        // 去重
+        const uniqueTables = [...new Set(tables)];
+        
+        // DS ID 映射
+        const DS_ID_MAPPING = {
+          51: 'shopee_ssc_dw',
+          52: 'shopee_ssc_dw',
+          53: 'ssc_sbs_mart',
+          54: 'ssc_isc_mart',
+          55: 'shopee_ssc_dw',
+          81: 'spx_mart'
+        };
+        
+        const lineageInfo = {
+          apiId: row.api_id,
+          apiVersion: row.api_version,
+          publishEnv: row.publish_env,
+          dsId: dsId,
+          dsName: DS_ID_MAPPING[dsId] || `DS_${dsId}`,
+          tables: uniqueTables,
+          bizSql: bizSql
+        };
+        
+        console.log('✅ Background: API血缘解析成功:', lineageInfo);
+        sendResponse({
+          success: true,
+          lineageInfo: lineageInfo
+        });
+      })
+      .catch(error => {
+        console.error('❌ Background: API血缘查询失败:', error);
+        sendResponse({
+          success: false,
+          error: error.message
+        });
+      });
+    
+    return true; // 保持异步消息通道
+  }
+  
   // 调用AI API（代理请求，避免CORS）
   if (request.action === 'CALL_AI_API') {
     console.log('🤖 Background: 收到AI API调用请求');
