@@ -170,7 +170,10 @@ class APIDataTracker {
     });
     
     // 点击按钮搜索数据来源
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', (e) => {
+      console.log('🖱️ [SPX Helper] 浮动按钮被点击');
+      e.stopPropagation();
+      e.preventDefault();
       this.searchSelectedText();
     });
     
@@ -194,6 +197,10 @@ class APIDataTracker {
   // 搜索选中的文本
   // ========================================
   searchSelectedText() {
+    console.log('🎯 [SPX Helper] searchSelectedText 方法被调用');
+    console.log('   当前 selectedText:', this.selectedText);
+    console.log('   API 记录数量:', this.apiRecords.size);
+    
     if (!this.selectedText) {
       console.warn('⚠️ [SPX Helper] 没有选中的文本');
       return;
