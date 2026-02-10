@@ -848,11 +848,14 @@
                 <!-- API 过滤条件 -->
                 <div style="padding: 10px 0;">
                   <div style="font-size: 13px; font-weight: 500; color: #333; margin-bottom: 8px;">API 过滤条件</div>
-                  <div style="font-size: 11px; color: #666; margin-bottom: 8px;">只拦截包含以下关键词的接口（逗号分隔，留空则拦截所有）</div>
+                  <div style="font-size: 11px; color: #666; margin-bottom: 8px;">
+                    过滤哪些接口会显示在查找结果中（逗号分隔）<br>
+                    <strong>留空 = 显示所有API</strong>
+                  </div>
                   <input 
                     type="text" 
                     id="apiFilterKeywords" 
-                    placeholder="例如: api_mart, /api/, graphql" 
+                    placeholder="例如: api_mart, /api/, graphql （留空显示全部）" 
                     value="api_mart"
                     style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 12px;"
                   >

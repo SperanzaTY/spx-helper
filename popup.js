@@ -8563,14 +8563,34 @@ async function initAPITrackerSettings() {
     
     await chrome.storage.local.set({ apiFilterKeywords: keywords });
     
-    showToast('✅ 过滤条件已保存，刷新页面后生效');
+    // 通知所有标签页更新过滤条件
+    const tabs = await chrome.tabs.query({});
+    let successCount = 0;
+    let failCount = 0;
     
-    // 显示提示：需要刷新页面
-    const hint = document.createElement('div');
-    hint.style.cssText = 'background: #fff3cd; padding: 8px 12px; border-radius: 6px; font-size: 11px; color: #856404; margin-top: 8px;';
-    hint.textContent = '⚠️ 请刷新页面让新的过滤条件生效';
-    this.parentElement.appendChild(hint);
-    setTimeout(() => hint.remove(), 3000);
+    for (const tab of tabs) {
+      if (tab.id && tab.url && !tab.url.startsWith('chrome://') && !tab.url.startsWith('chrome-extension://')) {
+        try {
+          await chrome.tabs.sendMessage(tab.id, {
+            action: 'UPDATE_API_FILTER',
+            keywords: keywords
+          });
+          successCount++;
+          console.log(`✅ [Popup] 已通知标签页 ${tab.id} 更新过滤条件`);
+        } catch (err) {
+          failCount++;
+          console.log(`⚠️ [Popup] 通知标签页 ${tab.id} 失败:`, err.message);
+        }
+      }
+    }
+    
+    console.log(`📊 [Popup] 通知完成: ${successCount} 成功, ${failCount} 失败`);
+    
+    if (successCount > 0) {
+      showToast(keywords === '' ? '✅ 过滤条件已清空（显示所有API）' : '✅ 过滤条件已保存并生效');
+    } else if (failCount > 0) {
+      showToast('⚠️ 过滤条件已保存，请刷新页面让设置生效');
+    }
   });
 }
 

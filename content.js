@@ -17,6 +17,7 @@ class APIDataTracker {
     this.selectionFloatingBtn = null; // 新增：文本选取浮动按钮
     this.textSelectionEnabled = true; // 新增：文本选取功能开关，默认开启
     this.textSelectionListenerAdded = false; // 新增：标记监听器是否已添加
+    this.apiFilterKeywords = ['api_mart']; // 新增：API 过滤关键词（默认值）
     
     console.log('🔍 [SPX Helper] Content Script 已加载');
     
@@ -62,19 +63,40 @@ class APIDataTracker {
       });
       
       this.textSelectionEnabled = settings.textSelectionEnabled;
-      console.log('⚙️ [SPX Helper] 设置已加载:', settings);
       
-      // 将 API 过滤条件发送到 injected.js
-      window.postMessage({
-        type: 'SPX_UPDATE_API_FILTER',
-        keywords: settings.apiFilterKeywords
-      }, '*');
+      // 解析 API 过滤关键词
+      const keywords = settings.apiFilterKeywords || '';
+      if (keywords.trim() === '') {
+        // 空字符串表示不过滤任何接口
+        this.apiFilterKeywords = [];
+        console.log('⚙️ [SPX Helper] API 过滤条件: 显示所有接口');
+      } else {
+        this.apiFilterKeywords = keywords.split(',').map(k => k.trim()).filter(k => k);
+        console.log('⚙️ [SPX Helper] API 过滤条件:', this.apiFilterKeywords);
+      }
       
-      console.log('📤 [SPX Helper] API 过滤条件已发送到 injected.js:', settings.apiFilterKeywords);
+      console.log('⚙️ [SPX Helper] 设置已加载:', {
+        textSelectionEnabled: this.textSelectionEnabled,
+        apiFilterKeywords: this.apiFilterKeywords
+      });
     } catch (err) {
       console.error('❌ [SPX Helper] 加载设置失败:', err);
       this.textSelectionEnabled = true; // 默认开启
+      this.apiFilterKeywords = ['api_mart']; // 默认过滤条件
     }
+  }
+  
+  // ========================================
+  // API 过滤方法
+  // ========================================
+  shouldShowAPI(url) {
+    // 如果没有设置过滤条件，显示所有接口
+    if (this.apiFilterKeywords.length === 0) {
+      return true;
+    }
+    
+    // 检查 URL 是否包含任一关键词
+    return this.apiFilterKeywords.some(keyword => url.includes(keyword));
   }
   
   // ========================================
@@ -615,10 +637,17 @@ class APIDataTracker {
     
     console.log('🔎 [SPX Helper] 开始查找数据来源');
     console.log('   Content Script 中的 API 数量:', this.apiRecords.size);
+    console.log('   当前过滤条件:', this.apiFilterKeywords.length === 0 ? '不过滤（显示全部）' : this.apiFilterKeywords);
     console.log('   要匹配的文本:', elementTexts);
     
     // 使用 Content Script 中已同步的 API 记录
     this.apiRecords.forEach((record, id) => {
+      // 应用过滤条件
+      if (!this.shouldShowAPI(record.url)) {
+        console.log(`   ⏭️ 跳过 API（不符合过滤条件）: ${record.url}`);
+        return; // 跳过不符合过滤条件的接口
+      }
+      
       const matches = [];
       const matchPaths = [];  // 新增：存储匹配的路径
       
@@ -1370,6 +1399,22 @@ class APIDataTracker {
           } else {
             console.log('✅ [SPX Helper] 监听器已存在，功能已激活');
           }
+        }
+        
+        sendResponse({ success: true });
+      }
+      
+      // 新增：更新 API 过滤条件
+      if (request.action === 'UPDATE_API_FILTER') {
+        const keywords = request.keywords || '';
+        
+        if (keywords.trim() === '') {
+          // 空字符串表示不过滤
+          this.apiFilterKeywords = [];
+          console.log('🔄 [SPX Helper] API 过滤条件已更新: 显示所有接口');
+        } else {
+          this.apiFilterKeywords = keywords.split(',').map(k => k.trim()).filter(k => k);
+          console.log('🔄 [SPX Helper] API 过滤条件已更新:', this.apiFilterKeywords);
         }
         
         sendResponse({ success: true });

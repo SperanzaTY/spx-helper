@@ -9,36 +9,7 @@
   // 创建全局 API 记录器
   window.__spxAPIRecords = new Map();
   
-  // API 过滤配置（默认值）
-  let apiFilterKeywords = ['api_mart'];  // 默认只拦截包含 api_mart 的接口
-  
-  // 监听来自 content.js 的配置更新
-  window.addEventListener('message', (event) => {
-    if (event.data.type === 'SPX_UPDATE_API_FILTER') {
-      const keywords = event.data.keywords || '';
-      
-      // 解析关键词（逗号分隔）
-      if (keywords.trim() === '') {
-        // 空字符串表示拦截所有接口
-        apiFilterKeywords = [];
-        console.log('⚙️ [SPX Helper] API 过滤条件已更新: 拦截所有接口');
-      } else {
-        apiFilterKeywords = keywords.split(',').map(k => k.trim()).filter(k => k);
-        console.log('⚙️ [SPX Helper] API 过滤条件已更新:', apiFilterKeywords);
-      }
-    }
-  });
-  
-  // 检查 URL 是否匹配过滤条件
-  function shouldInterceptAPI(url) {
-    // 如果没有设置过滤条件，拦截所有接口
-    if (apiFilterKeywords.length === 0) {
-      return true;
-    }
-    
-    // 检查 URL 是否包含任一关键词
-    return apiFilterKeywords.some(keyword => url.includes(keyword));
-  }
+  console.log('⚙️ [SPX Helper] 拦截器已配置为记录所有 API 请求');
   
   
   // 保存原始 fetch
@@ -60,12 +31,8 @@
         const data = await clonedResponse.json();
         const duration = Date.now() - startTime;
         
-        // 使用动态过滤条件
+        // 记录所有 API（不再在这里过滤）
         const urlString = typeof url === 'string' ? url : url.url;
-        if (!shouldInterceptAPI(urlString)) {
-          console.log('⏭️ [SPX Helper] 跳过接口（不匹配过滤条件）:', urlString);
-          return response;
-        }
         
         // 提取请求参数
         let requestPayload = null;
@@ -168,12 +135,7 @@
           const data = JSON.parse(xhr.responseText);
           const duration = Date.now() - xhr.__spxTracker.startTime;
           
-          // 使用动态过滤条件
-          if (!shouldInterceptAPI(xhr.__spxTracker.url)) {
-            console.log('⏭️ [SPX Helper] 跳过接口（不匹配过滤条件）:', xhr.__spxTracker.url);
-            return;
-          }
-          
+          // 记录所有 API（不再在这里过滤）
           const record = {
             id: xhr.__spxTracker.requestId,
             url: xhr.__spxTracker.url,
