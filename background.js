@@ -379,31 +379,80 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
       body: JSON.stringify(requestData)
     })
       .then(async response => {
+        console.log('📥 Background: 收到响应，状态码:', response.status);
+        
         if (!response.ok) {
           throw new Error(`AI API请求失败: ${response.status} ${response.statusText}`);
         }
         
-        const data = await response.json();
-        console.log('📥 Background: AI响应:', data);
+        // 先获取响应文本
+        const responseText = await response.text();
+        console.log('📄 Background: 响应文本（前200字符）:', responseText.substring(0, 200));
+        
+        let data;
+        try {
+          // 尝试解析为JSON
+          data = JSON.parse(responseText);
+          console.log('✅ Background: JSON解析成功');
+        } catch (parseError) {
+          console.error('❌ Background: JSON解析失败，可能是纯文本响应');
+          // 如果解析失败，直接返回文本
+          sendResponse({
+            success: true,
+            result: responseText
+          });
+          return;
+        }
+        
+        console.log('📥 Background: AI响应结构:', {
+          status: data.status,
+          hasData: !!data.data,
+          hasOutput: !!data.output,
+          keys: Object.keys(data)
+        });
         
         // 检查API是否返回成功
         if (data.status !== 'success') {
           throw new Error(data.error_message || data.error || 'AI返回错误');
         }
         
-        // 提取AI的响应内容
+        // 提取AI的响应内容 - 尝试多种可能的格式
         let assistantMessage = '';
+        
         if (data.data && data.data.response && data.data.response.response_str) {
+          // 格式1: data.data.response.response_str
           assistantMessage = data.data.response.response_str;
+          console.log('✅ 使用格式1: data.data.response.response_str');
+        } else if (data.data && data.data.output_str) {
+          // 格式2: data.data.output_str
+          assistantMessage = data.data.output_str;
+          console.log('✅ 使用格式2: data.data.output_str');
         } else if (data.output && data.output.output_str) {
+          // 格式3: data.output.output_str
           assistantMessage = data.output.output_str;
+          console.log('✅ 使用格式3: data.output.output_str');
         } else if (data.output && typeof data.output === 'string') {
+          // 格式4: data.output (直接是字符串)
           assistantMessage = data.output;
+          console.log('✅ 使用格式4: data.output');
+        } else if (data.result && typeof data.result === 'string') {
+          // 格式5: data.result
+          assistantMessage = data.result;
+          console.log('✅ 使用格式5: data.result');
+        } else if (typeof data === 'string') {
+          // 格式6: 整个响应就是字符串
+          assistantMessage = data;
+          console.log('✅ 使用格式6: 整个响应');
         } else {
-          throw new Error('无法解析AI响应格式');
+          console.error('❌ 无法识别的响应格式:', JSON.stringify(data, null, 2));
+          throw new Error('无法解析AI响应格式，请查看控制台日志');
         }
         
-        console.log('✅ Background: AI分析成功');
+        if (!assistantMessage || assistantMessage.trim() === '') {
+          throw new Error('AI返回了空响应');
+        }
+        
+        console.log('✅ Background: AI分析成功，结果长度:', assistantMessage.length);
         sendResponse({
           success: true,
           result: assistantMessage
@@ -411,6 +460,7 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
       })
       .catch(error => {
         console.error('❌ Background: AI请求失败:', error);
+        console.error('错误堆栈:', error.stack);
         sendResponse({
           success: false,
           error: error.message || 'AI请求失败'
