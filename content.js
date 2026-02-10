@@ -1537,7 +1537,7 @@ class APIDataTracker {
     const codeBlocks = [];
     text = text.replace(/```(\w+)?\n([\s\S]*?)```/g, (match, lang, code) => {
       const placeholder = `__CODE_BLOCK_${codeBlocks.length}__`;
-      codeBlocks.push(`<pre style="background: #1e1e1e; color: #d4d4d4; padding: 16px; border-radius: 8px; overflow-x: auto; margin: 14px 0; font-size: 13px; line-height: 1.5; font-family: 'Consolas', 'Monaco', 'Courier New', monospace; border: 1px solid #404040;">${this.escapeHtml(code.trim())}</pre>`);
+      codeBlocks.push(`<pre style="background: #f8f9fa; color: #212529; padding: 16px; border-radius: 8px; overflow-x: auto; margin: 14px 0; font-size: 13px; line-height: 1.5; font-family: 'Consolas', 'Monaco', 'Courier New', monospace; border: 1px solid #dee2e6;">${this.escapeHtml(code.trim())}</pre>`);
       return placeholder;
     });
     
@@ -1546,6 +1546,55 @@ class APIDataTracker {
     text = text.replace(/`([^`]+)`/g, (match, code) => {
       const placeholder = `__INLINE_CODE_${inlineCodes.length}__`;
       inlineCodes.push(`<code style="background: #f1f3f5; padding: 2px 6px; border-radius: 3px; font-family: 'Consolas', 'Monaco', monospace; color: #c7254e; font-size: 0.92em; border: 1px solid #e9ecef;">${this.escapeHtml(code)}</code>`);
+      return placeholder;
+    });
+    
+    // 处理Markdown表格
+    const tables = [];
+    text = text.replace(/(\|.+\|[\r\n]+)+/gm, (match) => {
+      const lines = match.trim().split('\n').filter(line => line.trim());
+      if (lines.length < 2) return match;
+      
+      // 检查是否有分隔行（第二行通常是 |---|---|）
+      const hasHeaderSeparator = lines[1].match(/^\|[\s\-:|]+\|$/);
+      if (!hasHeaderSeparator && lines.length < 3) return match;
+      
+      const startIndex = hasHeaderSeparator ? 0 : 1;
+      const headerLine = lines[startIndex];
+      const dataLines = hasHeaderSeparator ? lines.slice(2) : lines.slice(1);
+      
+      // 解析表头
+      const headers = headerLine.split('|').map(h => h.trim()).filter(h => h);
+      
+      // 解析数据行
+      const rows = dataLines.map(line => {
+        return line.split('|').map(cell => cell.trim()).filter(cell => cell !== '');
+      });
+      
+      // 生成HTML表格
+      let tableHtml = '<table style="border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 13px; border: 1px solid #dee2e6;">';
+      
+      // 表头
+      tableHtml += '<thead><tr style="background: #f8f9fa;">';
+      headers.forEach(header => {
+        tableHtml += `<th style="border: 1px solid #dee2e6; padding: 10px 12px; text-align: left; font-weight: 600; color: #495057;">${this.escapeHtml(header)}</th>`;
+      });
+      tableHtml += '</tr></thead>';
+      
+      // 表体
+      tableHtml += '<tbody>';
+      rows.forEach((row, index) => {
+        const bgColor = index % 2 === 0 ? '#ffffff' : '#f8f9fa';
+        tableHtml += `<tr style="background: ${bgColor};">`;
+        row.forEach(cell => {
+          tableHtml += `<td style="border: 1px solid #dee2e6; padding: 10px 12px; color: #212529;">${this.escapeHtml(cell)}</td>`;
+        });
+        tableHtml += '</tr>';
+      });
+      tableHtml += '</tbody></table>';
+      
+      const placeholder = `__TABLE_${tables.length}__`;
+      tables.push(tableHtml);
       return placeholder;
     });
     
@@ -1573,6 +1622,11 @@ class APIDataTracker {
     
     // 处理水平线
     text = text.replace(/^---+$/gm, '<hr style="margin: 18px 0; border: none; border-top: 1px solid #e5e7eb;">');
+    
+    // 恢复表格
+    tables.forEach((table, i) => {
+      text = text.replace(`__TABLE_${i}__`, table);
+    });
     
     // 恢复代码块
     codeBlocks.forEach((code, i) => {
