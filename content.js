@@ -16,15 +16,23 @@ class APIDataTracker {
     this.highlightedElement = null;
     this.selectedText = ''; // 新增：存储用户选取的文本
     this.selectionFloatingBtn = null; // 新增：文本选取浮动按钮
+    this.textSelectionEnabled = true; // 新增：文本选取功能开关，默认开启
     
     console.log('🔍 [SPX Helper] Content Script 已加载');
     
-    // 监听文本选取
-    try {
-      this.initTextSelectionListener();
-    } catch (err) {
-      console.error('❌ [SPX Helper] 初始化文本选取监听器失败:', err);
-    }
+    // 从 storage 读取设置
+    this.loadSettings().then(() => {
+      // 监听文本选取（如果开启）
+      if (this.textSelectionEnabled) {
+        try {
+          this.initTextSelectionListener();
+        } catch (err) {
+          console.error('❌ [SPX Helper] 初始化文本选取监听器失败:', err);
+        }
+      } else {
+        console.log('⏸️ [SPX Helper] 文本选取功能已禁用');
+      }
+    });
     
     // 监听来自页面的消息
     window.addEventListener('message', (event) => {
@@ -61,6 +69,32 @@ class APIDataTracker {
   }
   
   // ========================================
+  // 加载设置
+  // ========================================
+  async loadSettings() {
+    try {
+      const settings = await chrome.storage.local.get({
+        textSelectionEnabled: true,
+        apiFilterKeywords: 'api_mart'
+      });
+      
+      this.textSelectionEnabled = settings.textSelectionEnabled;
+      console.log('⚙️ [SPX Helper] 设置已加载:', settings);
+      
+      // 将 API 过滤条件发送到 injected.js
+      window.postMessage({
+        type: 'SPX_UPDATE_API_FILTER',
+        keywords: settings.apiFilterKeywords
+      }, '*');
+      
+      console.log('📤 [SPX Helper] API 过滤条件已发送到 injected.js:', settings.apiFilterKeywords);
+    } catch (err) {
+      console.error('❌ [SPX Helper] 加载设置失败:', err);
+      this.textSelectionEnabled = true; // 默认开启
+    }
+  }
+  
+  // ========================================
   // 文本选取监听器
   // ========================================
   initTextSelectionListener() {
@@ -68,6 +102,12 @@ class APIDataTracker {
     
     document.addEventListener('mouseup', (e) => {
       console.log('🖱️ [SPX Helper] mouseup 事件触发');
+      
+      // 检查功能是否开启
+      if (!this.textSelectionEnabled) {
+        console.log('⏸️ [SPX Helper] 文本选取功能已禁用');
+        return;
+      }
       
       // 如果点击的是浮动按钮，不处理
       if (e.target.closest('#spx-selection-floating-btn')) {
@@ -1144,6 +1184,19 @@ class APIDataTracker {
       
       if (request.action === 'STOP_INSPECTOR') {
         this.disableInspectorMode();
+        sendResponse({ success: true });
+      }
+      
+      // 新增：更新文本选取状态
+      if (request.action === 'UPDATE_TEXT_SELECTION_STATE') {
+        this.textSelectionEnabled = request.enabled;
+        console.log('🔄 [SPX Helper] 文本选取功能状态已更新:', request.enabled ? '开启' : '关闭');
+        
+        // 如果禁用，隐藏当前的浮动按钮
+        if (!request.enabled) {
+          this.hideSelectionFloatingBtn();
+        }
+        
         sendResponse({ success: true });
       }
       

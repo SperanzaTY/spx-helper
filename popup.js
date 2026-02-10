@@ -27,6 +27,7 @@ document.addEventListener('DOMContentLoaded', function() {
   initFmsLinks();
   initDodTool();
   initApiLineageTool();
+  initAPITrackerSettings();  // 初始化 API 溯源工具设置
   
   // 事件监听器
   document.getElementById('addLink').addEventListener('click', addLink);
@@ -8493,6 +8494,71 @@ document.getElementById('startAPITracker')?.addEventListener('click', async func
   }
 });
 */
+
+// ===== API 溯源工具 - 设置管理 =====
+async function initAPITrackerSettings() {
+  console.log('📋 [Popup] 初始化 API 溯源工具设置');
+  
+  // 读取设置
+  const settings = await chrome.storage.local.get({
+    textSelectionEnabled: true,  // 默认开启
+    apiFilterKeywords: 'api_mart'  // 默认只拦截 api_mart
+  });
+  
+  console.log('⚙️ [Popup] 当前设置:', settings);
+  
+  // 应用到 UI
+  const toggleTextSelection = document.getElementById('toggleTextSelection');
+  const apiFilterInput = document.getElementById('apiFilterKeywords');
+  
+  if (toggleTextSelection) {
+    toggleTextSelection.checked = settings.textSelectionEnabled;
+  }
+  
+  if (apiFilterInput) {
+    apiFilterInput.value = settings.apiFilterKeywords;
+  }
+  
+  // 监听开关变化
+  toggleTextSelection?.addEventListener('change', async function() {
+    const enabled = this.checked;
+    console.log('🔄 [Popup] 文本选取功能:', enabled ? '开启' : '关闭');
+    
+    await chrome.storage.local.set({ textSelectionEnabled: enabled });
+    
+    // 通知所有标签页更新状态
+    const tabs = await chrome.tabs.query({});
+    for (const tab of tabs) {
+      if (tab.id && tab.url && !tab.url.startsWith('chrome://') && !tab.url.startsWith('chrome-extension://')) {
+        chrome.tabs.sendMessage(tab.id, {
+          action: 'UPDATE_TEXT_SELECTION_STATE',
+          enabled: enabled
+        }).catch(() => {
+          // 忽略未加载 content script 的标签页
+        });
+      }
+    }
+    
+    showToast(enabled ? '✅ 文本选取功能已开启' : '⏸️ 文本选取功能已关闭');
+  });
+  
+  // 监听过滤条件保存
+  document.getElementById('saveApiFilter')?.addEventListener('click', async function() {
+    const keywords = apiFilterInput.value.trim();
+    console.log('💾 [Popup] 保存 API 过滤条件:', keywords);
+    
+    await chrome.storage.local.set({ apiFilterKeywords: keywords });
+    
+    showToast('✅ 过滤条件已保存，刷新页面后生效');
+    
+    // 显示提示：需要刷新页面
+    const hint = document.createElement('div');
+    hint.style.cssText = 'background: #fff3cd; padding: 8px 12px; border-radius: 6px; font-size: 11px; color: #856404; margin-top: 8px;';
+    hint.textContent = '⚠️ 请刷新页面让新的过滤条件生效';
+    this.parentElement.appendChild(hint);
+    setTimeout(() => hint.remove(), 3000);
+  });
+}
 
 // 加载 API 记录
 async function loadAPIRecords() {

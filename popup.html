@@ -827,17 +827,49 @@
             <h3>🔍 API 数据溯源</h3>
             
             <div class="api-tracker-tool">
+              <!-- 设置区域 -->
+              <div class="api-tracker-settings" style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+                <h4 style="font-size: 14px; color: #333; margin: 0 0 12px 0; display: flex; align-items: center; gap: 8px;">
+                  ⚙️ 功能设置
+                </h4>
+                
+                <!-- 文本选取开关 -->
+                <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid #e5e7eb;">
+                  <div>
+                    <div style="font-size: 13px; font-weight: 500; color: #333;">文本选取查找</div>
+                    <div style="font-size: 11px; color: #666; margin-top: 2px;">拖动选择文字时显示"🔍 查找来源"按钮</div>
+                  </div>
+                  <label class="toggle-switch">
+                    <input type="checkbox" id="toggleTextSelection" checked>
+                    <span class="toggle-slider"></span>
+                  </label>
+                </div>
+                
+                <!-- API 过滤条件 -->
+                <div style="padding: 10px 0;">
+                  <div style="font-size: 13px; font-weight: 500; color: #333; margin-bottom: 8px;">API 过滤条件</div>
+                  <div style="font-size: 11px; color: #666; margin-bottom: 8px;">只拦截包含以下关键词的接口（逗号分隔，留空则拦截所有）</div>
+                  <input 
+                    type="text" 
+                    id="apiFilterKeywords" 
+                    placeholder="例如: api_mart, /api/, graphql" 
+                    value="api_mart"
+                    style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 12px;"
+                  >
+                  <button id="saveApiFilter" style="margin-top: 8px; width: 100%; background: #667eea; color: white; border: none; border-radius: 6px; padding: 8px; cursor: pointer; font-size: 12px;">
+                    💾 保存过滤条件
+                  </button>
+                </div>
+              </div>
+
               <div class="api-tracker-intro">
                 <p>🎯 快速定位页面数据的 API 来源</p>
                 <ul style="margin: 10px 0; padding-left: 20px; color: #666; font-size: 13px;">
-                  <li>自动拦截所有 API 请求（包含 api_mart）</li>
+                  <li>自动拦截 API 请求（可自定义过滤条件）</li>
                   <li><strong>拖动鼠标选择</strong>页面上的文字或数字</li>
                   <li>点击浮动按钮 "🔍 查找来源" 即可查找</li>
                   <li>支持带千分位、货币符号的数字（如 $1,234.56）</li>
                 </ul>
-                <div style="background: #d1fae5; padding: 10px; border-radius: 6px; font-size: 12px; color: #065f46; margin-top: 10px;">
-                  💡 <strong>使用提示</strong>：直接在页面上选择文字，无需点击任何按钮启动
-                </div>
               </div>
 
               <div style="margin-bottom: 20px;">
