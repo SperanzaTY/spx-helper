@@ -1243,36 +1243,235 @@ class APIDataTracker {
     try {
       console.log('🤖 [SPX Helper] 准备让AI分析API:', source.apiRecord.url);
       
+      // 显示加载面板
+      this.showAIAnalysisPanel('loading', source);
+      
       // 构建分析提示词
       const prompt = this.buildAPIAnalysisPrompt(source);
       
-      // 保存到 storage，供 popup 使用
-      await chrome.storage.local.set({
-        aiAnalysisRequest: {
-          timestamp: Date.now(),
-          prompt: prompt,
-          apiInfo: {
-            url: source.apiRecord.url,
-            method: source.apiRecord.method,
-            status: source.apiRecord.status,
-            duration: source.apiRecord.duration
-          }
-        }
-      });
+      // 调用AI API
+      const analysis = await this.callAIAPI(prompt);
       
-      // 发送消息给 background script，打开 popup 并切换到 AI 助手 tab
-      chrome.runtime.sendMessage({
-        action: 'OPEN_AI_ASSISTANT',
-        prompt: prompt
-      });
-      
-      // 显示提示
-      this.showToast('🤖 正在打开AI助手...');
+      // 显示分析结果
+      this.showAIAnalysisPanel('result', source, analysis);
       
     } catch (err) {
       console.error('❌ [SPX Helper] 调用AI失败:', err);
-      alert('❌ 调用AI失败: ' + err.message);
+      this.showAIAnalysisPanel('error', source, err.message);
     }
+  }
+  
+  async callAIAPI(prompt) {
+    // Smart Agent配置
+    const SMART_CONFIG = {
+      endpointHashId: 'oxff0svf5ht51i507t6k68d8',
+      endpointKey: 'k160r2z9t0y0s573kt51o8vb',
+      userId: 'spx_helper_api_analysis'
+    };
+    
+    // 准备请求数据
+    const requestData = {
+      endpoint_deployment_hash_id: SMART_CONFIG.endpointHashId,
+      endpoint_deployment_key: SMART_CONFIG.endpointKey,
+      user_id: SMART_CONFIG.userId,
+      message: {
+        input_str: prompt
+      }
+    };
+    
+    console.log('📤 [SPX Helper] 发送AI请求...');
+    
+    // 调用Smart Agent API
+    const response = await fetch('https://smart.shopee.io/apis/smart/v1/orchestrator/deployments/invoke', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(requestData)
+    });
+    
+    if (!response.ok) {
+      throw new Error(`AI API请求失败: ${response.status} ${response.statusText}`);
+    }
+    
+    const data = await response.json();
+    console.log('📥 [SPX Helper] AI响应:', data);
+    
+    // 检查API是否返回成功
+    if (data.status !== 'success') {
+      throw new Error(data.error_message || data.error || 'AI返回错误');
+    }
+    
+    // 提取AI的响应内容
+    let assistantMessage = '';
+    if (data.data && data.data.response && data.data.response.response_str) {
+      assistantMessage = data.data.response.response_str;
+    } else if (data.output && data.output.output_str) {
+      assistantMessage = data.output.output_str;
+    } else if (data.output && typeof data.output === 'string') {
+      assistantMessage = data.output;
+    } else {
+      throw new Error('无法解析AI响应格式');
+    }
+    
+    return assistantMessage;
+  }
+  
+  showAIAnalysisPanel(state, source, content = '') {
+    // 移除旧面板
+    const oldPanel = document.getElementById('spx-ai-analysis-panel');
+    if (oldPanel) oldPanel.remove();
+    
+    const panel = document.createElement('div');
+    panel.id = 'spx-ai-analysis-panel';
+    panel.style.cssText = `
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 700px;
+      max-height: 85vh;
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+      z-index: 2147483647;
+      padding: 0;
+      overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    `;
+    
+    let html = '';
+    
+    if (state === 'loading') {
+      // 加载状态
+      html = `
+        <div style="padding: 30px; text-align: center;">
+          <div style="font-size: 48px; margin-bottom: 20px;">🤖</div>
+          <h3 style="margin: 0 0 15px 0; color: #333;">AI正在分析...</h3>
+          <div style="color: #666; font-size: 14px; margin-bottom: 20px;">
+            分析接口: <strong>${this.truncateText(source.apiRecord.url, 60)}</strong>
+          </div>
+          <div class="typing-indicator" style="display: inline-flex; gap: 6px;">
+            <span style="width: 10px; height: 10px; background: #667eea; border-radius: 50%; animation: bounce 1.4s infinite ease-in-out both;"></span>
+            <span style="width: 10px; height: 10px; background: #667eea; border-radius: 50%; animation: bounce 1.4s infinite ease-in-out both; animation-delay: 0.16s;"></span>
+            <span style="width: 10px; height: 10px; background: #667eea; border-radius: 50%; animation: bounce 1.4s infinite ease-in-out both; animation-delay: 0.32s;"></span>
+          </div>
+        </div>
+        <style>
+          @keyframes bounce {
+            0%, 80%, 100% { transform: scale(0); }
+            40% { transform: scale(1); }
+          }
+        </style>
+      `;
+    } else if (state === 'error') {
+      // 错误状态
+      html = `
+        <div style="padding: 30px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+            <h3 style="margin: 0; color: #ef4444;">❌ AI分析失败</h3>
+            <button id="spx-close-ai-panel" style="background: #f5f5f5; border: none; border-radius: 6px; padding: 8px 15px; cursor: pointer;">关闭</button>
+          </div>
+          <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 15px; color: #991b1b;">
+            <strong>错误信息:</strong> ${this.escapeHtml(content)}
+          </div>
+          <div style="margin-top: 15px; color: #666; font-size: 13px;">
+            可能的原因：<br>
+            • 网络连接问题<br>
+            • AI服务暂时不可用<br>
+            • 请求参数格式错误
+          </div>
+        </div>
+      `;
+    } else {
+      // 结果状态
+      html = `
+        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 20px; color: white;">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <h3 style="margin: 0; font-size: 18px;">🤖 AI 智能分析</h3>
+            <button id="spx-close-ai-panel" style="background: rgba(255,255,255,0.2); border: none; border-radius: 6px; padding: 8px 15px; cursor: pointer; color: white; font-weight: 500;">关闭</button>
+          </div>
+          <div style="font-size: 12px; margin-top: 8px; opacity: 0.9;">
+            ${this.truncateText(source.apiRecord.url, 70)}
+          </div>
+        </div>
+        <div style="padding: 25px; max-height: calc(85vh - 100px); overflow-y: auto;">
+          <div style="background: #f8f9fa; border-radius: 8px; padding: 20px; line-height: 1.8; color: #333; font-size: 14px;">
+            ${this.formatAIResponse(content)}
+          </div>
+          <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #e5e7eb; display: flex; gap: 10px;">
+            <button class="spx-copy-analysis" style="flex: 1; background: #667eea; color: white; border: none; border-radius: 6px; padding: 10px; cursor: pointer; font-size: 13px;">📋 复制分析结果</button>
+            <button class="spx-view-api-detail" style="flex: 1; background: #10b981; color: white; border: none; border-radius: 6px; padding: 10px; cursor: pointer; font-size: 13px;">📄 查看API详情</button>
+          </div>
+        </div>
+      `;
+    }
+    
+    panel.innerHTML = html;
+    document.body.appendChild(panel);
+    
+    // 绑定事件
+    const closeBtn = document.getElementById('spx-close-ai-panel');
+    if (closeBtn) {
+      closeBtn.addEventListener('click', () => panel.remove());
+    }
+    
+    if (state === 'result') {
+      // 复制分析结果
+      const copyBtn = panel.querySelector('.spx-copy-analysis');
+      if (copyBtn) {
+        copyBtn.addEventListener('click', () => {
+          navigator.clipboard.writeText(content).then(() => {
+            this.showToast('✅ 分析结果已复制到剪贴板');
+          });
+        });
+      }
+      
+      // 查看API详情
+      const viewBtn = panel.querySelector('.spx-view-api-detail');
+      if (viewBtn) {
+        viewBtn.addEventListener('click', () => {
+          panel.remove();
+          this.viewFullResponse(source.apiRecord.id, source.matchPaths || []);
+        });
+      }
+    }
+  }
+  
+  formatAIResponse(text) {
+    // 处理代码块
+    text = text.replace(/```(\w+)?\n([\s\S]*?)```/g, (match, lang, code) => {
+      return `<pre style="background: #282c34; color: #abb2bf; padding: 15px; border-radius: 6px; overflow-x: auto; margin: 10px 0;">${this.escapeHtml(code.trim())}</pre>`;
+    });
+    
+    // 处理行内代码
+    text = text.replace(/`([^`]+)`/g, '<code style="background: #f1f3f5; padding: 2px 6px; border-radius: 3px; font-family: monospace; color: #e83e8c;">$1</code>');
+    
+    // 处理标题
+    text = text.replace(/^##\s+(.+)$/gm, '<div style="font-size: 16px; font-weight: 600; color: #667eea; margin: 20px 0 10px 0;">$1</div>');
+    text = text.replace(/\*\*(.+?)[:：]\*\*/g, '<strong style="color: #667eea;">$1:</strong>');
+    
+    // 处理加粗
+    text = text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    
+    // 处理列表
+    text = text.replace(/^[\-•]\s+(.+)$/gm, '<div style="margin-left: 20px; margin-bottom: 6px;">• $1</div>');
+    
+    // 处理换行
+    text = text.replace(/\n/g, '<br>');
+    
+    return text;
+  }
+  
+  truncateText(text, maxLength) {
+    if (text.length <= maxLength) return text;
+    return text.substring(0, maxLength) + '...';
+  }
+  
+  escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
   }
   
   buildAPIAnalysisPrompt(source) {

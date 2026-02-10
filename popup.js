@@ -38,42 +38,6 @@ document.addEventListener('DOMContentLoaded', function() {
   document.getElementById('searchTodos').addEventListener('input', filterTodos);
 });
 
-// 监听来自 background 的消息
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  if (request.action === 'SWITCH_TO_AI_TAB') {
-    console.log('🤖 收到切换到AI助手的请求');
-    
-    // 切换到AI助手tab
-    switchTab('code-helper');
-    
-    // 填充提示词
-    if (request.prompt) {
-      const chatInput = document.getElementById('chatInput');
-      if (chatInput) {
-        chatInput.value = request.prompt;
-        // 自动调整输入框高度
-        chatInput.style.height = 'auto';
-        chatInput.style.height = chatInput.scrollHeight + 'px';
-        
-        // 自动聚焦
-        chatInput.focus();
-        
-        // 可选：自动发送消息
-        setTimeout(() => {
-          const sendBtn = document.getElementById('sendMessage');
-          if (sendBtn && confirm('是否立即发送给AI助手？')) {
-            sendBtn.click();
-          }
-        }, 300);
-      }
-    }
-    
-    sendResponse({ success: true });
-  }
-  
-  return true;
-});
-
 // ===== 窗口模式检测 =====
 function initWindowMode() {
   // 检查是否在窗口模式下打开
