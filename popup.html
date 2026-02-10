@@ -828,34 +828,28 @@
             
             <div class="api-tracker-tool">
               <div class="api-tracker-intro">
-                <p>🎯 快速定位页面元素的数据来源</p>
+                <p>🎯 快速定位页面数据的 API 来源</p>
                 <ul style="margin: 10px 0; padding-left: 20px; color: #666; font-size: 13px;">
-                  <li>自动拦截所有 API 请求</li>
-                  <li>点击页面元素查看数据来源</li>
-                  <li>智能匹配 API 响应数据</li>
+                  <li>自动拦截所有 API 请求（包含 api_mart）</li>
+                  <li><strong>拖动鼠标选择</strong>页面上的文字或数字</li>
+                  <li>点击浮动按钮 "🔍 查找来源" 即可查找</li>
+                  <li>支持带千分位、货币符号的数字（如 $1,234.56）</li>
                 </ul>
-                <div style="background: #fff3cd; padding: 10px; border-radius: 6px; font-size: 12px; color: #856404; margin-top: 10px;">
-                  💡 <strong>首次使用</strong>：如果"已捕获 API"为0，请刷新页面让工具生效
+                <div style="background: #d1fae5; padding: 10px; border-radius: 6px; font-size: 12px; color: #065f46; margin-top: 10px;">
+                  💡 <strong>使用提示</strong>：直接在页面上选择文字，无需点击任何按钮启动
                 </div>
               </div>
 
-              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px;">
-                <button id="refreshPageBtn" class="btn btn-secondary" style="padding: 12px; font-size: 14px;">
-                  🔄 刷新页面
-                </button>
-                <button id="startAPITracker" class="btn btn-primary" style="padding: 12px; font-size: 14px;">
-                  🎯 启动检查器
+              <div style="margin-bottom: 20px;">
+                <button id="refreshPageBtn" class="btn btn-primary" style="padding: 12px; font-size: 14px; width: 100%;">
+                  🔄 刷新页面（让工具生效）
                 </button>
               </div>
 
-              <div class="api-tracker-stats" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px;">
+              <div class="api-tracker-stats" style="display: grid; grid-template-columns: 1fr; gap: 10px; margin-bottom: 20px;">
                 <div style="background: #f0f4ff; padding: 15px; border-radius: 8px; text-align: center;">
                   <div style="font-size: 24px; font-weight: bold; color: #667eea;" id="apiTrackerCount">0</div>
-                  <div style="font-size: 12px; color: #666; margin-top: 5px;">已捕获 API</div>
-                </div>
-                <div style="background: #f0f4ff; padding: 15px; border-radius: 8px; text-align: center;">
-                  <div style="font-size: 24px; font-weight: bold; color: #667eea;" id="apiTrackerActive">待命</div>
-                  <div style="font-size: 12px; color: #666; margin-top: 5px;">检查器状态</div>
+                  <div style="font-size: 12px; color: #666; margin-top: 5px;">已捕获 API 请求</div>
                 </div>
               </div>
 
@@ -896,14 +890,14 @@
                 </div>
               </div>
 
-              <div class="api-tracker-help" style="margin-top: 20px; padding: 15px; background: #fff8e1; border-radius: 8px; font-size: 12px; color: #666;">
-                <div style="font-weight: bold; color: #f57c00; margin-bottom: 8px;">💡 使用提示</div>
-                <ul style="margin: 0; padding-left: 20px;">
-                  <li><strong>方法一：启动检查器</strong> - 鼠标悬停或点击元素查看数据来源</li>
-                  <li><strong>方法二：选取文本</strong> - 拖动鼠标选择数字或文本，点击浮动按钮 "🔍 查找来源"</li>
-                  <li>支持带千分位、货币符号、百分号的数字（如 $1,234.56%）</li>
-                  <li>按 ESC 键退出检查器模式</li>
-                </ul>
+              <div class="api-tracker-help" style="margin-top: 20px; padding: 15px; background: #e0e7ff; border-radius: 8px; font-size: 12px; color: #4338ca; border-left: 4px solid #667eea;">
+                <div style="font-weight: bold; color: #667eea; margin-bottom: 8px;">💡 使用方法</div>
+                <ol style="margin: 0; padding-left: 20px;">
+                  <li>在任意页面，直接用鼠标<strong>拖动选择</strong>你想查找的文字或数字</li>
+                  <li>松开鼠标后，会出现浮动按钮 "🔍 查找来源"</li>
+                  <li>点击浮动按钮，即可查看该数据在哪个 API 中</li>
+                  <li>支持带格式的数字：<code>$1,234.56</code>、<code>12.5%</code> 等</li>
+                </ol>
               </div>
             </div>
           </div>

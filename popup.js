@@ -8437,6 +8437,8 @@ document.getElementById('refreshPageBtn')?.addEventListener('click', async funct
 });
 
 // 启动 API 溯源检查器
+// ===== API 溯源工具 - 启动检查器按钮（已废弃，改用文本选取模式） =====
+/*
 document.getElementById('startAPITracker')?.addEventListener('click', async function() {
   const btn = this;
   const originalText = btn.innerHTML;
@@ -8490,6 +8492,7 @@ document.getElementById('startAPITracker')?.addEventListener('click', async func
     btn.disabled = false;
   }
 });
+*/
 
 // 加载 API 记录
 async function loadAPIRecords() {
