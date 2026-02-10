@@ -38,6 +38,42 @@ document.addEventListener('DOMContentLoaded', function() {
   document.getElementById('searchTodos').addEventListener('input', filterTodos);
 });
 
+// 监听来自 background 的消息
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.action === 'SWITCH_TO_AI_TAB') {
+    console.log('🤖 收到切换到AI助手的请求');
+    
+    // 切换到AI助手tab
+    switchTab('code-helper');
+    
+    // 填充提示词
+    if (request.prompt) {
+      const chatInput = document.getElementById('chatInput');
+      if (chatInput) {
+        chatInput.value = request.prompt;
+        // 自动调整输入框高度
+        chatInput.style.height = 'auto';
+        chatInput.style.height = chatInput.scrollHeight + 'px';
+        
+        // 自动聚焦
+        chatInput.focus();
+        
+        // 可选：自动发送消息
+        setTimeout(() => {
+          const sendBtn = document.getElementById('sendMessage');
+          if (sendBtn && confirm('是否立即发送给AI助手？')) {
+            sendBtn.click();
+          }
+        }, 300);
+      }
+    }
+    
+    sendResponse({ success: true });
+  }
+  
+  return true;
+});
+
 // ===== 窗口模式检测 =====
 function initWindowMode() {
   // 检查是否在窗口模式下打开
@@ -316,23 +352,35 @@ function initTabs() {
   tabBtns.forEach(btn => {
     btn.addEventListener('click', function() {
       const tabName = this.dataset.tab;
-      const targetTab = document.getElementById(`${tabName}-tab`);
-      
-      console.log('切换到标签页:', tabName, '目标元素:', targetTab);
-      
-      // 更新按钮状态
-      tabBtns.forEach(b => b.classList.remove('active'));
-      this.classList.add('active');
-      
-      // 更新面板状态
-      tabPanes.forEach(pane => pane.classList.remove('active'));
-      if (targetTab) {
-        targetTab.classList.add('active');
-      } else {
-        console.error('找不到标签页:', `${tabName}-tab`);
-      }
+      switchTab(tabName);
     });
   });
+}
+
+// 切换到指定tab的辅助函数
+function switchTab(tabName) {
+  const tabBtns = document.querySelectorAll('.tab-btn');
+  const tabPanes = document.querySelectorAll('.tab-pane');
+  const targetTab = document.getElementById(`${tabName}-tab`);
+  
+  console.log('切换到标签页:', tabName, '目标元素:', targetTab);
+  
+  // 更新按钮状态
+  tabBtns.forEach(b => {
+    if (b.dataset.tab === tabName) {
+      b.classList.add('active');
+    } else {
+      b.classList.remove('active');
+    }
+  });
+  
+  // 更新面板状态
+  tabPanes.forEach(pane => pane.classList.remove('active'));
+  if (targetTab) {
+    targetTab.classList.add('active');
+  } else {
+    console.error('找不到标签页:', `${tabName}-tab`);
+  }
 }
 
 // ===== 快速链接管理 =====

@@ -996,7 +996,8 @@ class APIDataTracker {
           </div>
           <div style="margin-top: 10px;">
             <button class="spx-view-response" data-id="${source.apiRecord.id}" style="background: #667eea; color: white; border: none; border-radius: 6px; padding: 6px 12px; cursor: pointer; font-size: 12px; margin-right: 5px;">查看响应</button>
-            <button class="spx-copy-url" data-url="${source.apiRecord.url}" style="background: #10b981; color: white; border: none; border-radius: 6px; padding: 6px 12px; cursor: pointer; font-size: 12px;">复制URL</button>
+            <button class="spx-copy-url" data-url="${source.apiRecord.url}" style="background: #10b981; color: white; border: none; border-radius: 6px; padding: 6px 12px; cursor: pointer; font-size: 12px; margin-right: 5px;">复制URL</button>
+            <button class="spx-ask-ai" data-id="${source.apiRecord.id}" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 6px; padding: 6px 12px; cursor: pointer; font-size: 12px;">🤖 让AI分析</button>
           </div>
         </div>
       `;
@@ -1022,6 +1023,17 @@ class APIDataTracker {
       btn.addEventListener('click', (e) => {
         const url = e.target.dataset.url;
         this.copyURL(url);
+      });
+    });
+    
+    // "让AI分析"按钮
+    panel.querySelectorAll('.spx-ask-ai').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const id = e.target.dataset.id;
+        const source = sources.find(s => s.apiRecord.id === id);
+        if (source) {
+          this.askAIAboutAPI(source);
+        }
       });
     });
   }
@@ -1222,6 +1234,112 @@ class APIDataTracker {
       console.error('复制失败:', err);
       alert('❌ 复制失败');
     });
+  }
+  
+  // ========================================
+  // AI 分析 API
+  // ========================================
+  async askAIAboutAPI(source) {
+    try {
+      console.log('🤖 [SPX Helper] 准备让AI分析API:', source.apiRecord.url);
+      
+      // 构建分析提示词
+      const prompt = this.buildAPIAnalysisPrompt(source);
+      
+      // 保存到 storage，供 popup 使用
+      await chrome.storage.local.set({
+        aiAnalysisRequest: {
+          timestamp: Date.now(),
+          prompt: prompt,
+          apiInfo: {
+            url: source.apiRecord.url,
+            method: source.apiRecord.method,
+            status: source.apiRecord.status,
+            duration: source.apiRecord.duration
+          }
+        }
+      });
+      
+      // 发送消息给 background script，打开 popup 并切换到 AI 助手 tab
+      chrome.runtime.sendMessage({
+        action: 'OPEN_AI_ASSISTANT',
+        prompt: prompt
+      });
+      
+      // 显示提示
+      this.showToast('🤖 正在打开AI助手...');
+      
+    } catch (err) {
+      console.error('❌ [SPX Helper] 调用AI失败:', err);
+      alert('❌ 调用AI失败: ' + err.message);
+    }
+  }
+  
+  buildAPIAnalysisPrompt(source) {
+    const record = source.apiRecord;
+    
+    // 截取响应数据（避免太长）
+    let responsePreview = JSON.stringify(record.responseData, null, 2);
+    if (responsePreview.length > 2000) {
+      responsePreview = responsePreview.substring(0, 2000) + '\n... (数据已截断)';
+    }
+    
+    // 构建详细的分析提示
+    const prompt = `请帮我分析这个API接口：
+
+📍 **API信息**
+- URL: \`${record.url}\`
+- 方法: ${record.method}
+- 状态码: ${record.status}
+- 响应时间: ${record.duration}ms
+- 请求时间: ${record.requestTime}
+
+${record.requestPayload ? `📤 **请求参数**
+\`\`\`json
+${JSON.stringify(record.requestPayload, null, 2)}
+\`\`\`` : ''}
+
+📥 **响应数据**（匹配的字段：${source.matches.join(', ')}）
+\`\`\`json
+${responsePreview}
+\`\`\`
+
+🔍 **匹配路径**
+${source.matchPaths.length > 0 ? source.matchPaths.map(p => `- ${p}`).join('\n') : '（无）'}
+
+请帮我分析：
+1. 这个接口的主要功能和用途
+2. 响应数据的结构和关键字段含义
+3. 匹配到的字段 ${source.matches.map(m => `"${m}"`).join(', ')} 的业务含义
+4. 是否有异常或需要注意的地方`;
+
+    return prompt;
+  }
+  
+  showToast(message) {
+    const toast = document.createElement('div');
+    toast.style.cssText = `
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: rgba(0, 0, 0, 0.85);
+      color: white;
+      padding: 12px 20px;
+      border-radius: 8px;
+      font-size: 14px;
+      z-index: 2147483647;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+      animation: slideIn 0.3s ease;
+    `;
+    toast.textContent = message;
+    
+    document.body.appendChild(toast);
+    
+    setTimeout(() => {
+      toast.style.animation = 'slideOut 0.3s ease';
+      setTimeout(() => toast.remove(), 300);
+    }, 2000);
   }
   
   // ========================================

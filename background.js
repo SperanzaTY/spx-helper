@@ -347,6 +347,34 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
     sendResponse({ success: true });
   }
   
+  // 打开AI助手并自动填充提示词
+  if (request.action === 'OPEN_AI_ASSISTANT') {
+    console.log('🤖 收到打开AI助手请求');
+    
+    // 打开扩展popup（如果是窗口模式则打开窗口）
+    chrome.action.openPopup().then(() => {
+      console.log('✅ Popup 已打开');
+      
+      // 等待 popup 加载完成后发送消息
+      setTimeout(() => {
+        chrome.runtime.sendMessage({
+          action: 'SWITCH_TO_AI_TAB',
+          prompt: request.prompt
+        }).catch(err => {
+          console.error('❌ 发送切换消息失败:', err);
+        });
+      }, 500);
+    }).catch(err => {
+      console.error('❌ 打开 popup 失败:', err);
+      // 如果无法打开 popup（例如在某些浏览器中），尝试打开窗口
+      chrome.storage.local.get(['windowPosition'], function(result) {
+        openHelperWindow(result.windowPosition);
+      });
+    });
+    
+    sendResponse({ success: true });
+  }
+  
   return true;
 });
 
