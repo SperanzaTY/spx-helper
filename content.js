@@ -1495,15 +1495,21 @@ class APIDataTracker {
       responsePreview = responsePreview.substring(0, 2000) + '\n... (数据已截断)';
     }
     
-    // 构建血缘信息部分
-    let lineageSection = '';
-    if (lineageInfo && lineageInfo.tables && lineageInfo.tables.length > 0) {
-      lineageSection = `
+    // 构建业务SQL部分
+    let bizSqlSection = '';
+    if (lineageInfo && lineageInfo.bizSql) {
+      // 截取SQL（避免太长）
+      let sqlPreview = lineageInfo.bizSql;
+      if (sqlPreview.length > 1500) {
+        sqlPreview = sqlPreview.substring(0, 1500) + '\n... (SQL已截断)';
+      }
+      
+      bizSqlSection = `
 
-🗄️ **数据血缘信息**
-- 数据源: ${lineageInfo.dsName || lineageInfo.dsId || '未知'}
-- 使用的表: ${lineageInfo.tables.join(', ')}
-${lineageInfo.bizSql ? `- 业务SQL:\n\`\`\`sql\n${lineageInfo.bizSql.substring(0, 500)}${lineageInfo.bizSql.length > 500 ? '\n... (SQL已截断)' : ''}\n\`\`\`` : ''}`;
+💻 **接口业务逻辑（SQL）**
+\`\`\`sql
+${sqlPreview}
+\`\`\``;
     }
     
     // 构建详细的分析提示
@@ -1516,7 +1522,7 @@ ${lineageInfo.bizSql ? `- 业务SQL:\n\`\`\`sql\n${lineageInfo.bizSql.substring(
 - 响应时间: ${record.duration}ms
 - 请求时间: ${record.requestTime}
 ${lineageInfo && lineageInfo.apiId ? `- API ID: ${lineageInfo.apiId}` : ''}
-${lineageSection}
+${bizSqlSection}
 ${record.requestPayload ? `
 
 📤 **请求参数**
@@ -1533,10 +1539,10 @@ ${responsePreview}
 ${source.matchPaths.length > 0 ? source.matchPaths.map(p => `- ${p}`).join('\n') : '（无）'}
 
 请帮我分析：
-1. 这个接口的主要功能和用途${lineageInfo ? '（结合数据血缘信息）' : ''}
+1. 这个接口的主要功能和用途${lineageInfo ? '（结合业务SQL）' : ''}
 2. 响应数据的结构和关键字段含义
 3. 匹配到的字段 ${source.matches.map(m => `"${m}"`).join(', ')} 的业务含义
-4. ${lineageInfo ? '数据来源和表结构的关系' : ''}${lineageInfo ? '\n5. ' : '4. '}是否有异常或需要注意的地方`;
+${lineageInfo ? '4. 接口的查询逻辑和数据处理流程\n5. ' : '4. '}是否有异常或需要注意的地方`;
 
     return prompt;
   }
