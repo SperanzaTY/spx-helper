@@ -16,6 +16,7 @@ class APIDataTracker {
     this.selectedText = ''; // 新增：存储用户选取的文本
     this.selectionFloatingBtn = null; // 新增：文本选取浮动按钮
     this.textSelectionEnabled = true; // 新增：文本选取功能开关，默认开启
+    this.textSelectionListenerAdded = false; // 新增：标记监听器是否已添加
     
     console.log('🔍 [SPX Helper] Content Script 已加载');
     
@@ -80,7 +81,14 @@ class APIDataTracker {
   // 文本选取监听器
   // ========================================
   initTextSelectionListener() {
+    // 防止重复添加监听器
+    if (this.textSelectionListenerAdded) {
+      console.log('⏭️ [SPX Helper] 文本选取监听器已存在，跳过');
+      return;
+    }
+    
     console.log('✅ [SPX Helper] 初始化文本选取监听器');
+    this.textSelectionListenerAdded = true;
     
     document.addEventListener('mouseup', (e) => {
       console.log('🖱️ [SPX Helper] mouseup 事件触发');
@@ -1342,12 +1350,26 @@ class APIDataTracker {
       
       // 新增：更新文本选取状态
       if (request.action === 'UPDATE_TEXT_SELECTION_STATE') {
+        const wasEnabled = this.textSelectionEnabled;
         this.textSelectionEnabled = request.enabled;
         console.log('🔄 [SPX Helper] 文本选取功能状态已更新:', request.enabled ? '开启' : '关闭');
         
-        // 如果禁用，隐藏当前的浮动按钮
         if (!request.enabled) {
+          // 如果禁用，隐藏当前的浮动按钮
           this.hideSelectionFloatingBtn();
+          console.log('✅ [SPX Helper] 文本选取功能已禁用');
+        } else if (!wasEnabled && request.enabled) {
+          // 如果从禁用切换到启用，确保监听器存在
+          console.log('🔄 [SPX Helper] 重新启用文本选取功能');
+          if (!this.textSelectionListenerAdded) {
+            try {
+              this.initTextSelectionListener();
+            } catch (err) {
+              console.error('❌ [SPX Helper] 重新初始化监听器失败:', err);
+            }
+          } else {
+            console.log('✅ [SPX Helper] 监听器已存在，功能已激活');
+          }
         }
         
         sendResponse({ success: true });

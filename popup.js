@@ -8528,18 +8528,32 @@ async function initAPITrackerSettings() {
     
     // 通知所有标签页更新状态
     const tabs = await chrome.tabs.query({});
+    let successCount = 0;
+    let failCount = 0;
+    
     for (const tab of tabs) {
       if (tab.id && tab.url && !tab.url.startsWith('chrome://') && !tab.url.startsWith('chrome-extension://')) {
-        chrome.tabs.sendMessage(tab.id, {
-          action: 'UPDATE_TEXT_SELECTION_STATE',
-          enabled: enabled
-        }).catch(() => {
-          // 忽略未加载 content script 的标签页
-        });
+        try {
+          await chrome.tabs.sendMessage(tab.id, {
+            action: 'UPDATE_TEXT_SELECTION_STATE',
+            enabled: enabled
+          });
+          successCount++;
+          console.log(`✅ [Popup] 已通知标签页 ${tab.id}: ${tab.url}`);
+        } catch (err) {
+          failCount++;
+          console.log(`⚠️ [Popup] 通知标签页 ${tab.id} 失败:`, err.message);
+        }
       }
     }
     
-    showToast(enabled ? '✅ 文本选取功能已开启' : '⏸️ 文本选取功能已关闭');
+    console.log(`📊 [Popup] 通知完成: ${successCount} 成功, ${failCount} 失败`);
+    
+    if (successCount > 0) {
+      showToast(enabled ? '✅ 文本选取功能已开启' : '⏸️ 文本选取功能已关闭');
+    } else if (failCount > 0) {
+      showToast('⚠️ 设置已保存，请刷新页面让设置生效');
+    }
   });
   
   // 监听过滤条件保存
