@@ -226,6 +226,14 @@ class APIDataTracker {
   // ========================================
   searchSelectedText() {
     console.log('🎯 [SPX Helper] searchSelectedText 方法被调用');
+    
+    // 检查功能是否开启
+    if (!this.textSelectionEnabled) {
+      console.log('⏸️ [SPX Helper] 文本选取功能已禁用，取消搜索');
+      this.hideSelectionFloatingBtn();
+      return;
+    }
+    
     console.log('   当前 selectedText:', this.selectedText);
     console.log('   API 记录数量:', this.apiRecords.size);
     
