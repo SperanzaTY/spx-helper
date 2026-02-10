@@ -58,13 +58,22 @@ class APIDataTracker {
   // 文本选取监听器
   // ========================================
   initTextSelectionListener() {
+    console.log('✅ [SPX Helper] 初始化文本选取监听器');
+    
     document.addEventListener('mouseup', (e) => {
+      console.log('🖱️ [SPX Helper] mouseup 事件触发');
+      
       // 如果检查器模式开启，不处理文本选取（避免冲突）
-      if (this.inspectorMode) return;
+      if (this.inspectorMode) {
+        console.log('⏭️ [SPX Helper] 检查器模式开启，跳过文本选取');
+        return;
+      }
       
       // 获取选中的文本
       const selection = window.getSelection();
       const selectedText = selection.toString().trim();
+      
+      console.log('📝 [SPX Helper] 选中的文本:', selectedText, '长度:', selectedText.length);
       
       // 如果没有选中文本或文本太短，隐藏按钮
       if (!selectedText || selectedText.length < 1) {
@@ -73,18 +82,24 @@ class APIDataTracker {
       }
       
       // 如果是在我们自己的 UI 元素上选择，忽略
-      const range = selection.getRangeAt(0);
-      const container = range.commonAncestorContainer;
-      const element = container.nodeType === Node.TEXT_NODE 
-        ? container.parentElement 
-        : container;
-      
-      if (this.isOurElement(element)) {
+      try {
+        const range = selection.getRangeAt(0);
+        const container = range.commonAncestorContainer;
+        const element = container.nodeType === Node.TEXT_NODE 
+          ? container.parentElement 
+          : container;
+        
+        if (this.isOurElement(element)) {
+          console.log('⏭️ [SPX Helper] 在扩展自身元素上选择，忽略');
+          return;
+        }
+      } catch (err) {
+        console.error('❌ [SPX Helper] 获取选区失败:', err);
         return;
       }
       
       this.selectedText = selectedText;
-      console.log('📝 [SPX Helper] 用户选取文本:', selectedText);
+      console.log('✅ [SPX Helper] 用户选取文本:', selectedText);
       
       // 显示浮动按钮
       this.showSelectionFloatingBtn(e.clientX, e.clientY);
