@@ -1243,32 +1243,41 @@ class APIDataTracker {
     try {
       console.log('🤖 [SPX Helper] 准备让AI分析API:', source.apiRecord.url);
       
-      // 显示加载面板
-      this.showAIAnalysisPanel('loading', source);
+      // 步骤1: 显示加载面板
+      this.showAIAnalysisPanel('loading', source, null, '正在准备分析...');
       
-      // 尝试提取API ID
+      // 步骤2: 尝试提取API ID
       const apiId = this.extractAPIId(source.apiRecord.url);
       
-      // 查询API血缘信息（如果能提取到API ID）
+      // 步骤3: 查询API血缘信息（如果能提取到API ID）
       let lineageInfo = null;
       if (apiId) {
         console.log('🔍 [SPX Helper] 提取到API ID:', apiId);
+        this.updateAIAnalysisPanelStatus('步骤 1/2：正在查询接口代码逻辑...');
+        
         try {
           lineageInfo = await this.queryAPILineage(apiId);
           console.log('✅ [SPX Helper] API血缘查询成功:', lineageInfo);
+          this.updateAIAnalysisPanelStatus(`步骤 1/2：已获取接口代码（${lineageInfo.bizSql ? '包含SQL' : '无SQL'}）`);
         } catch (err) {
           console.warn('⚠️ [SPX Helper] API血缘查询失败:', err.message);
-          // 血缘查询失败不影响主流程
+          this.updateAIAnalysisPanelStatus(`步骤 1/2：接口代码查询失败 - ${err.message}`);
+          // 等待1秒让用户看到状态
+          await new Promise(resolve => setTimeout(resolve, 1000));
         }
+      } else {
+        this.updateAIAnalysisPanelStatus('步骤 1/2：跳过（非api_mart接口）');
+        await new Promise(resolve => setTimeout(resolve, 800));
       }
       
-      // 构建分析提示词（包含血缘信息）
+      // 步骤4: 构建分析提示词
+      this.updateAIAnalysisPanelStatus('步骤 2/2：正在让AI分析...');
       const prompt = this.buildAPIAnalysisPrompt(source, lineageInfo);
       
-      // 调用AI API
+      // 步骤5: 调用AI API
       const analysis = await this.callAIAPI(prompt);
       
-      // 显示分析结果
+      // 步骤6: 显示分析结果
       this.showAIAnalysisPanel('result', source, analysis);
       
     } catch (err) {
@@ -1329,7 +1338,7 @@ class APIDataTracker {
     return response.result;
   }
   
-  showAIAnalysisPanel(state, source, content = '') {
+  showAIAnalysisPanel(state, source, content = '', statusText = '') {
     // 移除旧面板
     const oldPanel = document.getElementById('spx-ai-analysis-panel');
     if (oldPanel) oldPanel.remove();
@@ -1355,7 +1364,7 @@ class APIDataTracker {
     let html = '';
     
     if (state === 'loading') {
-      // 加载状态
+      // 加载状态 - 显示步骤进度
       html = `
         <div style="padding: 30px; text-align: center;">
           <div style="font-size: 48px; margin-bottom: 20px;">🤖</div>
@@ -1363,8 +1372,8 @@ class APIDataTracker {
           <div style="color: #666; font-size: 14px; margin-bottom: 8px;">
             分析接口: <strong>${this.truncateText(source.apiRecord.url, 60)}</strong>
           </div>
-          <div style="color: #999; font-size: 12px; margin-bottom: 20px;">
-            正在查询接口血缘信息（最多30秒）...
+          <div id="spx-ai-status-text" style="color: #667eea; font-size: 13px; margin-bottom: 20px; font-weight: 500; min-height: 20px;">
+            ${statusText || '正在准备分析...'}
           </div>
           <div class="typing-indicator" style="display: inline-flex; gap: 6px;">
             <span style="width: 10px; height: 10px; background: #667eea; border-radius: 50%; animation: bounce 1.4s infinite ease-in-out both;"></span>
@@ -1454,6 +1463,14 @@ class APIDataTracker {
           this.viewFullResponse(source.apiRecord.id, source.matchPaths || []);
         });
       }
+    }
+  }
+  
+  // 新增：更新AI分析面板的状态文本
+  updateAIAnalysisPanelStatus(statusText) {
+    const statusElement = document.getElementById('spx-ai-status-text');
+    if (statusElement) {
+      statusElement.textContent = statusText;
     }
   }
   
