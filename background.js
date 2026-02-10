@@ -400,8 +400,8 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
         
         const jobId = submitResult.jobId;
         
-        // 步骤2: 轮询结果（最多10次，每次1秒）
-        const maxAttempts = 10;
+        // 步骤2: 轮询结果（最多30次，每次1秒）
+        const maxAttempts = 30;
         let found = false;
         
         for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -417,7 +417,11 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
           });
           
           const metaResult = await metaResponse.json();
-          console.log(`🔄 Background: 轮询 ${attempt}/${maxAttempts}, 状态:`, metaResult.status);
+          
+          // 每5次打印一次日志，避免刷屏
+          if (attempt % 5 === 0 || metaResult.status === 'FINISHED' || metaResult.status === 'FAILED') {
+            console.log(`🔄 Background: 轮询 ${attempt}/${maxAttempts}, 状态:`, metaResult.status);
+          }
           
           if (metaResult.status === 'FINISHED') {
             // 步骤3: 获取实际数据
@@ -492,7 +496,7 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
         }
         
         if (!found) {
-          throw new Error('查询超时（10秒）');
+          throw new Error('查询超时（30秒）');
         }
       })
       .catch(error => {

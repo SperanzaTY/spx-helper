@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "SPX Helper",
-  "version": "2.17.4",
+  "version": "2.17.5",
   "description": "Shopee大数据开发助手 - 快速链接、代码片段、时区转换、SQL修正、API数据溯源(UI→API映射+文本选取)、DOD查询、API血缘查询",
   "author": "tianyi.liang",
   "permissions": [

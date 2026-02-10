@@ -1360,8 +1360,11 @@ class APIDataTracker {
         <div style="padding: 30px; text-align: center;">
           <div style="font-size: 48px; margin-bottom: 20px;">🤖</div>
           <h3 style="margin: 0 0 15px 0; color: #333;">AI正在分析...</h3>
-          <div style="color: #666; font-size: 14px; margin-bottom: 20px;">
+          <div style="color: #666; font-size: 14px; margin-bottom: 8px;">
             分析接口: <strong>${this.truncateText(source.apiRecord.url, 60)}</strong>
+          </div>
+          <div style="color: #999; font-size: 12px; margin-bottom: 20px;">
+            正在查询接口血缘信息（最多30秒）...
           </div>
           <div class="typing-indicator" style="display: inline-flex; gap: 6px;">
             <span style="width: 10px; height: 10px; background: #667eea; border-radius: 50%; animation: bounce 1.4s infinite ease-in-out both;"></span>
