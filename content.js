@@ -1512,11 +1512,12 @@ class APIDataTracker {
     
     // 构建业务SQL部分
     let bizSqlSection = '';
+    let deploymentInfo = '';
     if (lineageInfo && lineageInfo.bizSql) {
       // 截取SQL（避免太长）
       let sqlPreview = lineageInfo.bizSql;
-      if (sqlPreview.length > 1500) {
-        sqlPreview = sqlPreview.substring(0, 1500) + '\n... (SQL已截断)';
+      if (sqlPreview.length > 2000) {
+        sqlPreview = sqlPreview.substring(0, 2000) + '\n... (SQL已截断)';
       }
       
       bizSqlSection = `
@@ -1525,17 +1526,26 @@ class APIDataTracker {
 \`\`\`sql
 ${sqlPreview}
 \`\`\``;
+
+      deploymentInfo = `
+- API版本: v${lineageInfo.apiVersion || '未知'}
+- 发布环境: ${lineageInfo.publishEnv || '未知'}
+- 数据源ID: ${lineageInfo.dsId || '未知'}`;
     }
     
+    // 用户选中的字段
+    const selectedFields = source.matches.join(', ');
+    const fieldPaths = source.matchPaths.length > 0 ? source.matchPaths.map(p => `\`${p}\``).join(', ') : '响应根级字段';
+    
     // 构建详细的分析提示 - 开发者视角
-    const prompt = `你是一个资深的后端开发工程师，请从**开发者和运维人员的视角**分析这个API接口。
+    const prompt = `你是一个资深的后端开发工程师，请分析这个API接口，重点关注用户选中的字段是**如何计算出来的**。
 
 📍 **API基本信息**
 - URL: \`${record.url}\`
 - 方法: ${record.method}
 - 状态码: ${record.status}
-- 响应时间: ${record.duration}ms
-${lineageInfo && lineageInfo.apiId ? `- API ID: ${lineageInfo.apiId}` : ''}
+- 响应时间: ${record.duration}ms${lineageInfo && lineageInfo.apiId ? `
+- API ID: ${lineageInfo.apiId}` : ''}${deploymentInfo}
 ${bizSqlSection}
 ${record.requestPayload ? `
 
@@ -1544,50 +1554,65 @@ ${record.requestPayload ? `
 ${JSON.stringify(record.requestPayload, null, 2)}
 \`\`\`` : ''}
 
-📥 **响应数据结构示例**
+📥 **响应数据结构**
 \`\`\`json
 ${responsePreview}
 \`\`\`
 
-🎯 **分析目标**
-当前页面元素显示的数据：${source.matches.map(m => `"${m}"`).join(', ')}
-数据路径：${source.matchPaths.length > 0 ? source.matchPaths.join(', ') : '（根级）'}
+🎯 **用户选中的字段**
+- 字段值: ${selectedFields}
+- 数据路径: ${fieldPaths}
 
 ---
 
-请按以下格式输出分析结果，使用Markdown格式：
+请按以下格式输出分析结果：
 
 ## 🎯 接口功能
+简要说明这个接口的主要业务功能。
 
-简要说明这个接口的主要功能和业务用途。
+## 📊 选中字段的计算逻辑
 
-## 💻 数据逻辑
+**重点分析字段 "${selectedFields}" 是如何得到的：**
 
-${lineageInfo ? '基于业务SQL，说明：' : '说明：'}
-- 数据从哪里来（数据源/表）
-- 数据如何计算/处理
-- 关键的业务规则
+1. **数据来源**
+   - 从哪个表/视图获取（从SQL的FROM子句分析）
+   - 使用了哪些表的关联（从JOIN子句分析）
 
-## 📊 字段说明
+2. **计算过程**
+   - SELECT中的字段映射（如：SELECT order_sn AS orderNo）
+   - 聚合计算（如：SUM, COUNT, AVG等）
+   - 条件过滤（WHERE子句的影响）
+   - 分组逻辑（GROUP BY的影响）
+   - 其他SQL处理（CASE WHEN, CONCAT等）
 
-针对匹配到的字段 ${source.matches.map(m => `"${m}"`).join(', ')}：
-- 字段的业务含义
-- 字段在SQL中的来源
-- 字段的计算逻辑（如果有）
+3. **业务含义**
+   - 这个字段在业务上代表什么
+   - 为什么需要这样计算
 
-## 🔍 运维提示
+**注意**：只分析接口层的SQL逻辑，底表内部的数据如何生成不在分析范围内。
 
-为运维人员提供：
-- 这个页面功能的快速理解（1-2句话）
-- 常见问题排查方向
-- 性能优化建议（如果有）
+## 🔍 接口部署信息
+
+- **发布环境**: ${lineageInfo && lineageInfo.publishEnv ? lineageInfo.publishEnv : '（未获取到）'}
+- **数据源**: ${lineageInfo && lineageInfo.dsId ? `DS_${lineageInfo.dsId}` : '（未获取到）'}
+- **定位方法**: 
+  - 可在 ${lineageInfo && lineageInfo.publishEnv ? lineageInfo.publishEnv : '对应'} 环境排查
+  - 检查数据源连接状态
+  - 查看SQL执行计划
+
+## 🔧 运维建议
+
+- **常见问题**：这个字段可能出现什么问题
+- **排查方向**：如何快速定位问题
+- **性能优化**：如果响应慢，从哪里优化
 
 ---
 
-**要求**：
-1. 使用清晰的Markdown格式（## 标题, **加粗**, \`代码\`）
-2. 聚焦开发逻辑，不要过度描述数据内容
-3. 简洁专业，每部分2-4句话即可`;
+**输出要求**：
+1. 使用清晰的Markdown格式
+2. 重点是"计算逻辑"部分，要详细说明字段如何从SQL计算得出
+3. 简洁专业，避免冗余
+4. 如果SQL中没有复杂计算，直接说明是简单查询即可`;
 
     return prompt;
   }
