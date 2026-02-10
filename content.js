@@ -69,6 +69,12 @@ class APIDataTracker {
     document.addEventListener('mouseup', (e) => {
       console.log('🖱️ [SPX Helper] mouseup 事件触发');
       
+      // 如果点击的是浮动按钮，不处理
+      if (e.target.closest('#spx-selection-floating-btn')) {
+        console.log('⏭️ [SPX Helper] 点击的是浮动按钮，跳过');
+        return;
+      }
+      
       // 如果检查器模式开启，不处理文本选取（避免冲突）
       if (this.inspectorMode) {
         console.log('⏭️ [SPX Helper] 检查器模式开启，跳过文本选取');
