@@ -1398,22 +1398,26 @@ class APIDataTracker {
     } else {
       // 结果状态
       html = `
-        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 20px; color: white;">
+        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 24px; color: white; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
           <div style="display: flex; justify-content: space-between; align-items: center;">
-            <h3 style="margin: 0; font-size: 18px;">🤖 AI 智能分析</h3>
-            <button id="spx-close-ai-panel" style="background: rgba(255,255,255,0.2); border: none; border-radius: 6px; padding: 8px 15px; cursor: pointer; color: white; font-weight: 500;">关闭</button>
-          </div>
-          <div style="font-size: 12px; margin-top: 8px; opacity: 0.9;">
-            ${this.truncateText(source.apiRecord.url, 70)}
+            <div>
+              <h3 style="margin: 0; font-size: 20px; font-weight: 600; display: flex; align-items: center; gap: 8px;">
+                🤖 AI 接口分析
+              </h3>
+              <div style="font-size: 13px; margin-top: 6px; opacity: 0.95; font-family: monospace;">
+                ${this.truncateText(source.apiRecord.url, 70)}
+              </div>
+            </div>
+            <button id="spx-close-ai-panel" style="background: rgba(255,255,255,0.2); border: none; border-radius: 8px; padding: 10px 18px; cursor: pointer; color: white; font-weight: 500; font-size: 14px; transition: background 0.2s; backdrop-filter: blur(10px);" onmouseover="this.style.background='rgba(255,255,255,0.3)'" onmouseout="this.style.background='rgba(255,255,255,0.2)'">✕ 关闭</button>
           </div>
         </div>
-        <div style="padding: 25px; max-height: calc(85vh - 100px); overflow-y: auto;">
-          <div style="background: #f8f9fa; border-radius: 8px; padding: 20px; line-height: 1.8; color: #333; font-size: 14px;">
+        <div style="padding: 32px; max-height: calc(85vh - 120px); overflow-y: auto; background: #ffffff;">
+          <div style="background: #ffffff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 28px; line-height: 1.8; color: #1f2937; font-size: 15px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
             ${this.formatAIResponse(content)}
           </div>
-          <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #e5e7eb; display: flex; gap: 10px;">
-            <button class="spx-copy-analysis" style="flex: 1; background: #667eea; color: white; border: none; border-radius: 6px; padding: 10px; cursor: pointer; font-size: 13px;">📋 复制分析结果</button>
-            <button class="spx-view-api-detail" style="flex: 1; background: #10b981; color: white; border: none; border-radius: 6px; padding: 10px; cursor: pointer; font-size: 13px;">📄 查看API详情</button>
+          <div style="margin-top: 24px; padding-top: 24px; border-top: 2px solid #f3f4f6; display: flex; gap: 12px;">
+            <button class="spx-copy-analysis" style="flex: 1; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 8px; padding: 12px; cursor: pointer; font-size: 14px; font-weight: 500; transition: transform 0.2s, box-shadow 0.2s; box-shadow: 0 2px 8px rgba(102,126,234,0.3);" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 4px 12px rgba(102,126,234,0.4)'" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 8px rgba(102,126,234,0.3)'">📋 复制分析结果</button>
+            <button class="spx-view-api-detail" style="flex: 1; background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; border: none; border-radius: 8px; padding: 12px; cursor: pointer; font-size: 14px; font-weight: 500; transition: transform 0.2s, box-shadow 0.2s; box-shadow: 0 2px 8px rgba(16,185,129,0.3);" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 4px 12px rgba(16,185,129,0.4)'" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 8px rgba(16,185,129,0.3)'">📄 查看API详情</button>
           </div>
         </div>
       `;
@@ -1453,21 +1457,32 @@ class APIDataTracker {
   formatAIResponse(text) {
     // 处理代码块
     text = text.replace(/```(\w+)?\n([\s\S]*?)```/g, (match, lang, code) => {
-      return `<pre style="background: #282c34; color: #abb2bf; padding: 15px; border-radius: 6px; overflow-x: auto; margin: 10px 0;">${this.escapeHtml(code.trim())}</pre>`;
+      return `<pre style="background: #1e1e1e; color: #d4d4d4; padding: 16px; border-radius: 8px; overflow-x: auto; margin: 16px 0; font-size: 13px; line-height: 1.6; font-family: 'Consolas', 'Monaco', 'Courier New', monospace;">${this.escapeHtml(code.trim())}</pre>`;
     });
     
     // 处理行内代码
-    text = text.replace(/`([^`]+)`/g, '<code style="background: #f1f3f5; padding: 2px 6px; border-radius: 3px; font-family: monospace; color: #e83e8c;">$1</code>');
+    text = text.replace(/`([^`]+)`/g, '<code style="background: #f3f4f6; padding: 3px 7px; border-radius: 4px; font-family: monospace; color: #e83e8c; font-size: 0.9em;">$1</code>');
     
-    // 处理标题
-    text = text.replace(/^##\s+(.+)$/gm, '<div style="font-size: 16px; font-weight: 600; color: #667eea; margin: 20px 0 10px 0;">$1</div>');
-    text = text.replace(/\*\*(.+?)[:：]\*\*/g, '<strong style="color: #667eea;">$1:</strong>');
+    // 处理二级标题 ##
+    text = text.replace(/^##\s+(.+)$/gm, '<h2 style="font-size: 18px; font-weight: 600; color: #1f2937; margin: 24px 0 12px 0; padding-bottom: 8px; border-bottom: 2px solid #e5e7eb;">$1</h2>');
     
-    // 处理加粗
-    text = text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    // 处理三级标题 ###
+    text = text.replace(/^###\s+(.+)$/gm, '<h3 style="font-size: 16px; font-weight: 600; color: #374151; margin: 20px 0 10px 0;">$1</h3>');
     
-    // 处理列表
-    text = text.replace(/^[\-•]\s+(.+)$/gm, '<div style="margin-left: 20px; margin-bottom: 6px;">• $1</div>');
+    // 处理加粗 **text**
+    text = text.replace(/\*\*(.+?)\*\*/g, '<strong style="color: #667eea; font-weight: 600;">$1</strong>');
+    
+    // 处理无序列表 - item 或 • item
+    text = text.replace(/^[\-•]\s+(.+)$/gm, '<div style="margin-left: 24px; margin-bottom: 8px; padding-left: 12px; border-left: 3px solid #e5e7eb; color: #4b5563;">• $1</div>');
+    
+    // 处理有序列表 1. item
+    text = text.replace(/^(\d+)\.\s+(.+)$/gm, '<div style="margin-left: 24px; margin-bottom: 8px; padding-left: 12px; border-left: 3px solid #e5e7eb; color: #4b5563;"><strong style="color: #667eea;">$1.</strong> $2</div>');
+    
+    // 处理引用 > text
+    text = text.replace(/^>\s+(.+)$/gm, '<blockquote style="margin: 12px 0; padding: 12px 16px; background: #f9fafb; border-left: 4px solid #667eea; color: #6b7280; font-style: italic;">$1</blockquote>');
+    
+    // 处理水平线 ---
+    text = text.replace(/^---$/gm, '<hr style="margin: 20px 0; border: none; border-top: 1px solid #e5e7eb;">');
     
     // 处理换行
     text = text.replace(/\n/g, '<br>');
@@ -1491,8 +1506,8 @@ class APIDataTracker {
     
     // 截取响应数据（避免太长）
     let responsePreview = JSON.stringify(record.responseData, null, 2);
-    if (responsePreview.length > 2000) {
-      responsePreview = responsePreview.substring(0, 2000) + '\n... (数据已截断)';
+    if (responsePreview.length > 1000) {
+      responsePreview = responsePreview.substring(0, 1000) + '\n... (数据已截断)';
     }
     
     // 构建业务SQL部分
@@ -1512,15 +1527,14 @@ ${sqlPreview}
 \`\`\``;
     }
     
-    // 构建详细的分析提示
-    const prompt = `请帮我分析这个API接口：
+    // 构建详细的分析提示 - 开发者视角
+    const prompt = `你是一个资深的后端开发工程师，请从**开发者和运维人员的视角**分析这个API接口。
 
-📍 **API信息**
+📍 **API基本信息**
 - URL: \`${record.url}\`
 - 方法: ${record.method}
 - 状态码: ${record.status}
 - 响应时间: ${record.duration}ms
-- 请求时间: ${record.requestTime}
 ${lineageInfo && lineageInfo.apiId ? `- API ID: ${lineageInfo.apiId}` : ''}
 ${bizSqlSection}
 ${record.requestPayload ? `
@@ -1530,19 +1544,50 @@ ${record.requestPayload ? `
 ${JSON.stringify(record.requestPayload, null, 2)}
 \`\`\`` : ''}
 
-📥 **响应数据**（匹配的字段：${source.matches.join(', ')}）
+📥 **响应数据结构示例**
 \`\`\`json
 ${responsePreview}
 \`\`\`
 
-🔍 **匹配路径**
-${source.matchPaths.length > 0 ? source.matchPaths.map(p => `- ${p}`).join('\n') : '（无）'}
+🎯 **分析目标**
+当前页面元素显示的数据：${source.matches.map(m => `"${m}"`).join(', ')}
+数据路径：${source.matchPaths.length > 0 ? source.matchPaths.join(', ') : '（根级）'}
 
-请帮我分析：
-1. 这个接口的主要功能和用途${lineageInfo ? '（结合业务SQL）' : ''}
-2. 响应数据的结构和关键字段含义
-3. 匹配到的字段 ${source.matches.map(m => `"${m}"`).join(', ')} 的业务含义
-${lineageInfo ? '4. 接口的查询逻辑和数据处理流程\n5. ' : '4. '}是否有异常或需要注意的地方`;
+---
+
+请按以下格式输出分析结果，使用Markdown格式：
+
+## 🎯 接口功能
+
+简要说明这个接口的主要功能和业务用途。
+
+## 💻 数据逻辑
+
+${lineageInfo ? '基于业务SQL，说明：' : '说明：'}
+- 数据从哪里来（数据源/表）
+- 数据如何计算/处理
+- 关键的业务规则
+
+## 📊 字段说明
+
+针对匹配到的字段 ${source.matches.map(m => `"${m}"`).join(', ')}：
+- 字段的业务含义
+- 字段在SQL中的来源
+- 字段的计算逻辑（如果有）
+
+## 🔍 运维提示
+
+为运维人员提供：
+- 这个页面功能的快速理解（1-2句话）
+- 常见问题排查方向
+- 性能优化建议（如果有）
+
+---
+
+**要求**：
+1. 使用清晰的Markdown格式（## 标题, **加粗**, \`代码\`）
+2. 聚焦开发逻辑，不要过度描述数据内容
+3. 简洁专业，每部分2-4句话即可`;
 
     return prompt;
   }
