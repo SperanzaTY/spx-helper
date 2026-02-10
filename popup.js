@@ -29,6 +29,9 @@ document.addEventListener('DOMContentLoaded', function() {
   initApiLineageTool();
   initAPITrackerSettings();  // 初始化 API 溯源工具设置
   
+  // 预加载API血缘缓存（后台异步，不阻塞popup打开）
+  preloadAPILineageCache();
+  
   // 事件监听器
   document.getElementById('addLink').addEventListener('click', addLink);
   document.getElementById('addLinkCategory').addEventListener('click', addLinkCategory);
@@ -10653,4 +10656,186 @@ function showLineageStatus(type, message) {
   else if (type === 'error') icon = '❌';
   
   statusDiv.innerHTML = `${icon} ${escapeHtml(message)}`;
+}
+
+// ========================================
+// API血缘缓存预加载
+// ========================================
+async function preloadAPILineageCache() {
+  try {
+    console.log('🔄 [API缓存] 检查缓存状态...');
+    
+    // 检查缓存是否需要更新（每24小时更新一次）
+    const result = await chrome.storage.local.get(['apiLineageCache', 'apiLineageCacheTimestamp']);
+    const now = Date.now();
+    const cacheAge = now - (result.apiLineageCacheTimestamp || 0);
+    const CACHE_DURATION = 24 * 60 * 60 * 1000; // 24小时
+    
+    if (result.apiLineageCache && cacheAge < CACHE_DURATION) {
+      const cacheSize = Object.keys(result.apiLineageCache).length;
+      console.log(`✅ [API缓存] 缓存有效（${Math.round(cacheAge / 1000 / 60)}分钟前更新），共${cacheSize}个API，跳过预加载`);
+      return;
+    }
+    
+    console.log('🔄 [API缓存] 缓存过期或不存在，开始后台更新...');
+    
+    // 查询所有live环境的API血缘数据
+    const apiName = 'spx_mart.api_lineage_search';
+    const version = 'hg3ggpdp2lkgqlmc';
+    const personalToken = 'l7Vx4TGfwhmA1gtPn+JmUQ==';
+    const prestoQueueName = 'szsc-scheduled';
+    const endUser = 'tianyi.liang';
+    
+    // 提交查询（查询所有live环境的API）
+    const submitUrl = `https://open-api.datasuite.shopee.io/dataservice/${apiName}/${version}`;
+    
+    const submitBody = {
+      olapPayload: {
+        expressions: [
+          {
+            parameterName: 'api_id',
+            value: '%' // 查询所有API
+          }
+        ],
+        prestoQueueName: prestoQueueName
+      }
+    };
+    
+    const submitResponse = await fetch(submitUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': personalToken,
+        'X-End-User': endUser
+      },
+      body: JSON.stringify(submitBody)
+    });
+    
+    if (!submitResponse.ok) {
+      throw new Error(`提交失败: ${submitResponse.status}`);
+    }
+    
+    const submitResult = await submitResponse.json();
+    const jobId = submitResult.jobId;
+    
+    if (!jobId) {
+      throw new Error('未返回jobId');
+    }
+    
+    console.log('✅ [API缓存] 查询已提交, jobId:', jobId);
+    
+    // 轮询结果（后台静默）
+    const maxAttempts = 120;
+    let pollInterval = 2000; // 2秒间隔，避免频繁请求
+    
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, pollInterval));
+      
+      // 后期延长间隔
+      if (attempt > 60) pollInterval = 5000;
+      else if (attempt > 30) pollInterval = 3000;
+      
+      const metaUrl = `https://open-api.datasuite.shopee.io/dataservice/result/${jobId}`;
+      
+      const metaResponse = await fetch(metaUrl, {
+        headers: {
+          'Authorization': personalToken,
+          'X-End-User': endUser
+        }
+      });
+      
+      const metaResult = await metaResponse.json();
+      
+      // 每10次打印一次
+      if (attempt % 10 === 0) {
+        console.log(`🔄 [API缓存] 轮询 ${attempt}/${maxAttempts}, 状态: ${metaResult.status}`);
+      }
+      
+      if (metaResult.status === 'FINISH') {
+        console.log('✅ [API缓存] 查询完成，开始获取数据...');
+        
+        // 获取所有分片数据
+        const cache = {};
+        let shard = 0;
+        let totalRows = 0;
+        
+        while (true) {
+          const shardUrl = `https://open-api.datasuite.shopee.io/dataservice/result/${jobId}/${shard}`;
+          
+          const shardResponse = await fetch(shardUrl, {
+            headers: {
+              'Authorization': personalToken,
+              'X-End-User': endUser
+            }
+          });
+          
+          if (!shardResponse.ok) {
+            if (shard === 0) {
+              throw new Error(`获取结果失败: ${shardResponse.status}`);
+            }
+            break; // 没有更多分片
+          }
+          
+          const shardResult = await shardResponse.json();
+          
+          if (shardResult.contentType === 'ERROR_MESSAGE') {
+            throw new Error(shardResult.message || '查询出错');
+          }
+          
+          if (shardResult.contentType === 'QUERY_DATA' && shardResult.rows) {
+            // 处理这批数据，只保留live环境的
+            for (const row of shardResult.rows) {
+              const values = row.values;
+              if (values.publish_env === 'live') {
+                const apiId = values.api_id;
+                
+                // 提取表名
+                const bizSql = values.biz_sql || '';
+                const regex = /\{mgmt_db2\}\.([a-zA-Z0-9_\{\}\-]+)/g;
+                const tables = [];
+                let match;
+                while ((match = regex.exec(bizSql)) !== null) {
+                  if (!tables.includes(match[1])) {
+                    tables.push(match[1]);
+                  }
+                }
+                
+                // 存入缓存（以api_id为key）
+                cache[apiId] = {
+                  apiId: apiId,
+                  bizSql: bizSql,
+                  dsId: values.ds_id,
+                  tables: tables,
+                  publishEnv: 'live'
+                };
+                
+                totalRows++;
+              }
+            }
+          }
+          
+          shard++;
+        }
+        
+        // 保存缓存
+        await chrome.storage.local.set({
+          apiLineageCache: cache,
+          apiLineageCacheTimestamp: now
+        });
+        
+        const cacheSize = Object.keys(cache).length;
+        console.log(`✅ [API缓存] 预加载完成！处理${totalRows}行数据，缓存${cacheSize}个API的血缘信息`);
+        
+        return;
+      } else if (metaResult.status === 'FAILED') {
+        throw new Error(metaResult.message || '查询失败');
+      }
+    }
+    
+    throw new Error('预加载超时');
+    
+  } catch (error) {
+    console.error('❌ [API缓存] 预加载失败:', error);
+    // 失败不影响其他功能，用户仍可手动查询
+  }
 }

@@ -353,40 +353,87 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
     
     const apiId = request.apiId;
     
-    // 使用DataSuite API（与popup.js相同）
-    const apiName = 'spx_mart.api_lineage_search';
-    const version = 'hg3ggpdp2lkgqlmc';
-    const personalToken = 'l7Vx4TGfwhmA1gtPn+JmUQ==';
-    const prestoQueueName = 'szsc-scheduled';
-    const endUser = 'tianyi.liang';
-    
-    // 步骤1: 提交查询
-    const submitUrl = `https://open-api.datasuite.shopee.io/dataservice/${apiName}/${version}`;
-    
-    const submitBody = {
-      olapPayload: {
-        expressions: [
-          {
-            parameterName: 'api_id',
-            value: `%${apiId}%`
+    // 先尝试从缓存读取
+    chrome.storage.local.get(['apiLineageCache'], async function(result) {
+      try {
+        const cache = result.apiLineageCache || {};
+        const cacheKeys = Object.keys(cache);
+        
+        console.log('📦 Background: 缓存中共有', cacheKeys.length, '个API');
+        console.log('🔍 Background: 查询API ID:', apiId);
+        
+        // 在缓存中查找匹配的API（精确匹配或模糊匹配）
+        let lineageInfo = null;
+        
+        // 优先精确匹配
+        if (cache[apiId]) {
+          lineageInfo = cache[apiId];
+          console.log('✅ Background: 缓存精确命中!', apiId);
+        } else {
+          // 模糊匹配
+          for (const [cachedApiId, data] of Object.entries(cache)) {
+            if (cachedApiId.includes(apiId) || apiId.includes(cachedApiId)) {
+              lineageInfo = data;
+              console.log('✅ Background: 缓存模糊命中!');
+              console.log('   查询ID:', apiId);
+              console.log('   匹配key:', cachedApiId);
+              break;
+            }
           }
-        ],
-        prestoQueueName: prestoQueueName
-      }
-    };
-    
-    console.log('📤 Background: 提交API血缘查询');
-    
-    fetch(submitUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': personalToken,
-        'X-End-User': endUser
-      },
-      body: JSON.stringify(submitBody)
-    })
-      .then(async submitResponse => {
+        }
+        
+        if (lineageInfo) {
+          // 缓存命中，直接返回（<100ms）
+          sendResponse({
+            success: true,
+            lineageInfo: { ...lineageInfo, fromCache: true }
+          });
+          return;
+        }
+        
+        // 缓存未命中，输出调试信息
+        console.log('⚠️ Background: 缓存未命中');
+        console.log('   查询ID:', apiId);
+        if (cacheKeys.length > 0) {
+          console.log('   缓存key样本（前10个）:', cacheKeys.slice(0, 10));
+        } else {
+          console.log('   缓存为空，可能预加载尚未完成');
+        }
+        console.log('   执行实时查询...');
+        
+        // 缓存未命中，执行实时查询
+        const apiName = 'spx_mart.api_lineage_search';
+        const version = 'hg3ggpdp2lkgqlmc';
+        const personalToken = 'l7Vx4TGfwhmA1gtPn+JmUQ==';
+        const prestoQueueName = 'szsc-scheduled';
+        const endUser = 'tianyi.liang';
+        
+        const submitUrl = `https://open-api.datasuite.shopee.io/dataservice/${apiName}/${version}`;
+        
+        const submitBody = {
+          olapPayload: {
+            expressions: [
+              {
+                parameterName: 'api_id',
+                value: `%${apiId}%`
+              }
+            ],
+            prestoQueueName: prestoQueueName
+          }
+        };
+        
+        console.log('📤 Background: 提交实时查询');
+        
+        const submitResponse = await fetch(submitUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': personalToken,
+            'X-End-User': endUser
+          },
+          body: JSON.stringify(submitBody)
+        });
+        
         if (!submitResponse.ok) {
           throw new Error(`提交查询失败: ${submitResponse.status}`);
         }
@@ -400,12 +447,16 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
         
         const jobId = submitResult.jobId;
         
-        // 步骤2: 轮询结果（最多30次，每次1秒）
-        const maxAttempts = 30;
-        let found = false;
+        // 轮询结果（最多60次）
+        const maxAttempts = 60;
+        let pollInterval = 500;
         
         for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-          await new Promise(resolve => setTimeout(resolve, 1000));
+          await new Promise(resolve => setTimeout(resolve, pollInterval));
+          
+          // 动态调整间隔
+          if (attempt > 20) pollInterval = 2000;
+          else if (attempt > 5) pollInterval = 1000;
           
           const metaUrl = `https://open-api.datasuite.shopee.io/dataservice/result/${jobId}`;
           
@@ -418,14 +469,13 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
           
           const metaResult = await metaResponse.json();
           
-          // 每5次打印一次日志，避免刷屏
-          if (attempt % 5 === 0 || metaResult.status === 'FINISHED' || metaResult.status === 'FAILED') {
+          if (attempt % 5 === 0 || metaResult.status === 'FINISH' || metaResult.status === 'FAILED') {
             console.log(`🔄 Background: 轮询 ${attempt}/${maxAttempts}, 状态:`, metaResult.status);
           }
           
-          if (metaResult.status === 'FINISHED') {
-            // 步骤3: 获取实际数据
-            const dataUrl = `https://open-api.datasuite.shopee.io/dataservice/result/${jobId}/data`;
+          if (metaResult.status === 'FINISH') {
+            // 获取数据
+            const dataUrl = `https://open-api.datasuite.shopee.io/dataservice/result/${jobId}/0`;
             
             const dataResponse = await fetch(dataUrl, {
               headers: {
@@ -437,10 +487,14 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
             const data = await dataResponse.json();
             console.log('📥 Background: API血缘数据:', data);
             
+            if (data.contentType === 'ERROR_MESSAGE') {
+              throw new Error(data.message || '查询出错');
+            }
+            
             if (!data.rows || data.rows.length === 0) {
               sendResponse({
                 success: false,
-                error: '未找到live环境的API血缘信息'
+                error: '未找到API血缘信息'
               });
               return;
             }
@@ -468,44 +522,50 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
             const tables = [];
             let match;
             while ((match = regex.exec(bizSql)) !== null) {
-              tables.push(match[1]);
+              if (!tables.includes(match[1])) {
+                tables.push(match[1]);
+              }
             }
             
-            const uniqueTables = [...new Set(tables)];
-            
-            const lineageInfo = {
+            const resultInfo = {
               apiId: liveRecord.api_id,
-              apiVersion: liveRecord.api_version,
-              publishEnv: liveRecord.publish_env,
+              bizSql: bizSql,
               dsId: liveRecord.ds_id,
-              tables: uniqueTables,
-              bizSql: bizSql
+              tables: tables,
+              publishEnv: liveRecord.publish_env,
+              fromCache: false
             };
             
-            console.log('✅ Background: API血缘解析成功:', lineageInfo);
-            sendResponse({
-              success: true,
-              lineageInfo: lineageInfo
+            // 更新缓存（下次查询更快）
+            chrome.storage.local.get(['apiLineageCache'], function(cacheResult) {
+              const updatedCache = { ...(cacheResult.apiLineageCache || {}), [liveRecord.api_id]: resultInfo };
+              chrome.storage.local.set({ apiLineageCache: updatedCache });
+              console.log('💾 Background: 已更新缓存');
             });
             
-            found = true;
-            break;
+            console.log('✅ Background: API血缘解析成功');
+            
+            sendResponse({
+              success: true,
+              lineageInfo: resultInfo
+            });
+            
+            return;
           } else if (metaResult.status === 'FAILED') {
-            throw new Error('查询任务失败');
+            throw new Error(metaResult.message || '查询失败');
           }
         }
         
-        if (!found) {
-          throw new Error('查询超时（30秒）');
-        }
-      })
-      .catch(error => {
+        throw new Error('查询超时（60秒）');
+        
+      } catch (error) {
         console.error('❌ Background: API血缘查询失败:', error);
         sendResponse({
           success: false,
           error: error.message
         });
-      });
+      }
+    });
     
     return true; // 保持异步消息通道
   }

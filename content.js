@@ -8,6 +8,25 @@ console.log('🚀 [SPX Helper] Content Script 开始加载...');
 // 注意：API 拦截由 injected.js 完成（运行在 MAIN world）
 // 这个脚本负责 UI 交互（运行在 ISOLATED world）
 
+// ========================================
+// 扩展上下文检查（防止reload后报错）
+// ========================================
+function isExtensionContextValid() {
+  try {
+    return !!(chrome && chrome.runtime && chrome.runtime.id);
+  } catch (e) {
+    return false;
+  }
+}
+
+function safeRuntimeCall(fn) {
+  if (!isExtensionContextValid()) {
+    console.warn('⚠️ [SPX Helper] 扩展上下文已失效，跳过调用');
+    return Promise.resolve(null);
+  }
+  return fn();
+}
+
 class APIDataTracker {
   constructor() {
     this.apiRecords = new Map();
@@ -43,11 +62,13 @@ class APIDataTracker {
         const record = event.data.record;
         this.apiRecords.set(record.id, record);
         
-        // 通知 popup
-        chrome.runtime.sendMessage({
-          action: 'API_RECORDED',
-          record: record
-        }).catch(() => {});
+        // 通知 popup（安全调用）
+        safeRuntimeCall(() => {
+          return chrome.runtime.sendMessage({
+            action: 'API_RECORDED',
+            record: record
+          }).catch(() => {});
+        });
       }
     });
   }
@@ -1258,7 +1279,10 @@ class APIDataTracker {
         try {
           lineageInfo = await this.queryAPILineage(apiId);
           console.log('✅ [SPX Helper] API血缘查询成功:', lineageInfo);
-          this.updateAIAnalysisPanelStatus(`步骤 1/2：已获取接口代码（${lineageInfo.bizSql ? '包含SQL' : '无SQL'}）`);
+          
+          // 显示缓存命中状态
+          const cacheStatus = lineageInfo.fromCache ? '（📦 缓存命中）' : '（🌐 实时查询）';
+          this.updateAIAnalysisPanelStatus(`步骤 1/2：已获取接口代码${cacheStatus}`);
         } catch (err) {
           console.warn('⚠️ [SPX Helper] API血缘查询失败:', err.message);
           this.updateAIAnalysisPanelStatus(`步骤 1/2：接口代码查询失败 - ${err.message}`);
@@ -1274,6 +1298,15 @@ class APIDataTracker {
       this.updateAIAnalysisPanelStatus('步骤 2/2：正在让AI分析...');
       const prompt = this.buildAPIAnalysisPrompt(source, lineageInfo);
       
+      // 调试：输出prompt信息
+      console.log('📝 [SPX Helper] 传给AI的prompt长度:', prompt.length);
+      console.log('📝 [SPX Helper] SQL长度:', lineageInfo?.bizSql?.length || 0);
+      if (lineageInfo?.bizSql) {
+        console.log('📝 [SPX Helper] SQL内容（前200字符）:', lineageInfo.bizSql.substring(0, 200));
+        console.log('📝 [SPX Helper] SQL内容（后200字符）:', lineageInfo.bizSql.substring(lineageInfo.bizSql.length - 200));
+      }
+      console.log('📝 [SPX Helper] 完整prompt:', prompt);
+      
       // 步骤5: 调用AI API
       const analysis = await this.callAIAPI(prompt);
       
@@ -1288,14 +1321,39 @@ class APIDataTracker {
   
   extractAPIId(url) {
     // 尝试从URL中提取API ID
-    // 例如: /api_mart/order/get_detail -> order/get_detail
-    // 或: /api_mart/order/get_detail?v=1 -> order/get_detail
+    // 支持多种格式：
+    // 1. 标准格式: /api_mart/order/get_detail -> order/get_detail
+    // 2. 带查询参数: /api_mart/order/get_detail?v=1 -> order/get_detail
+    // 3. FMS格式: /mgmt/api/pc/forward/data/api_mart/mgmt_app/data_api/operation__xxx -> operation__xxx
+    //    这种格式取最后一个路径段作为API ID
     
+    // 先尝试匹配 api_mart 之后的内容
     const match = url.match(/\/api_mart\/([^?#]+)/);
     if (match) {
-      return match[1].replace(/\/$/, ''); // 移除末尾的斜杠
+      const fullPath = match[1].replace(/\/$/, ''); // 移除末尾的斜杠
+      
+      // 如果路径很长，可能是 FMS 格式（如 mgmt_app/data_api/operation__xxx）
+      // 取最后一个路径段
+      const segments = fullPath.split('/');
+      const lastSegment = segments[segments.length - 1];
+      
+      console.log('🔍 [SPX Helper] 提取API ID:');
+      console.log('   原始URL:', url);
+      console.log('   api_mart后的路径:', fullPath);
+      console.log('   最后一段:', lastSegment);
+      
+      // 如果最后一段看起来像是API ID（包含__或者比较长），就用最后一段
+      // 否则用完整路径
+      if (lastSegment.includes('__') || segments.length > 2) {
+        console.log('   ✅ 使用最后一段作为API ID:', lastSegment);
+        return lastSegment;
+      } else {
+        console.log('   ✅ 使用完整路径作为API ID:', fullPath);
+        return fullPath;
+      }
     }
     
+    console.log('⚠️ [SPX Helper] 无法提取API ID，URL不包含/api_mart/:', url);
     return null;
   }
   
@@ -1423,13 +1481,13 @@ class APIDataTracker {
             <button id="spx-close-ai-panel" style="background: rgba(255,255,255,0.2); border: none; border-radius: 8px; padding: 10px 18px; cursor: pointer; color: white; font-weight: 500; font-size: 14px; transition: background 0.2s; backdrop-filter: blur(10px);" onmouseover="this.style.background='rgba(255,255,255,0.3)'" onmouseout="this.style.background='rgba(255,255,255,0.2)'">✕ 关闭</button>
           </div>
         </div>
-        <div style="padding: 32px; max-height: calc(85vh - 120px); overflow-y: auto; background: #ffffff;">
-          <div style="background: #ffffff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 28px; line-height: 1.8; color: #1f2937; font-size: 15px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+        <div style="padding: 24px; max-height: calc(85vh - 120px); overflow-y: auto; background: #fafbfc;">
+          <div style="background: #ffffff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 22px; line-height: 1.7; color: #1f2937; font-size: 14px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
             ${this.formatAIResponse(content)}
           </div>
-          <div style="margin-top: 24px; padding-top: 24px; border-top: 2px solid #f3f4f6; display: flex; gap: 12px;">
-            <button class="spx-copy-analysis" style="flex: 1; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 8px; padding: 12px; cursor: pointer; font-size: 14px; font-weight: 500; transition: transform 0.2s, box-shadow 0.2s; box-shadow: 0 2px 8px rgba(102,126,234,0.3);" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 4px 12px rgba(102,126,234,0.4)'" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 8px rgba(102,126,234,0.3)'">📋 复制分析结果</button>
-            <button class="spx-view-api-detail" style="flex: 1; background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; border: none; border-radius: 8px; padding: 12px; cursor: pointer; font-size: 14px; font-weight: 500; transition: transform 0.2s, box-shadow 0.2s; box-shadow: 0 2px 8px rgba(16,185,129,0.3);" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 4px 12px rgba(16,185,129,0.4)'" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 8px rgba(16,185,129,0.3)'">📄 查看API详情</button>
+          <div style="margin-top: 20px; padding-top: 20px; border-top: 2px solid #f3f4f6; display: flex; gap: 10px;">
+            <button class="spx-copy-analysis" style="flex: 1; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 8px; padding: 11px; cursor: pointer; font-size: 13px; font-weight: 500; transition: transform 0.2s, box-shadow 0.2s; box-shadow: 0 2px 8px rgba(102,126,234,0.3);" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 4px 12px rgba(102,126,234,0.4)'" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 8px rgba(102,126,234,0.3)'">📋 复制分析结果</button>
+            <button class="spx-view-api-detail" style="flex: 1; background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; border: none; border-radius: 8px; padding: 11px; cursor: pointer; font-size: 13px; font-weight: 500; transition: transform 0.2s, box-shadow 0.2s; box-shadow: 0 2px 8px rgba(16,185,129,0.3);" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 4px 12px rgba(16,185,129,0.4)'" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 8px rgba(16,185,129,0.3)'">📄 查看API详情</button>
           </div>
         </div>
       `;
@@ -1475,37 +1533,67 @@ class APIDataTracker {
   }
   
   formatAIResponse(text) {
-    // 处理代码块
+    // 先处理代码块（保护它们不被其他规则影响）
+    const codeBlocks = [];
     text = text.replace(/```(\w+)?\n([\s\S]*?)```/g, (match, lang, code) => {
-      return `<pre style="background: #1e1e1e; color: #d4d4d4; padding: 16px; border-radius: 8px; overflow-x: auto; margin: 16px 0; font-size: 13px; line-height: 1.6; font-family: 'Consolas', 'Monaco', 'Courier New', monospace;">${this.escapeHtml(code.trim())}</pre>`;
+      const placeholder = `__CODE_BLOCK_${codeBlocks.length}__`;
+      codeBlocks.push(`<pre style="background: #1e1e1e; color: #d4d4d4; padding: 16px; border-radius: 8px; overflow-x: auto; margin: 14px 0; font-size: 13px; line-height: 1.5; font-family: 'Consolas', 'Monaco', 'Courier New', monospace; border: 1px solid #404040;">${this.escapeHtml(code.trim())}</pre>`);
+      return placeholder;
     });
     
-    // 处理行内代码
-    text = text.replace(/`([^`]+)`/g, '<code style="background: #f3f4f6; padding: 3px 7px; border-radius: 4px; font-family: monospace; color: #e83e8c; font-size: 0.9em;">$1</code>');
+    // 处理行内代码（在处理其他markdown之前）
+    const inlineCodes = [];
+    text = text.replace(/`([^`]+)`/g, (match, code) => {
+      const placeholder = `__INLINE_CODE_${inlineCodes.length}__`;
+      inlineCodes.push(`<code style="background: #f1f3f5; padding: 2px 6px; border-radius: 3px; font-family: 'Consolas', 'Monaco', monospace; color: #c7254e; font-size: 0.92em; border: 1px solid #e9ecef;">${this.escapeHtml(code)}</code>`);
+      return placeholder;
+    });
     
-    // 处理二级标题 ##
-    text = text.replace(/^##\s+(.+)$/gm, '<h2 style="font-size: 18px; font-weight: 600; color: #1f2937; margin: 24px 0 12px 0; padding-bottom: 8px; border-bottom: 2px solid #e5e7eb;">$1</h2>');
+    // 处理标题（注意顺序：先处理一级，再二级，再三级）
+    text = text.replace(/^#\s+(.+)$/gm, '<h1 style="font-size: 20px; font-weight: 700; color: #111827; margin: 0 0 16px 0; padding-bottom: 10px; border-bottom: 3px solid #667eea; display: flex; align-items: center; gap: 8px;">$1</h1>');
+    text = text.replace(/^##\s+(.+)$/gm, '<h2 style="font-size: 17px; font-weight: 600; color: #111827; margin: 22px 0 10px 0; padding-bottom: 6px; border-bottom: 2px solid #e5e7eb; display: flex; align-items: center; gap: 8px;">$1</h2>');
+    text = text.replace(/^###\s+(.+)$/gm, '<h3 style="font-size: 15px; font-weight: 600; color: #374151; margin: 16px 0 8px 0;">$1</h3>');
     
-    // 处理三级标题 ###
-    text = text.replace(/^###\s+(.+)$/gm, '<h3 style="font-size: 16px; font-weight: 600; color: #374151; margin: 20px 0 10px 0;">$1</h3>');
-    
-    // 处理加粗 **text**
+    // 处理加粗
     text = text.replace(/\*\*(.+?)\*\*/g, '<strong style="color: #667eea; font-weight: 600;">$1</strong>');
     
-    // 处理无序列表 - item 或 • item
-    text = text.replace(/^[\-•]\s+(.+)$/gm, '<div style="margin-left: 24px; margin-bottom: 8px; padding-left: 12px; border-left: 3px solid #e5e7eb; color: #4b5563;">• $1</div>');
+    // 处理无序列表（支持多种格式）
+    text = text.replace(/^[\-•]\s+(.+)$/gm, '<li style="margin-left: 0; margin-bottom: 6px; padding-left: 8px; color: #374151; line-height: 1.6;">$1</li>');
     
-    // 处理有序列表 1. item
-    text = text.replace(/^(\d+)\.\s+(.+)$/gm, '<div style="margin-left: 24px; margin-bottom: 8px; padding-left: 12px; border-left: 3px solid #e5e7eb; color: #4b5563;"><strong style="color: #667eea;">$1.</strong> $2</div>');
+    // 处理有序列表
+    text = text.replace(/^(\d+)\.\s+(.+)$/gm, '<li style="margin-left: 0; margin-bottom: 6px; padding-left: 8px; color: #374151; line-height: 1.6;"><strong style="color: #667eea; margin-right: 4px;">$1.</strong>$2</li>');
     
-    // 处理引用 > text
-    text = text.replace(/^>\s+(.+)$/gm, '<blockquote style="margin: 12px 0; padding: 12px 16px; background: #f9fafb; border-left: 4px solid #667eea; color: #6b7280; font-style: italic;">$1</blockquote>');
+    // 包装连续的列表项
+    text = text.replace(/(<li.*?<\/li>\n?)+/g, (match) => {
+      return `<ul style="margin: 10px 0; padding-left: 24px; list-style-type: none; border-left: 3px solid #e5e7eb;">${match}</ul>`;
+    });
     
-    // 处理水平线 ---
-    text = text.replace(/^---$/gm, '<hr style="margin: 20px 0; border: none; border-top: 1px solid #e5e7eb;">');
+    // 处理引用
+    text = text.replace(/^>\s+(.+)$/gm, '<blockquote style="margin: 10px 0; padding: 10px 14px; background: #f9fafb; border-left: 4px solid #667eea; color: #6b7280; font-style: italic; border-radius: 4px;">$1</blockquote>');
     
-    // 处理换行
-    text = text.replace(/\n/g, '<br>');
+    // 处理水平线
+    text = text.replace(/^---+$/gm, '<hr style="margin: 18px 0; border: none; border-top: 1px solid #e5e7eb;">');
+    
+    // 恢复代码块
+    codeBlocks.forEach((code, i) => {
+      text = text.replace(`__CODE_BLOCK_${i}__`, code);
+    });
+    
+    // 恢复行内代码
+    inlineCodes.forEach((code, i) => {
+      text = text.replace(`__INLINE_CODE_${i}__`, code);
+    });
+    
+    // 处理段落（连续的非HTML行合并为段落）
+    text = text.split('\n').map(line => {
+      line = line.trim();
+      if (!line) return '<br>';
+      if (line.startsWith('<')) return line; // 已经是HTML标签
+      return `<p style="margin: 8px 0; line-height: 1.7; color: #374151;">${line}</p>`;
+    }).join('\n');
+    
+    // 清理多余的<br>
+    text = text.replace(/(<br>\s*){3,}/g, '<br><br>');
     
     return text;
   }
@@ -1521,21 +1609,53 @@ class APIDataTracker {
     return div.innerHTML;
   }
   
+  // DS ID 到集群的映射表
+  getDsClusterName(dsId) {
+    const DS_MAPPING = {
+      110: 'spx_mart-cluster_szsc_spx_mart_online_5',
+      109: 'spx_mart',
+      108: 'spx_mart-cluster_szsc_spx_mart_online_3',
+      107: 'spx_mart-cluster_szsc_spx_mart_online_2',
+      106: 'staging_spx_mart-cluster_mpp_poc01_2replicas_online',
+      105: 'staging_spx_mart-cluster_mpp_poc01_2replicas_online',
+      104: 'spx_mart-cluster_szsc_data_shared_online',
+      86: 'spx_mart-cluster_szsc_spx_mart_online',
+      87: 'spx_mart-cluster_szsc_spx_mart_online',
+      88: 'spx_mart-cluster_szsc_spx_smartsort_online',
+      90: 'spx_mart-cluster_szsc_data_shared_online',
+      91: 'spx_mart-cluster_szsc_spx_smartsort_online',
+      113: 'spx_mart-cluster_szsc_spx_mart_online_4',
+      114: 'spx_mart-cluster_szsc_spx_mart_online_6',
+      115: 'spx_mart-cluster_szsc_spx_mart_online_7',
+      116: 'spx_mart-cluster_szsc_spx_mart_online_8',
+      119: 'spx_mart-cluster_szsc_spx_mart_online_5',
+      122: 'spx_mart-cluster_szsc_spx_mart_online_7'
+    };
+    return DS_MAPPING[dsId] || `DS_${dsId}`;
+  }
+  
   buildAPIAnalysisPrompt(source, lineageInfo = null) {
     const record = source.apiRecord;
     
-    // 用户选中的字段
-    const selectedFields = source.matches.join(', ');
+    // 提取匹配的字段路径（如果有的话）
+    let selectedFieldsInfo = '';
+    if (source.matchPaths && source.matchPaths.length > 0) {
+      // 使用字段路径
+      const fieldPaths = source.matchPaths.map(p => p.path).filter(p => p);
+      selectedFieldsInfo = fieldPaths.length > 0 
+        ? `字段路径: ${fieldPaths.join(', ')}\n匹配的值: ${source.matches.join(', ')}`
+        : `选中的值: ${source.matches.join(', ')}`;
+    } else {
+      // 降级：只显示匹配的值
+      selectedFieldsInfo = `选中的值: ${source.matches.join(', ')}`;
+    }
     
     // 构建业务SQL部分
     let bizSqlSection = '';
     let deploymentInfo = '';
     if (lineageInfo && lineageInfo.bizSql) {
-      // 截取SQL（避免太长）
-      let sqlPreview = lineageInfo.bizSql;
-      if (sqlPreview.length > 2000) {
-        sqlPreview = sqlPreview.substring(0, 2000) + '\n... (SQL已截断)';
-      }
+      // 直接使用完整SQL，不截断
+      const sqlPreview = lineageInfo.bizSql;
       
       bizSqlSection = `
 
@@ -1546,7 +1666,8 @@ ${sqlPreview}
 
       deploymentInfo = `
 - 发布环境: ${lineageInfo.publishEnv || '未知'}
-- 数据源ID: DS_${lineageInfo.dsId || '?'}`;
+- 数据源ID: DS_${lineageInfo.dsId || '?'}
+- ClickHouse集群: ${this.getDsClusterName(lineageInfo.dsId)}`;
     }
     
     // 构建精简的分析提示 - 实战运维视角
@@ -1557,28 +1678,33 @@ ${sqlPreview}
 - API ID: ${lineageInfo.apiId}` : ''}${deploymentInfo}
 ${bizSqlSection}
 
-**用户选中的字段**: ${selectedFields}
+**用户选中的字段**:
+${selectedFieldsInfo}
 
 ---
 
 请简洁分析（每个问题2-3句话）：
 
-## 📊 这个字段是什么、怎么算的？
+## 🎯 这个页面/接口的功能是什么？
+
+用1-2句话说明这个接口对应的页面整体功能和业务场景。
+
+## 📊 页面上的指标都是什么？
+
+${lineageInfo ? '从SQL中列出主要的业务指标（SELECT的字段），每个指标的含义和作用。' : '从响应数据中说明主要返回了哪些业务指标。'}
+
+## 🔍 用户选中的这个指标：${selectedFieldsInfo}
 
 ${lineageInfo ? '从SQL分析：' : '从响应数据分析：'}
-- 字段的业务含义
-- 数据来源（哪个表/字段）
-- 计算逻辑（SELECT映射、聚合SUM/COUNT、条件过滤、函数处理等）
+- **业务含义**: 这个指标代表什么业务含义
+- **计算逻辑**: 数据来源（哪个表/字段）和计算方式（聚合、条件、函数等）
+- **数值含义**: 这个数值的单位和业务解释
 
-## 🔍 出问题时去哪里排查？
+## 🛠️ 如果这个指标有问题，怎么排查？
 
-- 去哪个环境（${lineageInfo && lineageInfo.publishEnv ? lineageInfo.publishEnv : '对应环境'}）
-- 查哪个表和字段
-- 检查什么逻辑（JOIN关联、WHERE条件、聚合计算等）
-
-## 🎯 这个页面功能是什么？
-
-用一句话说明这个接口对应的页面功能。
+- **环境定位**: ${lineageInfo && lineageInfo.publishEnv ? lineageInfo.publishEnv : '对应环境'}环境，${lineageInfo && lineageInfo.dsId ? `ClickHouse集群: ${this.getDsClusterName(lineageInfo.dsId)}` : '对应数据源'}
+- **数据源检查**: 查哪个表和字段，检查原始数据是否正常
+- **逻辑验证**: 检查什么计算逻辑（JOIN、WHERE、聚合等）
 
 ---
 
