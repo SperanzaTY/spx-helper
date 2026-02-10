@@ -692,6 +692,7 @@ class APIDataTracker {
     // 使用 Content Script 中已同步的 API 记录
     this.apiRecords.forEach((record, id) => {
       const matches = [];
+      const matchPaths = [];  // 新增：存储匹配的路径
       
       console.log(`   🔍 检查 API: ${record.url}`);
       console.log(`      响应数据类型: ${typeof record.responseData}`);
@@ -699,19 +700,21 @@ class APIDataTracker {
       
       elementTexts.forEach(text => {
         console.log(`      → 尝试匹配文本: "${text}"`);
-        const matchResult = this.searchInObject(record.responseData, text, 0, true);
-        console.log(`         匹配结果: ${matchResult}`);
+        const matchResult = this.searchInObjectWithPath(record.responseData, text, '', 0, true);
+        console.log(`         匹配结果:`, matchResult);
         
         if (matchResult) {
           matches.push(text);
+          matchPaths.push(...matchResult.paths);  // 收集所有匹配路径
         }
       });
       
       if (matches.length > 0) {
-        console.log('   ✅ 找到匹配:', record.url, '匹配文本:', matches);
+        console.log('   ✅ 找到匹配:', record.url, '匹配文本:', matches, '路径:', matchPaths);
         sources.push({
           apiRecord: record,
-          matches: matches
+          matches: matches,
+          matchPaths: matchPaths  // 新增：传递匹配路径
         });
       }
     });
@@ -719,6 +722,81 @@ class APIDataTracker {
     console.log('   📊 总共找到', sources.length, '个数据来源');
     
     return sources;
+  }
+  
+  // 新增：带路径追踪的搜索函数
+  searchInObjectWithPath(obj, searchText, currentPath = '', depth = 0, debug = false) {
+    if (depth > 5) {
+      return null;
+    }
+    
+    if (!searchText || searchText.length < 1) {
+      return null;
+    }
+    
+    const result = { found: false, paths: [] };
+    const searchLower = searchText.toLowerCase();
+    
+    // 检查当前值是否匹配
+    const checkMatch = (value) => {
+      if (typeof value === 'string') {
+        const valueLower = value.toLowerCase();
+        if (valueLower.includes(searchLower)) return true;
+        
+        const searchNormalized = this.normalizeNumber(searchText);
+        const valueNormalized = this.normalizeNumber(value);
+        if (searchNormalized && valueNormalized && searchNormalized === valueNormalized) {
+          return true;
+        }
+        
+        const searchDigitsOnly = this.extractDigitsOnly(searchText);
+        const valueDigitsOnly = this.extractDigitsOnly(value);
+        if (searchDigitsOnly && valueDigitsOnly && searchDigitsOnly === valueDigitsOnly) {
+          return true;
+        }
+      }
+      
+      if (typeof value === 'number') {
+        const valueStr = value.toString();
+        if (valueStr === searchText) return true;
+        
+        const searchNormalized = this.normalizeNumber(searchText);
+        const valueNormalized = this.normalizeNumber(valueStr);
+        if (searchNormalized && valueNormalized && searchNormalized === valueNormalized) {
+          return true;
+        }
+      }
+      
+      return false;
+    };
+    
+    if (checkMatch(obj)) {
+      result.found = true;
+      result.paths.push({ path: currentPath, value: obj });
+      if (debug) console.log(`         ✅ 匹配路径: ${currentPath} = ${obj}`);
+    }
+    
+    if (Array.isArray(obj)) {
+      obj.forEach((item, index) => {
+        const newPath = currentPath ? `${currentPath}[${index}]` : `[${index}]`;
+        const subResult = this.searchInObjectWithPath(item, searchText, newPath, depth + 1, debug);
+        if (subResult && subResult.found) {
+          result.found = true;
+          result.paths.push(...subResult.paths);
+        }
+      });
+    } else if (obj && typeof obj === 'object') {
+      Object.keys(obj).forEach(key => {
+        const newPath = currentPath ? `${currentPath}.${key}` : key;
+        const subResult = this.searchInObjectWithPath(obj[key], searchText, newPath, depth + 1, debug);
+        if (subResult && subResult.found) {
+          result.found = true;
+          result.paths.push(...subResult.paths);
+        }
+      });
+    }
+    
+    return result.found ? result : null;
   }
   
   searchInObject(obj, searchText, depth = 0, debug = false) {
@@ -974,10 +1052,11 @@ class APIDataTracker {
     document.getElementById('spx-close-panel').addEventListener('click', () => panel.remove());
     
     // 查看响应按钮
-    panel.querySelectorAll('.spx-view-response').forEach(btn => {
+    panel.querySelectorAll('.spx-view-response').forEach((btn, index) => {
       btn.addEventListener('click', (e) => {
         const id = e.target.dataset.id;
-        this.viewFullResponse(id);
+        const source = sources.find(s => s.apiRecord.id === id);
+        this.viewFullResponse(id, source?.matchPaths || []);
       });
     });
     
@@ -993,7 +1072,7 @@ class APIDataTracker {
   // ========================================
   // 查看完整响应
   // ========================================
-  viewFullResponse(recordId) {
+  viewFullResponse(recordId, matchPaths = []) {
     const record = this.apiRecords.get(recordId);
     
     if (!record) {
@@ -1001,28 +1080,182 @@ class APIDataTracker {
       return;
     }
     
-    const newWindow = window.open('', '_blank', 'width=800,height=600');
+    // 生成带高亮的 JSON
+    const highlightedJson = this.highlightJsonPaths(record.responseData, matchPaths);
+    
+    const newWindow = window.open('', '_blank', 'width=900,height=700');
     newWindow.document.write(`
       <html>
       <head>
         <title>API 响应详情</title>
         <style>
-          body { font-family: monospace; padding: 20px; background: #1e1e1e; color: #d4d4d4; }
-          pre { white-space: pre-wrap; word-wrap: break-word; }
+          body { 
+            font-family: 'Monaco', 'Menlo', 'Consolas', monospace; 
+            padding: 20px; 
+            background: #1e1e1e; 
+            color: #d4d4d4;
+            line-height: 1.6;
+          }
+          .header {
+            background: #252526;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+          }
+          .header p {
+            margin: 5px 0;
+          }
+          .header strong {
+            color: #4ec9b0;
+          }
+          .json-container {
+            background: #1e1e1e;
+            border: 1px solid #3c3c3c;
+            border-radius: 8px;
+            padding: 15px;
+            overflow-x: auto;
+          }
+          pre { 
+            white-space: pre-wrap; 
+            word-wrap: break-word;
+            margin: 0;
+            font-size: 13px;
+          }
+          .highlight {
+            background: #ffd700 !important;
+            color: #000 !important;
+            padding: 2px 4px;
+            border-radius: 3px;
+            font-weight: bold;
+            box-shadow: 0 0 0 2px rgba(255, 215, 0, 0.3);
+          }
+          .highlight-key {
+            background: #4ec9b0 !important;
+            color: #1e1e1e !important;
+            padding: 2px 4px;
+            border-radius: 3px;
+            font-weight: bold;
+          }
+          .string { color: #ce9178; }
+          .number { color: #b5cea8; }
+          .boolean { color: #569cd6; }
+          .null { color: #569cd6; }
+          .key { color: #9cdcfe; }
+          .match-info {
+            background: #264f78;
+            padding: 10px 15px;
+            border-radius: 6px;
+            margin-bottom: 15px;
+            border-left: 4px solid #ffd700;
+          }
+          .match-path {
+            font-family: monospace;
+            background: #3c3c3c;
+            padding: 4px 8px;
+            border-radius: 4px;
+            margin: 5px 0;
+            display: inline-block;
+          }
         </style>
       </head>
       <body>
-        <h2>API 响应详情</h2>
-        <p><strong>URL:</strong> ${record.url}</p>
-        <p><strong>Method:</strong> ${record.method}</p>
-        <p><strong>Status:</strong> ${record.status}</p>
-        <p><strong>Duration:</strong> ${record.duration}ms</p>
-        <p><strong>Time:</strong> ${record.requestTime}</p>
-        <hr>
-        <pre>${JSON.stringify(record.responseData, null, 2)}</pre>
+        <div class="header">
+          <h2 style="margin-top: 0;">📡 API 响应详情</h2>
+          <p><strong>URL:</strong> ${this.escapeHtml(record.url)}</p>
+          <p><strong>Method:</strong> ${record.method} | <strong>Status:</strong> ${record.status} | <strong>Duration:</strong> ${record.duration}ms</p>
+          <p><strong>Time:</strong> ${record.requestTime}</p>
+        </div>
+        
+        ${matchPaths.length > 0 ? `
+          <div class="match-info">
+            <strong>🎯 匹配字段（${matchPaths.length}）：</strong><br>
+            ${matchPaths.map(m => `<div class="match-path">📍 ${this.escapeHtml(m.path)} = <span class="highlight">${this.escapeHtml(String(m.value))}</span></div>`).join('')}
+          </div>
+        ` : ''}
+        
+        <div class="json-container">
+          <pre>${highlightedJson}</pre>
+        </div>
       </body>
       </html>
     `);
+  }
+  
+  // 新增：高亮 JSON 中的匹配路径
+  highlightJsonPaths(data, matchPaths) {
+    const pathSet = new Set(matchPaths.map(m => m.path));
+    
+    const syntaxHighlight = (obj, currentPath = '', depth = 0) => {
+      if (depth > 10) return '...';
+      
+      const indent = '  '.repeat(depth);
+      
+      if (obj === null) {
+        return '<span class="null">null</span>';
+      }
+      
+      if (typeof obj === 'undefined') {
+        return '<span class="null">undefined</span>';
+      }
+      
+      if (typeof obj === 'boolean') {
+        return `<span class="boolean">${obj}</span>`;
+      }
+      
+      if (typeof obj === 'number') {
+        const isMatch = pathSet.has(currentPath);
+        return isMatch 
+          ? `<span class="highlight">${obj}</span>`
+          : `<span class="number">${obj}</span>`;
+      }
+      
+      if (typeof obj === 'string') {
+        const isMatch = pathSet.has(currentPath);
+        const escaped = this.escapeHtml(obj);
+        return isMatch
+          ? `<span class="string">"</span><span class="highlight">${escaped}</span><span class="string">"</span>`
+          : `<span class="string">"${escaped}"</span>`;
+      }
+      
+      if (Array.isArray(obj)) {
+        if (obj.length === 0) return '[]';
+        
+        const items = obj.map((item, index) => {
+          const itemPath = currentPath ? `${currentPath}[${index}]` : `[${index}]`;
+          return `${indent}  ${syntaxHighlight(item, itemPath, depth + 1)}`;
+        }).join(',\n');
+        
+        return `[\n${items}\n${indent}]`;
+      }
+      
+      if (typeof obj === 'object') {
+        const keys = Object.keys(obj);
+        if (keys.length === 0) return '{}';
+        
+        const items = keys.map(key => {
+          const keyPath = currentPath ? `${currentPath}.${key}` : key;
+          const isKeyMatch = pathSet.has(keyPath);
+          const keyHtml = isKeyMatch 
+            ? `<span class="highlight-key">"${this.escapeHtml(key)}"</span>`
+            : `<span class="key">"${this.escapeHtml(key)}"</span>`;
+          
+          return `${indent}  ${keyHtml}: ${syntaxHighlight(obj[key], keyPath, depth + 1)}`;
+        }).join(',\n');
+        
+        return `{\n${items}\n${indent}}`;
+      }
+      
+      return String(obj);
+    };
+    
+    return syntaxHighlight(data);
+  }
+  
+  // 新增：HTML 转义
+  escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
   }
   
   copyURL(url) {
