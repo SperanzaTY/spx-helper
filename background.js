@@ -352,93 +352,148 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
     console.log('🔍 Background: 收到API血缘查询请求, API ID:', request.apiId);
     
     const apiId = request.apiId;
-    const searchPattern = `%${apiId}%`;
     
-    // DataService API配置
-    const DATA_SERVICE_URL = 'https://data.ssc.shopeemobile.com/api/v2/service/shopee_ssc_data_kanban_data_service_spx_dev_01/query';
+    // 使用DataSuite API（与popup.js相同）
+    const apiName = 'spx_mart.api_lineage_search';
+    const version = 'hg3ggpdp2lkgqlmc';
+    const personalToken = 'l7Vx4TGfwhmA1gtPn+JmUQ==';
+    const prestoQueueName = 'szsc-scheduled';
+    const endUser = 'tianyi.liang';
     
-    const requestBody = {
-      "query": `SELECT 
-        a.api_id,
-        a.api_version,
-        a.api_status,
-        a.biz_sql,
-        a.ds_id,
-        a.publish_env
-      FROM dual_default.spx_apimart_management a
-      WHERE a.api_id LIKE '${searchPattern}'
-        AND a.api_status = 'online'
-        AND a.publish_env = 'live'
-      ORDER BY a.api_version DESC
-      LIMIT 1`
+    // 步骤1: 提交查询
+    const submitUrl = `https://open-api.datasuite.shopee.io/dataservice/${apiName}/${version}`;
+    
+    const submitBody = {
+      olapPayload: {
+        expressions: [
+          {
+            parameterName: 'api_id',
+            value: `%${apiId}%`
+          }
+        ],
+        prestoQueueName: prestoQueueName
+      }
     };
     
-    console.log('📤 Background: 发送API血缘查询');
+    console.log('📤 Background: 提交API血缘查询');
     
-    fetch(DATA_SERVICE_URL, {
+    fetch(submitUrl, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'Authorization': personalToken,
+        'X-End-User': endUser
       },
-      body: JSON.stringify(requestBody)
+      body: JSON.stringify(submitBody)
     })
-      .then(async response => {
-        if (!response.ok) {
-          throw new Error(`API血缘查询失败: ${response.status}`);
+      .then(async submitResponse => {
+        if (!submitResponse.ok) {
+          throw new Error(`提交查询失败: ${submitResponse.status}`);
         }
         
-        const data = await response.json();
-        console.log('📥 Background: API血缘数据:', data);
+        const submitResult = await submitResponse.json();
+        console.log('✅ Background: 查询已提交, jobId:', submitResult.jobId);
         
-        if (!data.rows || data.rows.length === 0) {
-          sendResponse({
-            success: false,
-            error: '未找到API血缘信息'
+        if (!submitResult.jobId) {
+          throw new Error('未返回jobId');
+        }
+        
+        const jobId = submitResult.jobId;
+        
+        // 步骤2: 轮询结果（最多10次，每次1秒）
+        const maxAttempts = 10;
+        let found = false;
+        
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          
+          const metaUrl = `https://open-api.datasuite.shopee.io/dataservice/result/${jobId}`;
+          
+          const metaResponse = await fetch(metaUrl, {
+            headers: {
+              'Authorization': personalToken,
+              'X-End-User': endUser
+            }
           });
-          return;
+          
+          const metaResult = await metaResponse.json();
+          console.log(`🔄 Background: 轮询 ${attempt}/${maxAttempts}, 状态:`, metaResult.status);
+          
+          if (metaResult.status === 'FINISHED') {
+            // 步骤3: 获取实际数据
+            const dataUrl = `https://open-api.datasuite.shopee.io/dataservice/result/${jobId}/data`;
+            
+            const dataResponse = await fetch(dataUrl, {
+              headers: {
+                'Authorization': personalToken,
+                'X-End-User': endUser
+              }
+            });
+            
+            const data = await dataResponse.json();
+            console.log('📥 Background: API血缘数据:', data);
+            
+            if (!data.rows || data.rows.length === 0) {
+              sendResponse({
+                success: false,
+                error: '未找到live环境的API血缘信息'
+              });
+              return;
+            }
+            
+            // 只取live环境的第一条记录
+            let liveRecord = null;
+            for (const row of data.rows) {
+              if (row.values.publish_env === 'live') {
+                liveRecord = row.values;
+                break;
+              }
+            }
+            
+            if (!liveRecord) {
+              sendResponse({
+                success: false,
+                error: '该API未发布到live环境'
+              });
+              return;
+            }
+            
+            // 解析SQL提取表名
+            const bizSql = liveRecord.biz_sql || '';
+            const regex = /\{mgmt_db2\}\.([a-zA-Z0-9_\{\}\-]+)/g;
+            const tables = [];
+            let match;
+            while ((match = regex.exec(bizSql)) !== null) {
+              tables.push(match[1]);
+            }
+            
+            const uniqueTables = [...new Set(tables)];
+            
+            const lineageInfo = {
+              apiId: liveRecord.api_id,
+              apiVersion: liveRecord.api_version,
+              publishEnv: liveRecord.publish_env,
+              dsId: liveRecord.ds_id,
+              tables: uniqueTables,
+              bizSql: bizSql
+            };
+            
+            console.log('✅ Background: API血缘解析成功:', lineageInfo);
+            sendResponse({
+              success: true,
+              lineageInfo: lineageInfo
+            });
+            
+            found = true;
+            break;
+          } else if (metaResult.status === 'FAILED') {
+            throw new Error('查询任务失败');
+          }
         }
         
-        // 解析第一条记录（最新版本）
-        const row = data.rows[0].values;
-        const bizSql = row.biz_sql || '';
-        const dsId = row.ds_id;
-        
-        // 提取表名
-        const regex = /\{mgmt_db2\}\.([a-zA-Z0-9_\{\}\-]+)/g;
-        const tables = [];
-        let match;
-        while ((match = regex.exec(bizSql)) !== null) {
-          tables.push(match[1]);
+        if (!found) {
+          throw new Error('查询超时（10秒）');
         }
-        
-        // 去重
-        const uniqueTables = [...new Set(tables)];
-        
-        // DS ID 映射
-        const DS_ID_MAPPING = {
-          51: 'shopee_ssc_dw',
-          52: 'shopee_ssc_dw',
-          53: 'ssc_sbs_mart',
-          54: 'ssc_isc_mart',
-          55: 'shopee_ssc_dw',
-          81: 'spx_mart'
-        };
-        
-        const lineageInfo = {
-          apiId: row.api_id,
-          apiVersion: row.api_version,
-          publishEnv: row.publish_env,
-          dsId: dsId,
-          dsName: DS_ID_MAPPING[dsId] || `DS_${dsId}`,
-          tables: uniqueTables,
-          bizSql: bizSql
-        };
-        
-        console.log('✅ Background: API血缘解析成功:', lineageInfo);
-        sendResponse({
-          success: true,
-          lineageInfo: lineageInfo
-        });
       })
       .catch(error => {
         console.error('❌ Background: API血缘查询失败:', error);
