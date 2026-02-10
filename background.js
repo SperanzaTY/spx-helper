@@ -347,6 +347,80 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
     sendResponse({ success: true });
   }
   
+  // 调用AI API（代理请求，避免CORS）
+  if (request.action === 'CALL_AI_API') {
+    console.log('🤖 Background: 收到AI API调用请求');
+    
+    // Smart Agent配置
+    const SMART_CONFIG = {
+      endpointHashId: 'oxff0svf5ht51i507t6k68d8',
+      endpointKey: 'k160r2z9t0y0s573kt51o8vb',
+      userId: 'spx_helper_api_analysis'
+    };
+    
+    // 准备请求数据
+    const requestData = {
+      endpoint_deployment_hash_id: SMART_CONFIG.endpointHashId,
+      endpoint_deployment_key: SMART_CONFIG.endpointKey,
+      user_id: SMART_CONFIG.userId,
+      message: {
+        input_str: request.prompt
+      }
+    };
+    
+    console.log('📤 Background: 发送AI请求');
+    
+    // 调用Smart Agent API
+    fetch('https://smart.shopee.io/apis/smart/v1/orchestrator/deployments/invoke', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(requestData)
+    })
+      .then(async response => {
+        if (!response.ok) {
+          throw new Error(`AI API请求失败: ${response.status} ${response.statusText}`);
+        }
+        
+        const data = await response.json();
+        console.log('📥 Background: AI响应:', data);
+        
+        // 检查API是否返回成功
+        if (data.status !== 'success') {
+          throw new Error(data.error_message || data.error || 'AI返回错误');
+        }
+        
+        // 提取AI的响应内容
+        let assistantMessage = '';
+        if (data.data && data.data.response && data.data.response.response_str) {
+          assistantMessage = data.data.response.response_str;
+        } else if (data.output && data.output.output_str) {
+          assistantMessage = data.output.output_str;
+        } else if (data.output && typeof data.output === 'string') {
+          assistantMessage = data.output;
+        } else {
+          throw new Error('无法解析AI响应格式');
+        }
+        
+        console.log('✅ Background: AI分析成功');
+        sendResponse({
+          success: true,
+          result: assistantMessage
+        });
+      })
+      .catch(error => {
+        console.error('❌ Background: AI请求失败:', error);
+        sendResponse({
+          success: false,
+          error: error.message || 'AI请求失败'
+        });
+      });
+    
+    // 返回 true 保持消息通道开放
+    return true;
+  }
+  
   return true;
 });
 

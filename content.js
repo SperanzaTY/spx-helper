@@ -1262,59 +1262,20 @@ class APIDataTracker {
   }
   
   async callAIAPI(prompt) {
-    // Smart Agent配置
-    const SMART_CONFIG = {
-      endpointHashId: 'oxff0svf5ht51i507t6k68d8',
-      endpointKey: 'k160r2z9t0y0s573kt51o8vb',
-      userId: 'spx_helper_api_analysis'
-    };
-    
-    // 准备请求数据
-    const requestData = {
-      endpoint_deployment_hash_id: SMART_CONFIG.endpointHashId,
-      endpoint_deployment_key: SMART_CONFIG.endpointKey,
-      user_id: SMART_CONFIG.userId,
-      message: {
-        input_str: prompt
-      }
-    };
-    
     console.log('📤 [SPX Helper] 发送AI请求...');
     
-    // 调用Smart Agent API
-    const response = await fetch('https://smart.shopee.io/apis/smart/v1/orchestrator/deployments/invoke', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(requestData)
+    // 通过background script代理请求（避免CORS问题）
+    const response = await chrome.runtime.sendMessage({
+      action: 'CALL_AI_API',
+      prompt: prompt
     });
     
-    if (!response.ok) {
-      throw new Error(`AI API请求失败: ${response.status} ${response.statusText}`);
+    if (!response.success) {
+      throw new Error(response.error || 'AI请求失败');
     }
     
-    const data = await response.json();
-    console.log('📥 [SPX Helper] AI响应:', data);
-    
-    // 检查API是否返回成功
-    if (data.status !== 'success') {
-      throw new Error(data.error_message || data.error || 'AI返回错误');
-    }
-    
-    // 提取AI的响应内容
-    let assistantMessage = '';
-    if (data.data && data.data.response && data.data.response.response_str) {
-      assistantMessage = data.data.response.response_str;
-    } else if (data.output && data.output.output_str) {
-      assistantMessage = data.output.output_str;
-    } else if (data.output && typeof data.output === 'string') {
-      assistantMessage = data.output;
-    } else {
-      throw new Error('无法解析AI响应格式');
-    }
-    
-    return assistantMessage;
+    console.log('📥 [SPX Helper] AI响应成功');
+    return response.result;
   }
   
   showAIAnalysisPanel(state, source, content = '') {
