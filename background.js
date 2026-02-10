@@ -368,6 +368,7 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
       FROM dual_default.spx_apimart_management a
       WHERE a.api_id LIKE '${searchPattern}'
         AND a.api_status = 'online'
+        AND a.publish_env = 'live'
       ORDER BY a.api_version DESC
       LIMIT 1`
     };
