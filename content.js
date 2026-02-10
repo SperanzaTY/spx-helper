@@ -20,7 +20,11 @@ class APIDataTracker {
     console.log('🔍 [SPX Helper] Content Script 已加载');
     
     // 监听文本选取
-    this.initTextSelectionListener();
+    try {
+      this.initTextSelectionListener();
+    } catch (err) {
+      console.error('❌ [SPX Helper] 初始化文本选取监听器失败:', err);
+    }
     
     // 监听来自页面的消息
     window.addEventListener('message', (event) => {
@@ -1166,4 +1170,9 @@ class APIDataTracker {
 const apiTracker = new APIDataTracker();
 apiTracker.setupMessageListener();
 
+// 暴露到 window 对象以便调试
+window.__spxApiTracker = apiTracker;
+window.APIDataTracker = APIDataTracker;
+
 console.log('✅ [SPX Helper] Content Script 已就绪');
+console.log('🔧 [SPX Helper] 调试: window.__spxApiTracker 可用');
