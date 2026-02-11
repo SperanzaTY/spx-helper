@@ -27,6 +27,10 @@ document.addEventListener('DOMContentLoaded', function() {
   initFmsLinks();
   initDodTool();
   initApiLineageTool();
+  initAPITrackerSettings();  // 初始化 API 溯源工具设置
+  
+  // 预加载API血缘缓存（后台异步，不阻塞popup打开）
+  preloadAPILineageCache();
   
   // 事件监听器
   document.getElementById('addLink').addEventListener('click', addLink);
@@ -315,23 +319,35 @@ function initTabs() {
   tabBtns.forEach(btn => {
     btn.addEventListener('click', function() {
       const tabName = this.dataset.tab;
-      const targetTab = document.getElementById(`${tabName}-tab`);
-      
-      console.log('切换到标签页:', tabName, '目标元素:', targetTab);
-      
-      // 更新按钮状态
-      tabBtns.forEach(b => b.classList.remove('active'));
-      this.classList.add('active');
-      
-      // 更新面板状态
-      tabPanes.forEach(pane => pane.classList.remove('active'));
-      if (targetTab) {
-        targetTab.classList.add('active');
-      } else {
-        console.error('找不到标签页:', `${tabName}-tab`);
-      }
+      switchTab(tabName);
     });
   });
+}
+
+// 切换到指定tab的辅助函数
+function switchTab(tabName) {
+  const tabBtns = document.querySelectorAll('.tab-btn');
+  const tabPanes = document.querySelectorAll('.tab-pane');
+  const targetTab = document.getElementById(`${tabName}-tab`);
+  
+  console.log('切换到标签页:', tabName, '目标元素:', targetTab);
+  
+  // 更新按钮状态
+  tabBtns.forEach(b => {
+    if (b.dataset.tab === tabName) {
+      b.classList.add('active');
+    } else {
+      b.classList.remove('active');
+    }
+  });
+  
+  // 更新面板状态
+  tabPanes.forEach(pane => pane.classList.remove('active'));
+  if (targetTab) {
+    targetTab.classList.add('active');
+  } else {
+    console.error('找不到标签页:', `${tabName}-tab`);
+  }
 }
 
 // ===== 快速链接管理 =====
@@ -1519,28 +1535,75 @@ function exportSingleNote() {
 
 // ===== 实用工具切换 =====
 function initUtils() {
+  // 从 storage 读取工具分类的展开状态
+  chrome.storage.local.get(['utilsCategoryExpanded'], function(result) {
+    const utilsCategoryExpanded = result.utilsCategoryExpanded || {};
+    
+    // 初始化工具分类的展开状态
+    const categoryHeaders = document.querySelectorAll('.utils-categories .category-header');
+    categoryHeaders.forEach(header => {
+      const category = header.parentElement;
+      const content = category.querySelector('.category-content');
+      const toggle = header.querySelector('.category-toggle');
+      
+      // 获取分类 ID
+      const categoryId = header.dataset.category;
+      if (!categoryId) return;
+      
+      // 读取之前保存的状态，默认：通用工具展开，App工具收起
+      const defaultExpanded = categoryId === 'general';
+      const isExpanded = utilsCategoryExpanded[categoryId] !== undefined 
+        ? utilsCategoryExpanded[categoryId] 
+        : defaultExpanded;
+      
+      // 应用状态
+      if (isExpanded) {
+        header.classList.add('active');
+        content.classList.add('active');
+        if (toggle) toggle.textContent = '▼';
+      } else {
+        header.classList.remove('active');
+        content.classList.remove('active');
+        if (toggle) toggle.textContent = '▶';
+      }
+    });
+  });
+  
   // 工具分类折叠
-  const categoryHeaders = document.querySelectorAll('.category-header');
+  const categoryHeaders = document.querySelectorAll('.utils-categories .category-header');
   categoryHeaders.forEach(header => {
     header.addEventListener('click', function() {
       const category = this.parentElement;
       const content = category.querySelector('.category-content');
       const toggle = this.querySelector('.category-toggle');
       
+      // 获取分类 ID
+      const categoryId = this.dataset.category;
+      if (!categoryId) return;
+      
       // 切换展开/折叠状态
       const isActive = this.classList.contains('active');
+      const newExpanded = !isActive;
       
       if (isActive) {
         // 折叠
         this.classList.remove('active');
         content.classList.remove('active');
-        toggle.textContent = '▶';
+        if (toggle) toggle.textContent = '▶';
       } else {
         // 展开
         this.classList.add('active');
         content.classList.add('active');
-        toggle.textContent = '▼';
+        if (toggle) toggle.textContent = '▼';
       }
+      
+      // 保存状态到 storage
+      chrome.storage.local.get(['utilsCategoryExpanded'], function(result) {
+        const utilsCategoryExpanded = result.utilsCategoryExpanded || {};
+        utilsCategoryExpanded[categoryId] = newExpanded;
+        chrome.storage.local.set({ utilsCategoryExpanded: utilsCategoryExpanded });
+        console.log('💾 保存工具分类状态:', categoryId, newExpanded);
+      });
     });
   });
   
@@ -8390,6 +8453,8 @@ document.getElementById('refreshPageBtn')?.addEventListener('click', async funct
 });
 
 // 启动 API 溯源检查器
+// ===== API 溯源工具 - 启动检查器按钮（已废弃，改用文本选取模式） =====
+/*
 document.getElementById('startAPITracker')?.addEventListener('click', async function() {
   const btn = this;
   const originalText = btn.innerHTML;
@@ -8443,6 +8508,106 @@ document.getElementById('startAPITracker')?.addEventListener('click', async func
     btn.disabled = false;
   }
 });
+*/
+
+// ===== API 溯源工具 - 设置管理 =====
+async function initAPITrackerSettings() {
+  console.log('📋 [Popup] 初始化 API 溯源工具设置');
+  
+  // 读取设置
+  const settings = await chrome.storage.local.get({
+    textSelectionEnabled: true,  // 默认开启
+    apiFilterKeywords: 'api_mart'  // 默认只拦截 api_mart
+  });
+  
+  console.log('⚙️ [Popup] 当前设置:', settings);
+  
+  // 应用到 UI
+  const toggleTextSelection = document.getElementById('toggleTextSelection');
+  const apiFilterInput = document.getElementById('apiFilterKeywords');
+  
+  if (toggleTextSelection) {
+    toggleTextSelection.checked = settings.textSelectionEnabled;
+  }
+  
+  if (apiFilterInput) {
+    apiFilterInput.value = settings.apiFilterKeywords;
+  }
+  
+  // 监听开关变化
+  toggleTextSelection?.addEventListener('change', async function() {
+    const enabled = this.checked;
+    console.log('🔄 [Popup] 文本选取功能:', enabled ? '开启' : '关闭');
+    
+    await chrome.storage.local.set({ textSelectionEnabled: enabled });
+    
+    // 通知所有标签页更新状态
+    const tabs = await chrome.tabs.query({});
+    let successCount = 0;
+    let failCount = 0;
+    
+    for (const tab of tabs) {
+      if (tab.id && tab.url && !tab.url.startsWith('chrome://') && !tab.url.startsWith('chrome-extension://')) {
+        try {
+          await chrome.tabs.sendMessage(tab.id, {
+            action: 'UPDATE_TEXT_SELECTION_STATE',
+            enabled: enabled
+          });
+          successCount++;
+          console.log(`✅ [Popup] 已通知标签页 ${tab.id}: ${tab.url}`);
+        } catch (err) {
+          failCount++;
+          console.log(`⚠️ [Popup] 通知标签页 ${tab.id} 失败:`, err.message);
+        }
+      }
+    }
+    
+    console.log(`📊 [Popup] 通知完成: ${successCount} 成功, ${failCount} 失败`);
+    
+    if (successCount > 0) {
+      showToast(enabled ? '✅ 文本选取功能已开启' : '⏸️ 文本选取功能已关闭');
+    } else if (failCount > 0) {
+      showToast('⚠️ 设置已保存，请刷新页面让设置生效');
+    }
+  });
+  
+  // 监听过滤条件保存
+  document.getElementById('saveApiFilter')?.addEventListener('click', async function() {
+    const keywords = apiFilterInput.value.trim();
+    console.log('💾 [Popup] 保存 API 过滤条件:', keywords);
+    
+    await chrome.storage.local.set({ apiFilterKeywords: keywords });
+    
+    // 通知所有标签页更新过滤条件
+    const tabs = await chrome.tabs.query({});
+    let successCount = 0;
+    let failCount = 0;
+    
+    for (const tab of tabs) {
+      if (tab.id && tab.url && !tab.url.startsWith('chrome://') && !tab.url.startsWith('chrome-extension://')) {
+        try {
+          await chrome.tabs.sendMessage(tab.id, {
+            action: 'UPDATE_API_FILTER',
+            keywords: keywords
+          });
+          successCount++;
+          console.log(`✅ [Popup] 已通知标签页 ${tab.id} 更新过滤条件`);
+        } catch (err) {
+          failCount++;
+          console.log(`⚠️ [Popup] 通知标签页 ${tab.id} 失败:`, err.message);
+        }
+      }
+    }
+    
+    console.log(`📊 [Popup] 通知完成: ${successCount} 成功, ${failCount} 失败`);
+    
+    if (successCount > 0) {
+      showToast(keywords === '' ? '✅ 过滤条件已清空（显示所有API）' : '✅ 过滤条件已保存并生效');
+    } else if (failCount > 0) {
+      showToast('⚠️ 过滤条件已保存，请刷新页面让设置生效');
+    }
+  });
+}
 
 // 加载 API 记录
 async function loadAPIRecords() {
@@ -10491,4 +10656,186 @@ function showLineageStatus(type, message) {
   else if (type === 'error') icon = '❌';
   
   statusDiv.innerHTML = `${icon} ${escapeHtml(message)}`;
+}
+
+// ========================================
+// API血缘缓存预加载
+// ========================================
+async function preloadAPILineageCache() {
+  try {
+    console.log('🔄 [API缓存] 检查缓存状态...');
+    
+    // 检查缓存是否需要更新（每24小时更新一次）
+    const result = await chrome.storage.local.get(['apiLineageCache', 'apiLineageCacheTimestamp']);
+    const now = Date.now();
+    const cacheAge = now - (result.apiLineageCacheTimestamp || 0);
+    const CACHE_DURATION = 24 * 60 * 60 * 1000; // 24小时
+    
+    if (result.apiLineageCache && cacheAge < CACHE_DURATION) {
+      const cacheSize = Object.keys(result.apiLineageCache).length;
+      console.log(`✅ [API缓存] 缓存有效（${Math.round(cacheAge / 1000 / 60)}分钟前更新），共${cacheSize}个API，跳过预加载`);
+      return;
+    }
+    
+    console.log('🔄 [API缓存] 缓存过期或不存在，开始后台更新...');
+    
+    // 查询所有live环境的API血缘数据
+    const apiName = 'spx_mart.api_lineage_search';
+    const version = 'hg3ggpdp2lkgqlmc';
+    const personalToken = 'l7Vx4TGfwhmA1gtPn+JmUQ==';
+    const prestoQueueName = 'szsc-scheduled';
+    const endUser = 'tianyi.liang';
+    
+    // 提交查询（查询所有live环境的API）
+    const submitUrl = `https://open-api.datasuite.shopee.io/dataservice/${apiName}/${version}`;
+    
+    const submitBody = {
+      olapPayload: {
+        expressions: [
+          {
+            parameterName: 'api_id',
+            value: '%' // 查询所有API
+          }
+        ],
+        prestoQueueName: prestoQueueName
+      }
+    };
+    
+    const submitResponse = await fetch(submitUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': personalToken,
+        'X-End-User': endUser
+      },
+      body: JSON.stringify(submitBody)
+    });
+    
+    if (!submitResponse.ok) {
+      throw new Error(`提交失败: ${submitResponse.status}`);
+    }
+    
+    const submitResult = await submitResponse.json();
+    const jobId = submitResult.jobId;
+    
+    if (!jobId) {
+      throw new Error('未返回jobId');
+    }
+    
+    console.log('✅ [API缓存] 查询已提交, jobId:', jobId);
+    
+    // 轮询结果（后台静默）
+    const maxAttempts = 120;
+    let pollInterval = 2000; // 2秒间隔，避免频繁请求
+    
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, pollInterval));
+      
+      // 后期延长间隔
+      if (attempt > 60) pollInterval = 5000;
+      else if (attempt > 30) pollInterval = 3000;
+      
+      const metaUrl = `https://open-api.datasuite.shopee.io/dataservice/result/${jobId}`;
+      
+      const metaResponse = await fetch(metaUrl, {
+        headers: {
+          'Authorization': personalToken,
+          'X-End-User': endUser
+        }
+      });
+      
+      const metaResult = await metaResponse.json();
+      
+      // 每10次打印一次
+      if (attempt % 10 === 0) {
+        console.log(`🔄 [API缓存] 轮询 ${attempt}/${maxAttempts}, 状态: ${metaResult.status}`);
+      }
+      
+      if (metaResult.status === 'FINISH') {
+        console.log('✅ [API缓存] 查询完成，开始获取数据...');
+        
+        // 获取所有分片数据
+        const cache = {};
+        let shard = 0;
+        let totalRows = 0;
+        
+        while (true) {
+          const shardUrl = `https://open-api.datasuite.shopee.io/dataservice/result/${jobId}/${shard}`;
+          
+          const shardResponse = await fetch(shardUrl, {
+            headers: {
+              'Authorization': personalToken,
+              'X-End-User': endUser
+            }
+          });
+          
+          if (!shardResponse.ok) {
+            if (shard === 0) {
+              throw new Error(`获取结果失败: ${shardResponse.status}`);
+            }
+            break; // 没有更多分片
+          }
+          
+          const shardResult = await shardResponse.json();
+          
+          if (shardResult.contentType === 'ERROR_MESSAGE') {
+            throw new Error(shardResult.message || '查询出错');
+          }
+          
+          if (shardResult.contentType === 'QUERY_DATA' && shardResult.rows) {
+            // 处理这批数据，只保留live环境的
+            for (const row of shardResult.rows) {
+              const values = row.values;
+              if (values.publish_env === 'live') {
+                const apiId = values.api_id;
+                
+                // 提取表名
+                const bizSql = values.biz_sql || '';
+                const regex = /\{mgmt_db2\}\.([a-zA-Z0-9_\{\}\-]+)/g;
+                const tables = [];
+                let match;
+                while ((match = regex.exec(bizSql)) !== null) {
+                  if (!tables.includes(match[1])) {
+                    tables.push(match[1]);
+                  }
+                }
+                
+                // 存入缓存（以api_id为key）
+                cache[apiId] = {
+                  apiId: apiId,
+                  bizSql: bizSql,
+                  dsId: values.ds_id,
+                  tables: tables,
+                  publishEnv: 'live'
+                };
+                
+                totalRows++;
+              }
+            }
+          }
+          
+          shard++;
+        }
+        
+        // 保存缓存
+        await chrome.storage.local.set({
+          apiLineageCache: cache,
+          apiLineageCacheTimestamp: now
+        });
+        
+        const cacheSize = Object.keys(cache).length;
+        console.log(`✅ [API缓存] 预加载完成！处理${totalRows}行数据，缓存${cacheSize}个API的血缘信息`);
+        
+        return;
+      } else if (metaResult.status === 'FAILED') {
+        throw new Error(metaResult.message || '查询失败');
+      }
+    }
+    
+    throw new Error('预加载超时');
+    
+  } catch (error) {
+    console.error('❌ [API缓存] 预加载失败:', error);
+    // 失败不影响其他功能，用户仍可手动查询
+  }
 }

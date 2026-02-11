@@ -347,6 +347,353 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
     sendResponse({ success: true });
   }
   
+  // 查询API血缘
+  if (request.action === 'QUERY_API_LINEAGE') {
+    console.log('🔍 Background: 收到API血缘查询请求, API ID:', request.apiId);
+    
+    const apiId = request.apiId;
+    
+    // 先尝试从缓存读取
+    chrome.storage.local.get(['apiLineageCache'], async function(result) {
+      try {
+        const cache = result.apiLineageCache || {};
+        const cacheKeys = Object.keys(cache);
+        
+        console.log('📦 Background: 缓存中共有', cacheKeys.length, '个API');
+        console.log('🔍 Background: 查询API ID:', apiId);
+        
+        // 在缓存中查找匹配的API（精确匹配或模糊匹配）
+        let lineageInfo = null;
+        
+        // 优先精确匹配
+        if (cache[apiId]) {
+          lineageInfo = cache[apiId];
+          console.log('✅ Background: 缓存精确命中!', apiId);
+        } else {
+          // 模糊匹配
+          for (const [cachedApiId, data] of Object.entries(cache)) {
+            if (cachedApiId.includes(apiId) || apiId.includes(cachedApiId)) {
+              lineageInfo = data;
+              console.log('✅ Background: 缓存模糊命中!');
+              console.log('   查询ID:', apiId);
+              console.log('   匹配key:', cachedApiId);
+              break;
+            }
+          }
+        }
+        
+        if (lineageInfo) {
+          // 缓存命中，直接返回（<100ms）
+          sendResponse({
+            success: true,
+            lineageInfo: { ...lineageInfo, fromCache: true }
+          });
+          return;
+        }
+        
+        // 缓存未命中，输出调试信息
+        console.log('⚠️ Background: 缓存未命中');
+        console.log('   查询ID:', apiId);
+        if (cacheKeys.length > 0) {
+          console.log('   缓存key样本（前10个）:', cacheKeys.slice(0, 10));
+        } else {
+          console.log('   缓存为空，可能预加载尚未完成');
+        }
+        console.log('   执行实时查询...');
+        
+        // 缓存未命中，执行实时查询
+        const apiName = 'spx_mart.api_lineage_search';
+        const version = 'hg3ggpdp2lkgqlmc';
+        const personalToken = 'l7Vx4TGfwhmA1gtPn+JmUQ==';
+        const prestoQueueName = 'szsc-scheduled';
+        const endUser = 'tianyi.liang';
+        
+        const submitUrl = `https://open-api.datasuite.shopee.io/dataservice/${apiName}/${version}`;
+        
+        const submitBody = {
+          olapPayload: {
+            expressions: [
+              {
+                parameterName: 'api_id',
+                value: `%${apiId}%`
+              }
+            ],
+            prestoQueueName: prestoQueueName
+          }
+        };
+        
+        console.log('📤 Background: 提交实时查询');
+        
+        const submitResponse = await fetch(submitUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': personalToken,
+            'X-End-User': endUser
+          },
+          body: JSON.stringify(submitBody)
+        });
+        
+        if (!submitResponse.ok) {
+          throw new Error(`提交查询失败: ${submitResponse.status}`);
+        }
+        
+        const submitResult = await submitResponse.json();
+        console.log('✅ Background: 查询已提交, jobId:', submitResult.jobId);
+        
+        if (!submitResult.jobId) {
+          throw new Error('未返回jobId');
+        }
+        
+        const jobId = submitResult.jobId;
+        
+        // 轮询结果（最多60次）
+        const maxAttempts = 60;
+        let pollInterval = 500;
+        
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+          await new Promise(resolve => setTimeout(resolve, pollInterval));
+          
+          // 动态调整间隔
+          if (attempt > 20) pollInterval = 2000;
+          else if (attempt > 5) pollInterval = 1000;
+          
+          const metaUrl = `https://open-api.datasuite.shopee.io/dataservice/result/${jobId}`;
+          
+          const metaResponse = await fetch(metaUrl, {
+            headers: {
+              'Authorization': personalToken,
+              'X-End-User': endUser
+            }
+          });
+          
+          const metaResult = await metaResponse.json();
+          
+          if (attempt % 5 === 0 || metaResult.status === 'FINISH' || metaResult.status === 'FAILED') {
+            console.log(`🔄 Background: 轮询 ${attempt}/${maxAttempts}, 状态:`, metaResult.status);
+          }
+          
+          if (metaResult.status === 'FINISH') {
+            // 获取数据
+            const dataUrl = `https://open-api.datasuite.shopee.io/dataservice/result/${jobId}/0`;
+            
+            const dataResponse = await fetch(dataUrl, {
+              headers: {
+                'Authorization': personalToken,
+                'X-End-User': endUser
+              }
+            });
+            
+            const data = await dataResponse.json();
+            console.log('📥 Background: API血缘数据:', data);
+            
+            if (data.contentType === 'ERROR_MESSAGE') {
+              throw new Error(data.message || '查询出错');
+            }
+            
+            if (!data.rows || data.rows.length === 0) {
+              sendResponse({
+                success: false,
+                error: '未找到API血缘信息'
+              });
+              return;
+            }
+            
+            // 只取live环境的第一条记录
+            let liveRecord = null;
+            for (const row of data.rows) {
+              if (row.values.publish_env === 'live') {
+                liveRecord = row.values;
+                break;
+              }
+            }
+            
+            if (!liveRecord) {
+              sendResponse({
+                success: false,
+                error: '该API未发布到live环境'
+              });
+              return;
+            }
+            
+            // 解析SQL提取表名
+            const bizSql = liveRecord.biz_sql || '';
+            const regex = /\{mgmt_db2\}\.([a-zA-Z0-9_\{\}\-]+)/g;
+            const tables = [];
+            let match;
+            while ((match = regex.exec(bizSql)) !== null) {
+              if (!tables.includes(match[1])) {
+                tables.push(match[1]);
+              }
+            }
+            
+            const resultInfo = {
+              apiId: liveRecord.api_id,
+              bizSql: bizSql,
+              dsId: liveRecord.ds_id,
+              tables: tables,
+              publishEnv: liveRecord.publish_env,
+              fromCache: false
+            };
+            
+            // 更新缓存（下次查询更快）
+            chrome.storage.local.get(['apiLineageCache'], function(cacheResult) {
+              const updatedCache = { ...(cacheResult.apiLineageCache || {}), [liveRecord.api_id]: resultInfo };
+              chrome.storage.local.set({ apiLineageCache: updatedCache });
+              console.log('💾 Background: 已更新缓存');
+            });
+            
+            console.log('✅ Background: API血缘解析成功');
+            
+            sendResponse({
+              success: true,
+              lineageInfo: resultInfo
+            });
+            
+            return;
+          } else if (metaResult.status === 'FAILED') {
+            throw new Error(metaResult.message || '查询失败');
+          }
+        }
+        
+        throw new Error('查询超时（60秒）');
+        
+      } catch (error) {
+        console.error('❌ Background: API血缘查询失败:', error);
+        sendResponse({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+    
+    return true; // 保持异步消息通道
+  }
+  
+  // 调用AI API（代理请求，避免CORS）
+  if (request.action === 'CALL_AI_API') {
+    console.log('🤖 Background: 收到AI API调用请求');
+    
+    // Smart Agent配置
+    const SMART_CONFIG = {
+      endpointHashId: 'oxff0svf5ht51i507t6k68d8',
+      endpointKey: 'k160r2z9t0y0s573kt51o8vb',
+      userId: 'spx_helper_api_analysis'
+    };
+    
+    // 准备请求数据
+    const requestData = {
+      endpoint_deployment_hash_id: SMART_CONFIG.endpointHashId,
+      endpoint_deployment_key: SMART_CONFIG.endpointKey,
+      user_id: SMART_CONFIG.userId,
+      message: {
+        input_str: request.prompt
+      }
+    };
+    
+    console.log('📤 Background: 发送AI请求');
+    
+    // 调用Smart Agent API
+    fetch('https://smart.shopee.io/apis/smart/v1/orchestrator/deployments/invoke', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(requestData)
+    })
+      .then(async response => {
+        console.log('📥 Background: 收到响应，状态码:', response.status);
+        
+        if (!response.ok) {
+          throw new Error(`AI API请求失败: ${response.status} ${response.statusText}`);
+        }
+        
+        // 先获取响应文本
+        const responseText = await response.text();
+        console.log('📄 Background: 响应文本（前200字符）:', responseText.substring(0, 200));
+        
+        let data;
+        try {
+          // 尝试解析为JSON
+          data = JSON.parse(responseText);
+          console.log('✅ Background: JSON解析成功');
+        } catch (parseError) {
+          console.error('❌ Background: JSON解析失败，可能是纯文本响应');
+          // 如果解析失败，直接返回文本
+          sendResponse({
+            success: true,
+            result: responseText
+          });
+          return;
+        }
+        
+        console.log('📥 Background: AI响应结构:', {
+          status: data.status,
+          hasData: !!data.data,
+          hasOutput: !!data.output,
+          keys: Object.keys(data)
+        });
+        
+        // 检查API是否返回成功
+        if (data.status !== 'success') {
+          throw new Error(data.error_message || data.error || 'AI返回错误');
+        }
+        
+        // 提取AI的响应内容 - 尝试多种可能的格式
+        let assistantMessage = '';
+        
+        if (data.data && data.data.response && data.data.response.response_str) {
+          // 格式1: data.data.response.response_str
+          assistantMessage = data.data.response.response_str;
+          console.log('✅ 使用格式1: data.data.response.response_str');
+        } else if (data.data && data.data.output_str) {
+          // 格式2: data.data.output_str
+          assistantMessage = data.data.output_str;
+          console.log('✅ 使用格式2: data.data.output_str');
+        } else if (data.output && data.output.output_str) {
+          // 格式3: data.output.output_str
+          assistantMessage = data.output.output_str;
+          console.log('✅ 使用格式3: data.output.output_str');
+        } else if (data.output && typeof data.output === 'string') {
+          // 格式4: data.output (直接是字符串)
+          assistantMessage = data.output;
+          console.log('✅ 使用格式4: data.output');
+        } else if (data.result && typeof data.result === 'string') {
+          // 格式5: data.result
+          assistantMessage = data.result;
+          console.log('✅ 使用格式5: data.result');
+        } else if (typeof data === 'string') {
+          // 格式6: 整个响应就是字符串
+          assistantMessage = data;
+          console.log('✅ 使用格式6: 整个响应');
+        } else {
+          console.error('❌ 无法识别的响应格式:', JSON.stringify(data, null, 2));
+          throw new Error('无法解析AI响应格式，请查看控制台日志');
+        }
+        
+        if (!assistantMessage || assistantMessage.trim() === '') {
+          throw new Error('AI返回了空响应');
+        }
+        
+        console.log('✅ Background: AI分析成功，结果长度:', assistantMessage.length);
+        sendResponse({
+          success: true,
+          result: assistantMessage
+        });
+      })
+      .catch(error => {
+        console.error('❌ Background: AI请求失败:', error);
+        console.error('错误堆栈:', error.stack);
+        sendResponse({
+          success: false,
+          error: error.message || 'AI请求失败'
+        });
+      });
+    
+    // 返回 true 保持消息通道开放
+    return true;
+  }
+  
   return true;
 });
 

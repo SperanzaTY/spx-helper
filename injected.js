@@ -9,6 +9,9 @@
   // 创建全局 API 记录器
   window.__spxAPIRecords = new Map();
   
+  console.log('⚙️ [SPX Helper] 拦截器已配置为记录所有 API 请求');
+  
+  
   // 保存原始 fetch
   const originalFetch = window.fetch;
   
@@ -28,12 +31,28 @@
         const data = await clonedResponse.json();
         const duration = Date.now() - startTime;
         
-        // 只记录包含 api_mart 的接口
+        // 记录所有 API（不再在这里过滤）
         const urlString = typeof url === 'string' ? url : url.url;
-        if (!urlString.includes('api_mart')) {
-          console.log('⏭️ [SPX Helper] 跳过非 api_mart 接口:', urlString);
-          return response;
+        
+        // 提取请求参数
+        let requestPayload = null;
+        try {
+          if (options?.body) {
+            if (typeof options.body === 'string') {
+              requestPayload = JSON.parse(options.body);
+            } else {
+              requestPayload = options.body;
+            }
+          }
+        } catch (e) {
+          requestPayload = options?.body; // 保留原始字符串
         }
+        
+        // 获取调用栈（前5层）
+        const callStack = new Error().stack
+          .split('\n')
+          .slice(2, 7)
+          .map(line => line.trim());
         
         const record = {
           id: requestId,
@@ -43,6 +62,9 @@
           duration: duration,
           status: response.status,
           responseData: data,
+          requestPayload: requestPayload,
+          requestHeaders: options?.headers || {},
+          callStack: callStack,
           type: 'fetch'
         };
         
@@ -86,18 +108,34 @@
   XMLHttpRequest.prototype.send = function(...args) {
     const xhr = this;
     
+    // 记录请求体
+    let requestPayload = null;
+    try {
+      if (args[0] && typeof args[0] === 'string') {
+        requestPayload = JSON.parse(args[0]);
+      } else if (args[0]) {
+        requestPayload = args[0];
+      }
+    } catch (e) {
+      requestPayload = args[0];
+    }
+    
+    // 获取调用栈
+    const callStack = new Error().stack
+      .split('\n')
+      .slice(2, 7)
+      .map(line => line.trim());
+    
+    xhr.__spxTracker.requestPayload = requestPayload;
+    xhr.__spxTracker.callStack = callStack;
+    
     xhr.addEventListener('load', function() {
       if (xhr.__spxTracker && xhr.status === 200) {
         try {
           const data = JSON.parse(xhr.responseText);
           const duration = Date.now() - xhr.__spxTracker.startTime;
           
-          // 只记录包含 api_mart 的接口
-          if (!xhr.__spxTracker.url.includes('api_mart')) {
-            console.log('⏭️ [SPX Helper] 跳过非 api_mart 接口:', xhr.__spxTracker.url);
-            return;
-          }
-          
+          // 记录所有 API（不再在这里过滤）
           const record = {
             id: xhr.__spxTracker.requestId,
             url: xhr.__spxTracker.url,
@@ -106,6 +144,8 @@
             duration: duration,
             status: xhr.status,
             responseData: data,
+            requestPayload: xhr.__spxTracker.requestPayload,
+            callStack: xhr.__spxTracker.callStack,
             type: 'xhr'
           };
           
