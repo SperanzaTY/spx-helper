@@ -9,6 +9,16 @@
 </head>
 <body>
   <div class="container">
+    <!-- 独立窗口模式提示 -->
+    <div id="windowModeHint" class="window-mode-hint" style="display: none;">
+      <div class="hint-content">
+        <span class="hint-icon">💡</span>
+        <span class="hint-text">提示：开启独立窗口模式后，扩展将以可拖动窗口形式打开，点击网页后不会自动关闭</span>
+        <button id="enableWindowMode" class="hint-btn">🪟 立即开启</button>
+        <button id="closeHint" class="hint-close">×</button>
+      </div>
+    </div>
+    
     <header>
       <div class="header-main">
         <h1>⚡ SPX Helper</h1>
@@ -27,7 +37,7 @@
           <div class="setting-item">
             <div class="setting-info">
               <div class="setting-label">🪟 独立窗口模式</div>
-              <div class="setting-desc">启用后，点击扩展图标将打开独立窗口，可常驻桌面</div>
+              <div class="setting-desc">启用后，点击扩展图标将打开独立窗口，窗口可拖动、调整大小、常驻桌面，点击网页后不会自动关闭</div>
             </div>
             <label class="switch">
               <input type="checkbox" id="windowModeSwitch">
@@ -289,26 +299,23 @@
               </div>
             </div>
 
-            <!-- 分隔线 -->
-            <div class="quick-access-divider"></div>
-
-            <!-- FMS SPX Admin 快速入口 -->
+            <!-- FMS 快速入口 -->
             <div class="quick-access-group">
-              <h3>FMS SPX Admin 快速入口</h3>
+              <h3>FMS 快速入口</h3>
               
               <!-- 环境标签页 -->
               <div class="fms-env-tabs">
-                <button class="fms-env-tab active" data-env="live">LIVE</button>
-                <button class="fms-env-tab" data-env="uat">UAT</button>
-                <button class="fms-env-tab" data-env="test">TEST</button>
-                <button class="fms-env-tab" data-env="test-stable">TEST-STABLE</button>
-                <button class="fms-env-tab" data-env="staging">STAGING</button>
+                <button class="fms-env-tab2 active" data-env="live">LIVE</button>
+                <button class="fms-env-tab2" data-env="uat">UAT</button>
+                <button class="fms-env-tab2" data-env="test">TEST</button>
+                <button class="fms-env-tab2" data-env="test-stable">TEST-STABLE</button>
+                <button class="fms-env-tab2" data-env="staging">STAGING</button>
               </div>
               
               <!-- 市场链接区域 -->
-              <div class="fms-markets-container">
+              <div class="fms-markets-container2">
                 <!-- LIVE 环境 -->
-                <div class="fms-markets active" data-env="live">
+                <div class="fms-markets2 active" data-env="live">
                   <a href="https://spx.shopee.co.id/" target="_blank" class="fms-market-btn">ID</a>
                   <a href="https://spx.shopee.com.my" target="_blank" class="fms-market-btn">MY</a>
                   <a href="https://spx.shopee.co.th/" target="_blank" class="fms-market-btn">TH</a>
@@ -316,11 +323,13 @@
                   <a href="https://spx.shopee.vn/" target="_blank" class="fms-market-btn">VN</a>
                   <a href="https://spx.shopee.sg/" target="_blank" class="fms-market-btn">SG</a>
                   <a href="https://spx.shopee.tw" target="_blank" class="fms-market-btn">TW</a>
+                  <a href="https://spx.shopee.systems/#/index" target="_blank" class="fms-market-btn">XX</a>
                   <a href="https://spx.shopee.com.br/#/index" target="_blank" class="fms-market-btn">BR</a>
+                  <a href="https://spx.shopee.com.mx/" target="_blank" class="fms-market-btn">MX</a>
                 </div>
                 
                 <!-- UAT 环境 -->
-                <div class="fms-markets" data-env="uat">
+                <div class="fms-markets2" data-env="uat">
                   <a href="https://spx.uat.shopee.co.id/" target="_blank" class="fms-market-btn">ID</a>
                   <a href="https://spx.uat.shopee.com.my" target="_blank" class="fms-market-btn">MY</a>
                   <a href="https://spx.uat.shopee.co.th/" target="_blank" class="fms-market-btn">TH</a>
@@ -329,10 +338,11 @@
                   <a href="https://spx.uat.shopee.sg/" target="_blank" class="fms-market-btn">SG</a>
                   <a href="https://spx.uat.shopee.tw" target="_blank" class="fms-market-btn">TW</a>
                   <a href="https://spx.uat.shopee.com.br/#/index" target="_blank" class="fms-market-btn">BR</a>
+                  <a href="https://spx.uat.shopee.com.mx/" target="_blank" class="fms-market-btn">MX</a>
                 </div>
                 
                 <!-- TEST 环境 -->
-                <div class="fms-markets" data-env="test">
+                <div class="fms-markets2" data-env="test">
                   <a href="https://spx.test.shopee.co.id/" target="_blank" class="fms-market-btn">ID</a>
                   <a href="https://spx.test.shopee.com.my" target="_blank" class="fms-market-btn">MY</a>
                   <a href="https://spx.test.shopee.co.th/" target="_blank" class="fms-market-btn">TH</a>
@@ -341,15 +351,16 @@
                   <a href="https://spx.test.shopee.sg/" target="_blank" class="fms-market-btn">SG</a>
                   <a href="https://spx.test.shopee.tw" target="_blank" class="fms-market-btn">TW</a>
                   <a href="https://spx.test.shopee.com.br/#/index" target="_blank" class="fms-market-btn">BR</a>
+                  <a href="https://spx.test.shopee.com.mx/" target="_blank" class="fms-market-btn">MX</a>
                 </div>
                 
                 <!-- TEST-STABLE 环境 -->
-                <div class="fms-markets" data-env="test-stable">
+                <div class="fms-markets2" data-env="test-stable">
                   <a href="https://spx.test-stable.shopee.co.th/" target="_blank" class="fms-market-btn">TH</a>
                 </div>
                 
                 <!-- STAGING 环境 -->
-                <div class="fms-markets" data-env="staging">
+                <div class="fms-markets2" data-env="staging">
                   <a href="https://spx.staging.shopee.co.id/" target="_blank" class="fms-market-btn">ID</a>
                   <a href="https://spx.staging.shopee.com.my" target="_blank" class="fms-market-btn">MY</a>
                   <a href="https://spx.staging.shopee.co.th/" target="_blank" class="fms-market-btn">TH</a>
@@ -474,60 +485,93 @@
         <div class="section">
           <h2>🛠️ 实用工具</h2>
           
-          <!-- 工具选择器 - 网格图标式 -->
-          <div class="utils-grid">
-            <button class="utils-grid-btn active" data-util="timezone">
-              <span class="grid-icon">⏰</span>
-              <span class="grid-label">时区转换</span>
-            </button>
-            <button class="utils-grid-btn" data-util="api-tracker">
-              <span class="grid-icon">🔍</span>
-              <span class="grid-label">API溯源</span>
-            </button>
-            <button class="utils-grid-btn" data-util="json">
-              <span class="grid-icon">📋</span>
-              <span class="grid-label">JSON</span>
-            </button>
-            <button class="utils-grid-btn" data-util="sql">
-              <span class="grid-icon">🗃️</span>
-              <span class="grid-label">SQL</span>
-            </button>
-            <button class="utils-grid-btn" data-util="cron">
-              <span class="grid-icon">⏱️</span>
-              <span class="grid-label">Cron</span>
-            </button>
-            <button class="utils-grid-btn" data-util="regex">
-              <span class="grid-icon">🔍</span>
-              <span class="grid-label">正则</span>
-            </button>
-            <button class="utils-grid-btn" data-util="diff">
-              <span class="grid-icon">📝</span>
-              <span class="grid-label">文本对比</span>
-            </button>
-            <button class="utils-grid-btn" data-util="case">
-              <span class="grid-icon">🔤</span>
-              <span class="grid-label">命名转换</span>
-            </button>
-            <button class="utils-grid-btn" data-util="mermaid">
-              <span class="grid-icon">📊</span>
-              <span class="grid-label">Mermaid</span>
-            </button>
-            <button class="utils-grid-btn" data-util="http">
-              <span class="grid-icon">🌐</span>
-              <span class="grid-label">HTTP</span>
-            </button>
-            <button class="utils-grid-btn" data-util="decision">
-              <span class="grid-icon">🎡</span>
-              <span class="grid-label">Roll</span>
-            </button>
-            <button class="utils-grid-btn" data-util="station">
-              <span class="grid-icon">📍</span>
-              <span class="grid-label">站点查询</span>
-            </button>
-            <button class="utils-grid-btn" data-util="data-sync">
-              <span class="grid-icon">🔄</span>
-              <span class="grid-label">数据同步</span>
-            </button>
+          <!-- 工具选择器 - 分类折叠菜单 -->
+          <div class="utils-categories" id="utilsCategories">
+            <!-- 通用工具分类 -->
+            <div class="utils-category">
+              <button class="category-header active" data-category="general">
+                <span class="category-icon">🔧</span>
+                <span class="category-title">通用工具</span>
+                <span class="category-toggle">▼</span>
+              </button>
+              <div class="category-content active">
+                <div class="utils-grid">
+                  <button class="utils-grid-btn active" data-util="timezone">
+                    <span class="grid-icon">⏰</span>
+                    <span class="grid-label">时区转换</span>
+                  </button>
+                  <button class="utils-grid-btn" data-util="json">
+                    <span class="grid-icon">📋</span>
+                    <span class="grid-label">JSON</span>
+                  </button>
+                  <button class="utils-grid-btn" data-util="sql">
+                    <span class="grid-icon">🗃️</span>
+                    <span class="grid-label">SQL</span>
+                  </button>
+                  <button class="utils-grid-btn" data-util="cron">
+                    <span class="grid-icon">⏱️</span>
+                    <span class="grid-label">Cron</span>
+                  </button>
+                  <button class="utils-grid-btn" data-util="regex">
+                    <span class="grid-icon">🔍</span>
+                    <span class="grid-label">正则</span>
+                  </button>
+                  <button class="utils-grid-btn" data-util="diff">
+                    <span class="grid-icon">📝</span>
+                    <span class="grid-label">文本对比</span>
+                  </button>
+                  <button class="utils-grid-btn" data-util="case">
+                    <span class="grid-icon">🔤</span>
+                    <span class="grid-label">命名转换</span>
+                  </button>
+                  <button class="utils-grid-btn" data-util="mermaid">
+                    <span class="grid-icon">📊</span>
+                    <span class="grid-label">Mermaid</span>
+                  </button>
+                  <button class="utils-grid-btn" data-util="dod">
+                    <span class="grid-icon">📖</span>
+                    <span class="grid-label">DOD查询</span>
+                  </button>
+                  <button class="utils-grid-btn" data-util="decision">
+                    <span class="grid-icon">🎡</span>
+                    <span class="grid-label">Roll</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+            
+            <!-- App工具分类 -->
+            <div class="utils-category">
+              <button class="category-header" data-category="app">
+                <span class="category-icon">📱</span>
+                <span class="category-title">App 工具</span>
+                <span class="category-toggle">▶</span>
+              </button>
+              <div class="category-content">
+                <div class="utils-grid">
+                  <button class="utils-grid-btn" data-util="api-tracker">
+                    <span class="grid-icon">🔍</span>
+                    <span class="grid-label">API溯源</span>
+                  </button>
+                  <button class="utils-grid-btn" data-util="station">
+                    <span class="grid-icon">📍</span>
+                    <span class="grid-label">站点查询</span>
+                  </button>
+                  <button class="utils-grid-btn" data-util="data-sync">
+                    <span class="grid-icon">🔄</span>
+                    <span class="grid-label">数据同步</span>
+                  </button>
+                  <button class="utils-grid-btn" data-util="http">
+                    <span class="grid-icon">🌐</span>
+                    <span class="grid-label">HTTP</span>
+                  </button>
+                  <button class="utils-grid-btn" data-util="api-lineage">
+                    <span class="grid-icon">🔗</span>
+                    <span class="grid-label">API血缘</span>
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
 
           <!-- 时区转换工具 -->
@@ -783,35 +827,64 @@
             <h3>🔍 API 数据溯源</h3>
             
             <div class="api-tracker-tool">
-              <div class="api-tracker-intro">
-                <p>🎯 快速定位页面元素的数据来源</p>
-                <ul style="margin: 10px 0; padding-left: 20px; color: #666; font-size: 13px;">
-                  <li>自动拦截所有 API 请求</li>
-                  <li>点击页面元素查看数据来源</li>
-                  <li>智能匹配 API 响应数据</li>
-                </ul>
-                <div style="background: #fff3cd; padding: 10px; border-radius: 6px; font-size: 12px; color: #856404; margin-top: 10px;">
-                  💡 <strong>首次使用</strong>：如果"已捕获 API"为0，请刷新页面让工具生效
+              <!-- 设置区域 -->
+              <div class="api-tracker-settings" style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+                <h4 style="font-size: 14px; color: #333; margin: 0 0 12px 0; display: flex; align-items: center; gap: 8px;">
+                  ⚙️ 功能设置
+                </h4>
+                
+                <!-- 文本选取开关 -->
+                <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid #e5e7eb;">
+                  <div>
+                    <div style="font-size: 13px; font-weight: 500; color: #333;">文本选取查找</div>
+                    <div style="font-size: 11px; color: #666; margin-top: 2px;">拖动选择文字时显示"🔍 查找来源"按钮</div>
+                  </div>
+                  <label class="toggle-switch">
+                    <input type="checkbox" id="toggleTextSelection" checked>
+                    <span class="toggle-slider"></span>
+                  </label>
+                </div>
+                
+                <!-- API 过滤条件 -->
+                <div style="padding: 10px 0;">
+                  <div style="font-size: 13px; font-weight: 500; color: #333; margin-bottom: 8px;">API 过滤条件</div>
+                  <div style="font-size: 11px; color: #666; margin-bottom: 8px;">
+                    过滤哪些接口会显示在查找结果中（逗号分隔）<br>
+                    <strong>留空 = 显示所有API</strong>
+                  </div>
+                  <input 
+                    type="text" 
+                    id="apiFilterKeywords" 
+                    placeholder="例如: api_mart, /api/, graphql （留空显示全部）" 
+                    value="api_mart"
+                    style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 12px;"
+                  >
+                  <button id="saveApiFilter" style="margin-top: 8px; width: 100%; background: #667eea; color: white; border: none; border-radius: 6px; padding: 8px; cursor: pointer; font-size: 12px;">
+                    💾 保存过滤条件
+                  </button>
                 </div>
               </div>
 
-              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px;">
-                <button id="refreshPageBtn" class="btn btn-secondary" style="padding: 12px; font-size: 14px;">
-                  🔄 刷新页面
-                </button>
-                <button id="startAPITracker" class="btn btn-primary" style="padding: 12px; font-size: 14px;">
-                  🎯 启动检查器
+              <div class="api-tracker-intro">
+                <p>🎯 快速定位页面数据的 API 来源</p>
+                <ul style="margin: 10px 0; padding-left: 20px; color: #666; font-size: 13px;">
+                  <li>自动拦截 API 请求（可自定义过滤条件）</li>
+                  <li><strong>拖动鼠标选择</strong>页面上的文字或数字</li>
+                  <li>点击浮动按钮 "🔍 查找来源" 即可查找</li>
+                  <li>支持带千分位、货币符号的数字（如 $1,234.56）</li>
+                </ul>
+              </div>
+
+              <div style="margin-bottom: 20px;">
+                <button id="refreshPageBtn" class="btn btn-primary" style="padding: 12px; font-size: 14px; width: 100%;">
+                  🔄 刷新页面（让工具生效）
                 </button>
               </div>
 
-              <div class="api-tracker-stats" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px;">
+              <div class="api-tracker-stats" style="display: grid; grid-template-columns: 1fr; gap: 10px; margin-bottom: 20px;">
                 <div style="background: #f0f4ff; padding: 15px; border-radius: 8px; text-align: center;">
                   <div style="font-size: 24px; font-weight: bold; color: #667eea;" id="apiTrackerCount">0</div>
-                  <div style="font-size: 12px; color: #666; margin-top: 5px;">已捕获 API</div>
-                </div>
-                <div style="background: #f0f4ff; padding: 15px; border-radius: 8px; text-align: center;">
-                  <div style="font-size: 24px; font-weight: bold; color: #667eea;" id="apiTrackerActive">待命</div>
-                  <div style="font-size: 12px; color: #666; margin-top: 5px;">检查器状态</div>
+                  <div style="font-size: 12px; color: #666; margin-top: 5px;">已捕获 API 请求</div>
                 </div>
               </div>
 
@@ -829,14 +902,14 @@
                 </div>
               </div>
 
-              <div class="api-tracker-help" style="margin-top: 20px; padding: 15px; background: #fff8e1; border-radius: 8px; font-size: 12px; color: #666;">
-                <div style="font-weight: bold; color: #f57c00; margin-bottom: 8px;">💡 使用提示</div>
-                <ul style="margin: 0; padding-left: 20px;">
-                  <li>在任意页面打开扩展，点击"启动检查器"</li>
-                  <li>移动鼠标到页面元素上，会高亮显示</li>
-                  <li>点击元素查看其数据来源的 API</li>
-                  <li>按 ESC 键退出检查器模式</li>
-                </ul>
+              <div class="api-tracker-help" style="margin-top: 20px; padding: 15px; background: #e0e7ff; border-radius: 8px; font-size: 12px; color: #4338ca; border-left: 4px solid #667eea;">
+                <div style="font-weight: bold; color: #667eea; margin-bottom: 8px;">💡 使用方法</div>
+                <ol style="margin: 0; padding-left: 20px;">
+                  <li>在任意页面，直接用鼠标<strong>拖动选择</strong>你想查找的文字或数字</li>
+                  <li>松开鼠标后，会出现浮动按钮 "🔍 查找来源"</li>
+                  <li>点击浮动按钮，即可查看该数据在哪个 API 中</li>
+                  <li>支持带格式的数字：<code>$1,234.56</code>、<code>12.5%</code> 等</li>
+                </ol>
               </div>
             </div>
           </div>
@@ -1453,6 +1526,143 @@
                     </div>
                   </div>
                 </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- DOD查询工具 -->
+          <div id="dod-util" class="utils-content">
+            <h3>📅 本周值班 (DOD)</h3>
+            
+            <div class="dod-tool">
+              <!-- 当前周信息 -->
+              <div class="dod-week-info">
+                <div class="dod-week-header">
+                  <span class="dod-week-icon">📆</span>
+                  <div class="dod-week-text">
+                    <div class="dod-week-title" id="dodWeekTitle">正在加载...</div>
+                    <div class="dod-week-date" id="dodWeekDate">-</div>
+                  </div>
+                  <button id="refreshDodBtn" class="btn btn-secondary btn-small">🔄 刷新</button>
+                </div>
+              </div>
+              
+              <!-- 搜索框 -->
+              <div class="dod-search-section">
+                <input type="text" id="dodSearchInput" class="dod-input" placeholder="🔍 搜索域名...（如: Driver, Order, Delivery）">
+              </div>
+              
+              <!-- 值班人员列表 -->
+              <div class="dod-results-section">
+                <div id="dodResults" class="dod-results">
+                  <div class="dod-placeholder">
+                    <span class="placeholder-icon">📅</span>
+                    <span class="placeholder-text">点击刷新按钮加载本周值班信息</span>
+                    <div class="placeholder-help">
+                      <p>💡 自动显示本周各域的值班人员</p>
+                      <p>📊 数据来源: Google Sheets 值班排班表</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              <!-- 加载状态 -->
+              <div id="dodLoading" class="dod-loading" style="display: none;">
+                <div class="loading-spinner"></div>
+                <p>正在加载值班数据...</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- API血缘查询工具 -->
+          <div id="api-lineage-util" class="utils-content">
+            <div class="api-lineage-tool">
+              <!-- 紧凑的顶部栏：标题 + 模式切换 -->
+              <div class="lineage-header">
+                <h3 style="margin: 0; font-size: 16px; color: #333;">🔗 API血缘查询</h3>
+                <div class="lineage-mode-tabs-compact">
+                  <button class="lineage-mode-tab active" data-mode="api-to-table">API → 表</button>
+                  <button class="lineage-mode-tab" data-mode="table-to-api">表 → API</button>
+                </div>
+              </div>
+              
+              <!-- API → 表 查询 -->
+              <div id="api-to-table-mode" class="lineage-mode-content active">
+                <div class="lineage-compact-form">
+                  <div class="lineage-input-row">
+                    <input type="text" id="apiIdInput" class="lineage-input-compact" 
+                           placeholder="输入API关键词">
+                    <button id="queryApiToTable" class="btn-compact btn-primary">🔍 查询</button>
+                  </div>
+                  <div class="env-checkbox-group-compact">
+                    <label class="env-checkbox-label-compact">
+                      <input type="checkbox" name="apiEnv" value="live" class="env-checkbox" checked>
+                      <span>live</span>
+                    </label>
+                    <label class="env-checkbox-label-compact">
+                      <input type="checkbox" name="apiEnv" value="dev" class="env-checkbox">
+                      <span>dev</span>
+                    </label>
+                    <label class="env-checkbox-label-compact">
+                      <input type="checkbox" name="apiEnv" value="test" class="env-checkbox">
+                      <span>test</span>
+                    </label>
+                    <label class="env-checkbox-label-compact">
+                      <input type="checkbox" name="apiEnv" value="uat" class="env-checkbox">
+                      <span>uat</span>
+                    </label>
+                    <label class="env-checkbox-label-compact">
+                      <input type="checkbox" name="apiEnv" value="staging" class="env-checkbox">
+                      <span>staging</span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+              
+              <!-- 表 → API 查询 -->
+              <div id="table-to-api-mode" class="lineage-mode-content">
+                <div class="lineage-compact-form">
+                  <div class="lineage-input-row">
+                    <input type="text" id="tableNameInput" class="lineage-input-compact" 
+                           placeholder="输入表名关键词">
+                    <button id="queryTableToApi" class="btn-compact btn-primary">🔍 查询</button>
+                    <button id="refreshCache" class="btn-compact btn-secondary" title="清除缓存">🔄</button>
+                  </div>
+                  <div class="env-checkbox-group-compact">
+                    <label class="env-checkbox-label-compact">
+                      <input type="checkbox" name="tableEnv" value="live" class="env-checkbox" checked>
+                      <span>live</span>
+                    </label>
+                    <label class="env-checkbox-label-compact">
+                      <input type="checkbox" name="tableEnv" value="dev" class="env-checkbox">
+                      <span>dev</span>
+                    </label>
+                    <label class="env-checkbox-label-compact">
+                      <input type="checkbox" name="tableEnv" value="test" class="env-checkbox">
+                      <span>test</span>
+                    </label>
+                    <label class="env-checkbox-label-compact">
+                      <input type="checkbox" name="tableEnv" value="uat" class="env-checkbox">
+                      <span>uat</span>
+                    </label>
+                    <label class="env-checkbox-label-compact">
+                      <input type="checkbox" name="tableEnv" value="staging" class="env-checkbox">
+                      <span>staging</span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+              
+              <!-- 状态显示 -->
+              <div id="lineageStatus" class="lineage-status"></div>
+              
+              <!-- 结果区域 -->
+              <div id="lineageResults" class="lineage-results" style="display: none;">
+                <div class="lineage-results-header">
+                  <h4>查询结果</h4>
+                  <button id="copyLineageResults" class="btn btn-secondary btn-small">📋 复制</button>
+                </div>
+                <div id="lineageResultsContent" class="lineage-results-content"></div>
               </div>
             </div>
           </div>

@@ -25,6 +25,12 @@ document.addEventListener('DOMContentLoaded', function() {
   initCodeHelper();
   initTodos();
   initFmsLinks();
+  initDodTool();
+  initApiLineageTool();
+  initAPITrackerSettings();  // 初始化 API 溯源工具设置
+  
+  // 预加载API血缘缓存（后台异步，不阻塞popup打开）
+  preloadAPILineageCache();
   
   // 事件监听器
   document.getElementById('addLink').addEventListener('click', addLink);
@@ -76,6 +82,44 @@ function initSettings() {
   const versionElement = document.getElementById('currentVersion');
   if (versionElement) {
     versionElement.textContent = 'v' + manifest.version;
+  }
+  
+  // 检查是否显示独立窗口模式提示
+  chrome.storage.local.get(['windowMode', 'windowModeHintDismissed'], function(result) {
+    const windowModeHint = document.getElementById('windowModeHint');
+    const isInWindowMode = new URLSearchParams(window.location.search).get('mode') === 'window';
+    
+    // 如果不在窗口模式、窗口模式未启用、且用户未关闭过提示
+    if (!isInWindowMode && !result.windowMode && !result.windowModeHintDismissed) {
+      if (windowModeHint) {
+        windowModeHint.style.display = 'block';
+      }
+    }
+    
+    if (windowModeSwitch) {
+      windowModeSwitch.checked = result.windowMode || false;
+    }
+  });
+  
+  // 快速开启窗口模式
+  const enableWindowModeBtn = document.getElementById('enableWindowMode');
+  if (enableWindowModeBtn) {
+    enableWindowModeBtn.addEventListener('click', function() {
+      if (windowModeSwitch) {
+        windowModeSwitch.checked = true;
+        windowModeSwitch.dispatchEvent(new Event('change'));
+      }
+      document.getElementById('windowModeHint').style.display = 'none';
+    });
+  }
+  
+  // 关闭提示
+  const closeHintBtn = document.getElementById('closeHint');
+  if (closeHintBtn) {
+    closeHintBtn.addEventListener('click', function() {
+      document.getElementById('windowModeHint').style.display = 'none';
+      chrome.storage.local.set({ windowModeHintDismissed: true });
+    });
   }
   
   // 加载当前设置
@@ -275,23 +319,35 @@ function initTabs() {
   tabBtns.forEach(btn => {
     btn.addEventListener('click', function() {
       const tabName = this.dataset.tab;
-      const targetTab = document.getElementById(`${tabName}-tab`);
-      
-      console.log('切换到标签页:', tabName, '目标元素:', targetTab);
-      
-      // 更新按钮状态
-      tabBtns.forEach(b => b.classList.remove('active'));
-      this.classList.add('active');
-      
-      // 更新面板状态
-      tabPanes.forEach(pane => pane.classList.remove('active'));
-      if (targetTab) {
-        targetTab.classList.add('active');
-      } else {
-        console.error('找不到标签页:', `${tabName}-tab`);
-      }
+      switchTab(tabName);
     });
   });
+}
+
+// 切换到指定tab的辅助函数
+function switchTab(tabName) {
+  const tabBtns = document.querySelectorAll('.tab-btn');
+  const tabPanes = document.querySelectorAll('.tab-pane');
+  const targetTab = document.getElementById(`${tabName}-tab`);
+  
+  console.log('切换到标签页:', tabName, '目标元素:', targetTab);
+  
+  // 更新按钮状态
+  tabBtns.forEach(b => {
+    if (b.dataset.tab === tabName) {
+      b.classList.add('active');
+    } else {
+      b.classList.remove('active');
+    }
+  });
+  
+  // 更新面板状态
+  tabPanes.forEach(pane => pane.classList.remove('active'));
+  if (targetTab) {
+    targetTab.classList.add('active');
+  } else {
+    console.error('找不到标签页:', `${tabName}-tab`);
+  }
 }
 
 // ===== 快速链接管理 =====
@@ -1479,6 +1535,79 @@ function exportSingleNote() {
 
 // ===== 实用工具切换 =====
 function initUtils() {
+  // 从 storage 读取工具分类的展开状态
+  chrome.storage.local.get(['utilsCategoryExpanded'], function(result) {
+    const utilsCategoryExpanded = result.utilsCategoryExpanded || {};
+    
+    // 初始化工具分类的展开状态
+    const categoryHeaders = document.querySelectorAll('.utils-categories .category-header');
+    categoryHeaders.forEach(header => {
+      const category = header.parentElement;
+      const content = category.querySelector('.category-content');
+      const toggle = header.querySelector('.category-toggle');
+      
+      // 获取分类 ID
+      const categoryId = header.dataset.category;
+      if (!categoryId) return;
+      
+      // 读取之前保存的状态，默认：通用工具展开，App工具收起
+      const defaultExpanded = categoryId === 'general';
+      const isExpanded = utilsCategoryExpanded[categoryId] !== undefined 
+        ? utilsCategoryExpanded[categoryId] 
+        : defaultExpanded;
+      
+      // 应用状态
+      if (isExpanded) {
+        header.classList.add('active');
+        content.classList.add('active');
+        if (toggle) toggle.textContent = '▼';
+      } else {
+        header.classList.remove('active');
+        content.classList.remove('active');
+        if (toggle) toggle.textContent = '▶';
+      }
+    });
+  });
+  
+  // 工具分类折叠
+  const categoryHeaders = document.querySelectorAll('.utils-categories .category-header');
+  categoryHeaders.forEach(header => {
+    header.addEventListener('click', function() {
+      const category = this.parentElement;
+      const content = category.querySelector('.category-content');
+      const toggle = this.querySelector('.category-toggle');
+      
+      // 获取分类 ID
+      const categoryId = this.dataset.category;
+      if (!categoryId) return;
+      
+      // 切换展开/折叠状态
+      const isActive = this.classList.contains('active');
+      const newExpanded = !isActive;
+      
+      if (isActive) {
+        // 折叠
+        this.classList.remove('active');
+        content.classList.remove('active');
+        if (toggle) toggle.textContent = '▶';
+      } else {
+        // 展开
+        this.classList.add('active');
+        content.classList.add('active');
+        if (toggle) toggle.textContent = '▼';
+      }
+      
+      // 保存状态到 storage
+      chrome.storage.local.get(['utilsCategoryExpanded'], function(result) {
+        const utilsCategoryExpanded = result.utilsCategoryExpanded || {};
+        utilsCategoryExpanded[categoryId] = newExpanded;
+        chrome.storage.local.set({ utilsCategoryExpanded: utilsCategoryExpanded });
+        console.log('💾 保存工具分类状态:', categoryId, newExpanded);
+      });
+    });
+  });
+  
+  // 工具切换
   const utilsBtns = document.querySelectorAll('.utils-grid-btn');
   const utilsContents = document.querySelectorAll('.utils-content');
   
@@ -1486,7 +1615,7 @@ function initUtils() {
     btn.addEventListener('click', function() {
       const utilName = this.dataset.util;
       
-      // 更新按钮状态
+      // 更新按钮状态（跨分类）
       utilsBtns.forEach(b => b.classList.remove('active'));
       this.classList.add('active');
       
@@ -7099,22 +7228,22 @@ document.getElementById('gmailDetailModal')?.addEventListener('click', function(
 
 // ===== FMS 链接初始化 =====
 function initFmsLinks() {
-  // 获取所有环境标签按钮
-  const envTabs = document.querySelectorAll('.fms-env-tab');
-  const marketsContainers = document.querySelectorAll('.fms-markets');
+  // FMS快速入口
+  const envTabs2 = document.querySelectorAll('.fms-env-tab2');
+  const marketsContainers2 = document.querySelectorAll('.fms-markets2');
   
   // 为每个标签添加点击事件
-  envTabs.forEach(tab => {
+  envTabs2.forEach(tab => {
     tab.addEventListener('click', function() {
       const env = this.dataset.env;
       
       // 移除所有active状态
-      envTabs.forEach(t => t.classList.remove('active'));
-      marketsContainers.forEach(m => m.classList.remove('active'));
+      envTabs2.forEach(t => t.classList.remove('active'));
+      marketsContainers2.forEach(m => m.classList.remove('active'));
       
       // 添加当前active状态
       this.classList.add('active');
-      const targetMarkets = document.querySelector(`.fms-markets[data-env="${env}"]`);
+      const targetMarkets = document.querySelector(`.fms-markets2[data-env="${env}"]`);
       if (targetMarkets) {
         targetMarkets.classList.add('active');
       }
@@ -8324,6 +8453,8 @@ document.getElementById('refreshPageBtn')?.addEventListener('click', async funct
 });
 
 // 启动 API 溯源检查器
+// ===== API 溯源工具 - 启动检查器按钮（已废弃，改用文本选取模式） =====
+/*
 document.getElementById('startAPITracker')?.addEventListener('click', async function() {
   const btn = this;
   const originalText = btn.innerHTML;
@@ -8377,6 +8508,106 @@ document.getElementById('startAPITracker')?.addEventListener('click', async func
     btn.disabled = false;
   }
 });
+*/
+
+// ===== API 溯源工具 - 设置管理 =====
+async function initAPITrackerSettings() {
+  console.log('📋 [Popup] 初始化 API 溯源工具设置');
+  
+  // 读取设置
+  const settings = await chrome.storage.local.get({
+    textSelectionEnabled: true,  // 默认开启
+    apiFilterKeywords: 'api_mart'  // 默认只拦截 api_mart
+  });
+  
+  console.log('⚙️ [Popup] 当前设置:', settings);
+  
+  // 应用到 UI
+  const toggleTextSelection = document.getElementById('toggleTextSelection');
+  const apiFilterInput = document.getElementById('apiFilterKeywords');
+  
+  if (toggleTextSelection) {
+    toggleTextSelection.checked = settings.textSelectionEnabled;
+  }
+  
+  if (apiFilterInput) {
+    apiFilterInput.value = settings.apiFilterKeywords;
+  }
+  
+  // 监听开关变化
+  toggleTextSelection?.addEventListener('change', async function() {
+    const enabled = this.checked;
+    console.log('🔄 [Popup] 文本选取功能:', enabled ? '开启' : '关闭');
+    
+    await chrome.storage.local.set({ textSelectionEnabled: enabled });
+    
+    // 通知所有标签页更新状态
+    const tabs = await chrome.tabs.query({});
+    let successCount = 0;
+    let failCount = 0;
+    
+    for (const tab of tabs) {
+      if (tab.id && tab.url && !tab.url.startsWith('chrome://') && !tab.url.startsWith('chrome-extension://')) {
+        try {
+          await chrome.tabs.sendMessage(tab.id, {
+            action: 'UPDATE_TEXT_SELECTION_STATE',
+            enabled: enabled
+          });
+          successCount++;
+          console.log(`✅ [Popup] 已通知标签页 ${tab.id}: ${tab.url}`);
+        } catch (err) {
+          failCount++;
+          console.log(`⚠️ [Popup] 通知标签页 ${tab.id} 失败:`, err.message);
+        }
+      }
+    }
+    
+    console.log(`📊 [Popup] 通知完成: ${successCount} 成功, ${failCount} 失败`);
+    
+    if (successCount > 0) {
+      showToast(enabled ? '✅ 文本选取功能已开启' : '⏸️ 文本选取功能已关闭');
+    } else if (failCount > 0) {
+      showToast('⚠️ 设置已保存，请刷新页面让设置生效');
+    }
+  });
+  
+  // 监听过滤条件保存
+  document.getElementById('saveApiFilter')?.addEventListener('click', async function() {
+    const keywords = apiFilterInput.value.trim();
+    console.log('💾 [Popup] 保存 API 过滤条件:', keywords);
+    
+    await chrome.storage.local.set({ apiFilterKeywords: keywords });
+    
+    // 通知所有标签页更新过滤条件
+    const tabs = await chrome.tabs.query({});
+    let successCount = 0;
+    let failCount = 0;
+    
+    for (const tab of tabs) {
+      if (tab.id && tab.url && !tab.url.startsWith('chrome://') && !tab.url.startsWith('chrome-extension://')) {
+        try {
+          await chrome.tabs.sendMessage(tab.id, {
+            action: 'UPDATE_API_FILTER',
+            keywords: keywords
+          });
+          successCount++;
+          console.log(`✅ [Popup] 已通知标签页 ${tab.id} 更新过滤条件`);
+        } catch (err) {
+          failCount++;
+          console.log(`⚠️ [Popup] 通知标签页 ${tab.id} 失败:`, err.message);
+        }
+      }
+    }
+    
+    console.log(`📊 [Popup] 通知完成: ${successCount} 成功, ${failCount} 失败`);
+    
+    if (successCount > 0) {
+      showToast(keywords === '' ? '✅ 过滤条件已清空（显示所有API）' : '✅ 过滤条件已保存并生效');
+    } else if (failCount > 0) {
+      showToast('⚠️ 过滤条件已保存，请刷新页面让设置生效');
+    }
+  });
+}
 
 // 加载 API 记录
 async function loadAPIRecords() {
@@ -9042,3 +9273,1569 @@ document.querySelectorAll('.utils-grid-btn').forEach(btn => {
   });
 });
 
+
+// ===== DOD 值班查询工具 =====
+const DOD_SHEET_ID = '17jW1K3gEwhyyJxoOsXTOLlzQVXVIaU44S4SLLZBO-Zo';
+const DOD_SHEET_GID = '374454140';
+let dodScheduleData = [];
+let dodTeamLeaders = {}; // 存储team leader信息
+let currentDodList = []; // 存储当前周的所有域值班信息
+
+function initDodTool() {
+  const refreshBtn = document.getElementById('refreshDodBtn');
+  const searchInput = document.getElementById('dodSearchInput');
+  
+  if (refreshBtn) {
+    refreshBtn.addEventListener('click', loadCurrentWeekDod);
+  }
+  
+  if (searchInput) {
+    searchInput.addEventListener('input', filterDodDomains);
+  }
+  
+  // 自动加载本周值班
+  loadCurrentWeekDod();
+}
+
+async function loadCurrentWeekDod() {
+  showDodLoading();
+  
+  try {
+    // 使用 Google Sheets 公开 CSV 导出
+    const csvUrl = `https://docs.google.com/spreadsheets/d/${DOD_SHEET_ID}/export?format=csv&gid=${DOD_SHEET_GID}`;
+    
+    const response = await fetch(csvUrl);
+    if (!response.ok) {
+      throw new Error('无法加载数据');
+    }
+    
+    const csvText = await response.text();
+    
+    // 调试：打印原始CSV的前3行和匹配行周围的数据
+    const lines = csvText.split('\n');
+    console.log('=== Raw CSV (First 3 lines) ===');
+    console.log('Line 0 (Headers):', lines[0]);
+    console.log('Line 1 (Team Leaders):', lines[1]);
+    console.log('Line 2 (First Data):', lines[2]);
+    
+    // 查找包含 02/02 的行号
+    const targetIndex = lines.findIndex(line => line.includes('02/02-02/08'));
+    if (targetIndex !== -1) {
+      console.log('=== Found 02/02-02/08 at line', targetIndex, '===');
+      console.log('Raw line:', lines[targetIndex]);
+      console.log('Previous line:', lines[targetIndex - 1]);
+      console.log('Next line:', lines[targetIndex + 1]);
+    }
+    console.log('=====================================');
+    
+    const allData = parseCSV(csvText);
+    
+    // 第一行是域名标题（CSV的header）
+    // parseCSV后：
+    // allData[0] = 第二行（Team Leader行）
+    // allData[1] = 第三行（Date标题行）
+    // allData[2] 开始 = 实际的值班数据
+    
+    if (allData.length >= 2) {
+      const leaderRow = allData[0]; // Team Leader在第二行
+      
+      console.log('=== Team Leader Row ===');
+      console.log(leaderRow);
+      
+      // 提取team leader信息
+      dodTeamLeaders = {};
+      for (const key in leaderRow) {
+        if (key !== 'Date' && key !== '日期' && key !== 'Domain' && key !== '') {
+          dodTeamLeaders[key] = leaderRow[key] || '';
+        }
+      }
+      
+      console.log('=== Parsed Team Leaders ===');
+      console.log(dodTeamLeaders);
+      
+      // 从第3行开始是实际的值班数据（allData[2]开始）
+      dodScheduleData = allData.slice(2);
+    } else {
+      dodScheduleData = allData;
+    }
+    
+    console.log('成功加载值班数据:', dodScheduleData.length, '条记录');
+    
+    // 获取当前日期
+    const today = new Date();
+    
+    // 查找匹配当前日期的值班记录（选择最新的匹配项）
+    const currentDodRow = findCurrentWeekDodRow(dodScheduleData, today);
+    
+    if (currentDodRow) {
+      // 更新周信息
+      updateWeekInfo(currentDodRow.dateRange);
+      
+      // 显示结果
+      displayDodSchedule(currentDodRow);
+    } else {
+      showDodError('未找到当前日期的值班信息');
+    }
+    
+  } catch (error) {
+    console.error('加载值班数据失败:', error);
+    showDodError('加载失败: ' + error.message);
+  }
+}
+
+function findCurrentWeekDodRow(data, currentDate) {
+  let matchedRow = null;
+  let matchedRows = []; // 收集所有匹配的行
+  
+  console.log('=== Finding DOD for date:', currentDate.toLocaleDateString());
+  console.log('Total rows to check:', data.length);
+  
+  // 从后往前遍历，这样最后一个匹配的就是最新的
+  for (let i = data.length - 1; i >= 0; i--) {
+    const row = data[i];
+    const dateStr = row['Date'] || row['日期'] || Object.values(row)[0];
+    
+    if (!dateStr || dateStr.trim() === '') continue;
+    
+    // 跳过标题行和年份标记行
+    if (dateStr.includes('Domain') || dateStr.includes('月份') || dateStr.includes('年')) {
+      continue;
+    }
+    
+    // 解析日期范围
+    const dateRange = parseDateRange(dateStr, currentDate.getFullYear());
+    
+    if (dateRange) {
+      const inRange = isDateInRange(currentDate, dateRange);
+      
+      // 调试：打印最后20行的匹配情况
+      if (i >= data.length - 20) {
+        console.log(`Row ${i}: ${dateStr} - In Range: ${inRange}`, dateRange);
+      }
+      
+      if (inRange) {
+        console.log(`✅ MATCHED Row ${i}: ${dateStr}`);
+        matchedRows.push({ index: i, dateStr, row, dateRange });
+        matchedRow = {
+          dateRange: dateStr,
+          data: row,
+          parsedRange: dateRange,
+          rowIndex: i
+        };
+        // 找到第一个匹配的（因为是从后往前遍历，第一个就是最新的）
+        break;
+      }
+    }
+  }
+  
+  console.log('=== Match Result ===');
+  console.log('Total matched rows:', matchedRows.length);
+  if (matchedRow) {
+    console.log('Selected row index:', matchedRow.rowIndex);
+    console.log('Date range:', matchedRow.dateRange);
+    console.log('Non-empty fields:', Object.keys(matchedRow.data).filter(k => matchedRow.data[k] && matchedRow.data[k].trim()));
+  }
+  
+  return matchedRow;
+}
+
+function parseDateRange(dateStr, currentYear) {
+  // 清理字符串
+  dateStr = dateStr.trim();
+  
+  // 多种日期格式：
+  // 11.29~12.5
+  // 12.6~12.12
+  // 7/4
+  // 1.3~1.9
+  // 5.30-6.6
+  // 6/27
+  // 1/6-1/12
+  
+  let startDate, endDate;
+  
+  // 格式1: MM.DD~MM.DD 或 M.D~M.D
+  let match = dateStr.match(/(\d{1,2})\.(\d{1,2})~(\d{1,2})\.(\d{1,2})/);
+  if (match) {
+    const [, startMonth, startDay, endMonth, endDay] = match;
+    startDate = new Date(currentYear, parseInt(startMonth) - 1, parseInt(startDay));
+    endDate = new Date(currentYear, parseInt(endMonth) - 1, parseInt(endDay));
+    
+    // 处理跨年情况（如 12.27~1.2）
+    if (endDate < startDate) {
+      endDate.setFullYear(currentYear + 1);
+    }
+    
+    return { start: startDate, end: endDate };
+  }
+  
+  // 格式2: M/D-M/D 或 M.D-M.D
+  match = dateStr.match(/(\d{1,2})[/.](\d{1,2})[-~](\d{1,2})[/.](\d{1,2})/);
+  if (match) {
+    const [, startMonth, startDay, endMonth, endDay] = match;
+    startDate = new Date(currentYear, parseInt(startMonth) - 1, parseInt(startDay));
+    endDate = new Date(currentYear, parseInt(endMonth) - 1, parseInt(endDay));
+    
+    // 处理跨年情况
+    if (endDate < startDate) {
+      endDate.setFullYear(currentYear + 1);
+    }
+    
+    return { start: startDate, end: endDate };
+  }
+  
+  // 格式3: M/D 或 M.D (单日)
+  match = dateStr.match(/^(\d{1,2})[/.](\d{1,2})$/);
+  if (match) {
+    const [, month, day] = match;
+    startDate = new Date(currentYear, parseInt(month) - 1, parseInt(day));
+    endDate = new Date(startDate);
+    endDate.setDate(endDate.getDate() + 6); // 假设一周
+    
+    return { start: startDate, end: endDate };
+  }
+  
+  return null;
+}
+
+function isDateInRange(date, range) {
+  // 设置时间为当天的开始，避免时间部分影响比较
+  const checkDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const startDate = new Date(range.start.getFullYear(), range.start.getMonth(), range.start.getDate());
+  const endDate = new Date(range.end.getFullYear(), range.end.getMonth(), range.end.getDate());
+  
+  return checkDate >= startDate && checkDate <= endDate;
+}
+
+function updateWeekInfo(dateRangeStr) {
+  const titleEl = document.getElementById('dodWeekTitle');
+  const dateEl = document.getElementById('dodWeekDate');
+  
+  if (titleEl) {
+    titleEl.textContent = '本周值班';
+  }
+  
+  if (dateEl) {
+    dateEl.textContent = dateRangeStr;
+  }
+}
+
+function displayDodSchedule(dodRow) {
+  const resultsDiv = document.getElementById('dodResults');
+  
+  if (!dodRow || !dodRow.data) {
+    resultsDiv.innerHTML = `
+      <div class="dod-no-results">
+        <span class="dod-no-results-icon">📅</span>
+        <div class="dod-no-results-text">未找到本周值班信息</div>
+      </div>
+    `;
+    hideDodLoading();
+    return;
+  }
+  
+  const rowData = dodRow.data;
+  
+  // 调试：打印所有列
+  console.log('=== DOD Row Data ===');
+  console.log('Date Range:', dodRow.dateRange);
+  console.log('All Keys:', Object.keys(rowData));
+  console.log('All Data:', rowData);
+  
+  // 获取所有域（跳过第一列Date）
+  currentDodList = []; // 清空并重新填充
+  for (const key in rowData) {
+    const value = rowData[key];
+    console.log(`Key: "${key}", Value: "${value}", Has Value: ${!!value}`);
+    
+    if (key !== 'Date' && key !== '日期' && key !== '' && key !== 'Domain' && value && value.trim && value.trim()) {
+      // 跳过一些特殊标记
+      if (!key.includes('月份') && !key.includes('年')) {
+        const teamLeader = dodTeamLeaders[key] || '';
+        currentDodList.push({
+          name: key,
+          person: value.trim(),
+          teamLeader: teamLeader
+        });
+        console.log(`✅ Added domain: ${key} = ${value.trim()}, TL: ${teamLeader}`);
+      } else {
+        console.log(`❌ Skipped (special marker): ${key}`);
+      }
+    } else {
+      console.log(`❌ Skipped (empty or Date): ${key}`);
+    }
+  }
+  
+  console.log('=== Total Domains Found:', currentDodList.length);
+  
+  // 显示所有域
+  renderDodList(currentDodList, dodRow.dateRange);
+}
+
+function filterDodDomains() {
+  const keyword = document.getElementById('dodSearchInput').value.trim().toLowerCase();
+  
+  if (!keyword) {
+    // 没有搜索词，显示全部
+    renderDodList(currentDodList, document.getElementById('dodWeekDate').textContent);
+    return;
+  }
+  
+  // 过滤域名
+  const filtered = currentDodList.filter(domain => 
+    domain.name.toLowerCase().includes(keyword) ||
+    domain.person.toLowerCase().includes(keyword) ||
+    (domain.teamLeader && domain.teamLeader.toLowerCase().includes(keyword))
+  );
+  
+  renderDodList(filtered, document.getElementById('dodWeekDate').textContent);
+}
+
+function renderDodList(domains, dateRange) {
+  const resultsDiv = document.getElementById('dodResults');
+  
+  if (domains.length === 0) {
+    resultsDiv.innerHTML = `
+      <div class="dod-no-results">
+        <span class="dod-no-results-icon">🔍</span>
+        <div class="dod-no-results-text">未找到匹配的域</div>
+      </div>
+    `;
+    return;
+  }
+  
+  let html = '';
+  domains.forEach((domain) => {
+    const initial = domain.person.charAt(0).toUpperCase();
+    const domainIcon = getDomainIcon(domain.name);
+    
+    html += `
+      <div class="dod-domain-card">
+        <div class="dod-domain-header">
+          <div class="dod-domain-name">
+            <span class="dod-domain-icon">${domainIcon}</span>
+            ${escapeHtml(domain.name)}
+          </div>
+          <span class="dod-domain-badge">值班中</span>
+        </div>
+        <div class="dod-person-info">
+          <div class="dod-person-avatar">${initial}</div>
+          <div class="dod-person-details">
+            <div class="dod-person-name">${escapeHtml(domain.person)}</div>
+            <div class="dod-person-meta">
+              <div class="dod-person-meta-item">
+                <span>📅</span>
+                <span>${dateRange}</span>
+              </div>
+              ${domain.teamLeader ? `
+              <div class="dod-person-meta-item">
+                <span>👔</span>
+                <span>TL: ${escapeHtml(domain.teamLeader)}</span>
+              </div>
+              ` : ''}
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  });
+  
+  resultsDiv.innerHTML = html;
+  hideDodLoading();
+}
+
+function getDomainIcon(domain) {
+  const domainLower = domain.toLowerCase();
+  
+  if (domainLower.includes('fpm')) return '📦';
+  if (domainLower.includes('order')) return '📝';
+  if (domainLower.includes('fulfil')) return '🏭';
+  if (domainLower.includes('exception')) return '⚠️';
+  if (domainLower.includes('fee')) return '💰';
+  if (domainLower.includes('driver')) return '🚗';
+  if (domainLower.includes('pickup')) return '📦';
+  if (domainLower.includes('linehaul')) return '🚛';
+  if (domainLower.includes('zone') || domainLower.includes('address')) return '🗺️';
+  if (domainLower.includes('delivery')) return '🚚';
+  if (domainLower.includes('service')) return '🏪';
+  if (domainLower.includes('locker')) return '🔒';
+  if (domainLower.includes('instation')) return '🏢';
+  if (domainLower.includes('network')) return '🌐';
+  if (domainLower.includes('asm') || domainLower.includes('cctv') || domainLower.includes('wcs')) return '📹';
+  if (domainLower.includes('common')) return '🔧';
+  if (domainLower.includes('wfm')) return '📊';
+  if (domainLower.includes('fe')) return '💻';
+  if (domainLower.includes('app')) return '📱';
+  
+  return '👤';
+}
+
+function parseCSV(csvText) {
+  const rows = [];
+  const lines = csvText.split('\n');
+  let currentRow = [];
+  let currentField = '';
+  let inQuotes = false;
+  let lineBuffer = '';
+  
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    lineBuffer += (lineBuffer ? '\n' : '') + line;
+    
+    // 检查这一行是否完整（引号是否闭合）
+    let quoteCount = 0;
+    for (let char of lineBuffer) {
+      if (char === '"') quoteCount++;
+    }
+    
+    // 如果引号数是奇数，说明还在引号内，继续读取下一行
+    if (quoteCount % 2 !== 0) {
+      continue;
+    }
+    
+    // 引号已闭合，解析这一行
+    currentRow = parseCSVLine(lineBuffer);
+    rows.push(currentRow);
+    
+    // 重置buffer
+    lineBuffer = '';
+  }
+  
+  if (rows.length === 0) return [];
+  
+  // 第一行是标题
+  const headers = rows[0];
+  
+  // 转换为对象数组
+  const data = [];
+  for (let i = 1; i < rows.length; i++) {
+    const values = rows[i];
+    const item = {};
+    headers.forEach((header, index) => {
+      item[header] = values[index] || '';
+    });
+    data.push(item);
+  }
+  
+  return data;
+}
+
+function parseCSVLine(line) {
+  const values = [];
+  let current = '';
+  let inQuotes = false;
+  
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+    
+    if (char === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        // 转义的引号
+        current += '"';
+        i++;
+      } else {
+        // 切换引号状态
+        inQuotes = !inQuotes;
+      }
+    } else if (char === ',' && !inQuotes) {
+      // 字段分隔符（不在引号内）
+      values.push(current);
+      current = '';
+    } else {
+      // 普通字符（包括换行符）
+      current += char;
+    }
+  }
+  
+  // 添加最后一个字段
+  values.push(current);
+  
+  // 清理每个字段（去除前后空格和引号）
+  return values.map(v => v.trim().replace(/^"|"$/g, ''));
+}
+
+function showDodLoading() {
+  document.getElementById('dodLoading').style.display = 'block';
+  document.getElementById('dodResults').style.display = 'none';
+}
+
+function hideDodLoading() {
+  document.getElementById('dodLoading').style.display = 'none';
+  document.getElementById('dodResults').style.display = 'block';
+}
+
+function showDodError(message) {
+  const resultsDiv = document.getElementById('dodResults');
+  resultsDiv.innerHTML = `
+    <div class="dod-no-results">
+      <span class="dod-no-results-icon">⚠️</span>
+      <div class="dod-no-results-text">${escapeHtml(message)}</div>
+    </div>
+  `;
+  hideDodLoading();
+}
+
+function escapeHtml(text) {
+  if (!text) return '';
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+// ===== API血缘查询工具 =====
+
+// DS ID 映射表 - 使用 datasource username 作为展示名称
+const DS_ID_MAPPING = {
+  51: 'shopee_ssc_dw-cluster_anyshards_2replicas_001_online',
+  52: 'shopee_ssc_dw-cluster_anyshards_2replicas_001_online',
+  53: 'ssc_sbs_mart-cluster_ssc_data_kanban_2replicas_online',
+  54: 'ssc_isc_mart-cluster_ssc_data_kanban_2replicas_online',
+  55: 'shopee_ssc_dw-cluster_anyshards_2replicas_001_online',
+  56: 'zhihuang.lin',
+  57: 'ssc_wms_mart-cluster_ssc_data_kanban_2replicas_online',
+  58: 'Shopee_DE_fbs_mart_dev-cluster_anyshards_2replicas_001_online',
+  59: 'shopee_szsc_spx_smart_sorting-cluster_ssc_data_spx_smartsorting_2replicas_online',
+  60: 'ssc_wms_mart-cluster_ssc_data_wms_2replicas_online',
+  61: 'ssc_wms_mart-cluster_ssc_data_wms_realtimemart_2replicas_online',
+  62: 'sz_sc_test2',
+  63: 'supply_chain_stag',
+  64: 'ssc_data_wms_read',
+  65: 'Shopee_DE_fbs_mart-cluster_ssc_data_kanban_2replicas_online',
+  66: 'shopee_ssc_biz-cluster_shopee_ssc_biz_szsc_online',
+  67: 'staging_shopee_ssc_biz-cluster_anyshards_2replicas_001_online',
+  68: 'sz_sc_test2',
+  69: 'supply_chain_uat',
+  70: 'shopee_stag_all3',
+  71: 'sscdata_spx_r',
+  73: 'zhihuang.lin',
+  74: 'staging_shopee_ssc_biz-cluster_anyshards_2replicas_001_online',
+  75: 'shopee_ssc_biz-cluster_shopee_ssc_biz_szsc_online',
+  80: 'yi.tang',
+  81: 'spx_mart-cluster_anyshards_2replicas_001_online',
+  82: 'staging_sls_mart-cluster_2_shards_poc_1_replica',
+  84: 'spx_mart-cluster_2replicas_storage_online',
+  85: 'spx_mart',
+  86: 'spx_mart-cluster_szsc_spx_mart_online',
+  87: 'spx_mart-cluster_szsc_spx_mart_online',
+  88: 'spx_mart-cluster_szsc_spx_smartsort_online',
+  89: 'staging_spx_mart-cluster_mpp_poc01_2replicas_online',
+  90: 'spx_mart-cluster_szsc_data_shared_online',
+  91: 'spx_mart-cluster_szsc_spx_smartsort_online',
+  92: 'sbs_mart-cluster_ssc_data_wms_realtimemart_2replicas_online',
+  93: 'ofp_mart-cluster_ssc_data_wms_realtimemart_2replicas_online',
+  94: 'spx_mart-cluster_ssc_data_kanban_2replicas_online',
+  95: 'staging_spx_mart-cluster_anyshards_2replicas_001_online',
+  96: 'wms_mart-cluster_szsc_data_shared_online',
+  97: 'wms_mart-cluster_szsc_sbs_mart_online',
+  98: 'isc_mart-cluster_szsc_data_shared_online',
+  99: 'isc_mart-cluster_szsc_sbs_mart_online',
+  100: 'sbs_mart-cluster_szsc_data_shared_online',
+  101: 'sbs_mart-cluster_szsc_sbs_mart_online',
+  102: 'fbs_mart-cluster_szsc_data_shared_online',
+  103: 'fbs_mart-cluster_szsc_sbs_mart_online',
+  104: 'spx_mart-cluster_szsc_data_shared_online',
+  105: 'staging_spx_mart-cluster_mpp_poc01_2replicas_online',
+  106: 'staging_spx_mart-cluster_mpp_poc01_2replicas_online',
+  107: 'spx_mart-cluster_szsc_spx_mart_online_2',
+  108: 'spx_mart-cluster_szsc_spx_mart_online_3',
+  109: 'spx_mart',
+  110: 'spx_mart-cluster_szsc_spx_mart_online_5',
+  111: 'wms_mart-cluster_szsc_sbs_mart_online_1',
+  112: 'wms_mart-cluster_szsc_sbs_mart_online_2',
+  113: 'spx_mart-cluster_szsc_spx_mart_online_4',
+  114: 'spx_mart-cluster_szsc_spx_mart_online_6',
+  115: 'spx_mart-cluster_szsc_spx_mart_online_7',
+  116: 'spx_mart-cluster_szsc_spx_mart_online_8',
+  117: 'sls_mart-cluster_szsc_sls_mart_online',
+  119: 'spx_mart-cluster_szsc_spx_mart_online_5',
+  122: 'spx_mart-cluster_szsc_spx_mart_online_7'
+};
+
+// 获取数据源名称（使用datasource username）
+function getDsName(dsId) {
+  return DS_ID_MAPPING[dsId] || `DS-${dsId}`;
+}
+
+// 查询结果缓存
+let queryCache = {
+  data: null,
+  timestamp: null,
+  ttl: 5 * 60 * 1000 // 5分钟缓存
+};
+
+// 检查缓存是否有效
+function isCacheValid() {
+  if (!queryCache.data || !queryCache.timestamp) {
+    return false;
+  }
+  const now = Date.now();
+  return (now - queryCache.timestamp) < queryCache.ttl;
+}
+
+function initApiLineageTool() {
+  // 模式切换
+  const modeTabs = document.querySelectorAll('.lineage-mode-tab');
+  const modeContents = document.querySelectorAll('.lineage-mode-content');
+  
+  modeTabs.forEach(tab => {
+    tab.addEventListener('click', function() {
+      const mode = this.dataset.mode;
+      
+      modeTabs.forEach(t => t.classList.remove('active'));
+      modeContents.forEach(c => c.classList.remove('active'));
+      
+      this.classList.add('active');
+      document.getElementById(`${mode}-mode`).classList.add('active');
+      
+      // 清空之前的结果
+      document.getElementById('lineageResults').style.display = 'none';
+      document.getElementById('lineageStatus').className = 'lineage-status';
+      document.getElementById('lineageStatus').innerHTML = '';
+    });
+  });
+  
+  // API → 表 查询
+  const queryApiToTableBtn = document.getElementById('queryApiToTable');
+  if (queryApiToTableBtn) {
+    queryApiToTableBtn.addEventListener('click', queryApiToTable);
+  }
+  
+  // 表 → API 查询
+  const queryTableToApiBtn = document.getElementById('queryTableToApi');
+  if (queryTableToApiBtn) {
+    queryTableToApiBtn.addEventListener('click', queryTableToApi);
+  }
+  
+  // 复制结果
+  const copyBtn = document.getElementById('copyLineageResults');
+  if (copyBtn) {
+    copyBtn.addEventListener('click', copyLineageResults);
+  }
+  
+  // 刷新缓存
+  const refreshCacheBtn = document.getElementById('refreshCache');
+  if (refreshCacheBtn) {
+    refreshCacheBtn.addEventListener('click', () => {
+      queryCache.data = null;
+      queryCache.timestamp = null;
+      alert('缓存已清除，下次查询将重新获取数据');
+    });
+  }
+}
+
+async function queryApiToTable() {
+  const apiId = document.getElementById('apiIdInput').value.trim();
+  
+  if (!apiId) {
+    showLineageStatus('error', '请输入API ID');
+    return;
+  }
+  
+  // 获取选中的环境（从复选框）
+  const checkedBoxes = document.querySelectorAll('input[name="apiEnv"]:checked');
+  const selectedEnvs = Array.from(checkedBoxes).map(cb => cb.value);
+  
+  if (selectedEnvs.length === 0) {
+    showLineageStatus('error', '请至少选择一个环境');
+    return;
+  }
+  
+  document.getElementById('lineageResults').style.display = 'none';
+  showLineageStatus('loading', `正在查询API使用的表 (${selectedEnvs.join(', ')})...`);
+  
+  try {
+    const searchPattern = `%${apiId}%`;
+    
+    // DataService API 只查询原始数据
+    const results = await queryDataService(searchPattern);
+    
+    // 在前端处理数据（传入环境筛选）
+    const processedResults = processApiToTableData(results, apiId, selectedEnvs);
+    displayApiToTableResults(processedResults);
+    
+  } catch (error) {
+    console.error('查询失败:', error);
+    showLineageStatus('error', error.message || '查询失败，请查看控制台了解详情');
+  }
+}
+
+async function queryTableToApi() {
+  const tableName = document.getElementById('tableNameInput').value.trim();
+  
+  if (!tableName) {
+    showLineageStatus('error', '请输入表名');
+    return;
+  }
+  
+  // 获取选中的环境（从复选框）
+  const checkedBoxes = document.querySelectorAll('input[name="tableEnv"]:checked');
+  const selectedEnvs = Array.from(checkedBoxes).map(cb => cb.value);
+  
+  if (selectedEnvs.length === 0) {
+    showLineageStatus('error', '请至少选择一个环境');
+    return;
+  }
+  
+  document.getElementById('lineageResults').style.display = 'none';
+  showLineageStatus('loading', `正在查询使用该表的API (${selectedEnvs.join(', ')})...`);
+  
+  try {
+    let results;
+    
+    // 检查是否有缓存
+    if (isCacheValid()) {
+      console.log('使用缓存数据');
+      showLineageStatus('loading', `正在查询使用该表的API (使用缓存数据)...`);
+      results = queryCache.data;
+    } else {
+      console.log('缓存失效，重新查询');
+      showLineageStatus('loading', `正在查询使用该表的API (首次查询，请稍候)...`);
+      
+      // 查询所有数据并缓存
+      const searchPattern = '%';
+      results = await queryDataService(searchPattern);
+      
+      // 更新缓存
+      queryCache.data = results;
+      queryCache.timestamp = Date.now();
+      console.log('查询结果已缓存，5分钟内有效');
+    }
+    
+    // 在前端处理数据（传入环境筛选）
+    const processedResults = processTableToApiData(results, tableName, selectedEnvs);
+    displayTableToApiResults(processedResults);
+    
+  } catch (error) {
+    console.error('查询失败:', error);
+    showLineageStatus('error', error.message || '查询失败，请查看控制台了解详情');
+  }
+}
+
+// 处理 API → 表 的数据
+function processApiToTableData(results, searchApiId, selectedEnvs) {
+  if (!results.rows || results.rows.length === 0) {
+    return { rows: [] };
+  }
+  
+  console.log('原始数据:', results);
+  console.log('选中环境:', selectedEnvs);
+  
+  // 按 api_id 分组
+  const groupedByApiId = {};
+  results.rows.forEach(row => {
+    const values = row.values;
+    const apiId = values.api_id;
+    const apiStatus = values.api_status;
+    const publishEnv = values.publish_env;
+    
+    // 只处理 online 状态的API
+    if (apiStatus !== 'online') {
+      return;
+    }
+    
+    // 环境筛选
+    if (!selectedEnvs.includes(publishEnv)) {
+      return;
+    }
+    
+    // 筛选匹配的 API
+    if (!apiId || !apiId.toLowerCase().includes(searchApiId.toLowerCase())) {
+      return;
+    }
+    
+    if (!groupedByApiId[apiId]) {
+      groupedByApiId[apiId] = [];
+    }
+    groupedByApiId[apiId].push(values);
+  });
+  
+  console.log('分组后数据:', groupedByApiId);
+  
+  // 对每个 api_id，按 api_version 降序排序，取最新版本
+  const processedRows = [];
+  Object.keys(groupedByApiId).forEach(apiId => {
+    const versions = groupedByApiId[apiId];
+    
+    // 按 api_version 降序排序
+    versions.sort((a, b) => {
+      const versionA = parseInt(a.api_version) || 0;
+      const versionB = parseInt(b.api_version) || 0;
+      return versionB - versionA;
+    });
+    
+    // 取最新版本
+    const latestVersion = versions[0];
+    const bizSql = latestVersion.biz_sql || '';
+    const dsId = latestVersion.ds_id;
+    
+    // 检查是否包含 mgmt_db2
+    if (!bizSql.includes('mgmt_db2')) {
+      return;
+    }
+    
+    // 用正则提取表名: {mgmt_db2}.表名
+    const regex = /\{mgmt_db2\}\.([a-zA-Z0-9_\{\}\-]+)/g;
+    const tableNames = [];
+    let match;
+    while ((match = regex.exec(bizSql)) !== null) {
+      tableNames.push(match[1]);
+    }
+    
+    // 去重
+    const uniqueTableNames = [...new Set(tableNames)];
+    const tableNameStr = uniqueTableNames.join(' , ');
+    
+    processedRows.push({
+      values: {
+        api_id: apiId,
+        table_name: tableNameStr || '-',
+        ds_id: dsId
+      },
+      // 保存完整的原始数据用于下钻
+      rawData: latestVersion
+    });
+  });
+  
+  console.log('处理后数据:', processedRows);
+  
+  return { rows: processedRows };
+}
+
+// 处理 表 → API 的数据
+function processTableToApiData(results, searchTable, selectedEnvs) {
+  if (!results.rows || results.rows.length === 0) {
+    return { rows: [] };
+  }
+  
+  console.log('原始数据:', results);
+  console.log('选中环境:', selectedEnvs);
+  
+  // 按 api_id 分组
+  const groupedByApiId = {};
+  results.rows.forEach(row => {
+    const values = row.values;
+    const apiId = values.api_id;
+    const apiStatus = values.api_status;
+    const publishEnv = values.publish_env;
+    const bizSql = values.biz_sql || '';
+    
+    // 只处理 online 状态的API
+    if (apiStatus !== 'online') {
+      return;
+    }
+    
+    // 环境筛选
+    if (!selectedEnvs.includes(publishEnv)) {
+      return;
+    }
+    
+    // 筛选包含指定表名的 API
+    if (!bizSql.toLowerCase().includes(searchTable.toLowerCase())) {
+      return;
+    }
+    
+    if (!groupedByApiId[apiId]) {
+      groupedByApiId[apiId] = [];
+    }
+    groupedByApiId[apiId].push(values);
+  });
+  
+  console.log('分组后数据:', groupedByApiId);
+  
+  // 对每个 api_id，按 api_version 降序排序，取最新版本
+  const processedRows = [];
+  Object.keys(groupedByApiId).forEach(apiId => {
+    const versions = groupedByApiId[apiId];
+    
+    // 按 api_version 降序排序
+    versions.sort((a, b) => {
+      const versionA = parseInt(a.api_version) || 0;
+      const versionB = parseInt(b.api_version) || 0;
+      return versionB - versionA;
+    });
+    
+    // 取最新版本
+    const latestVersion = versions[0];
+    const dsId = latestVersion.ds_id;
+    const bizSql = latestVersion.biz_sql || '';
+    
+    // 提取所有表名
+    const regex = /\{mgmt_db2\}\.([a-zA-Z0-9_\{\}\-]+)/g;
+    const allTableNames = [];
+    let match;
+    while ((match = regex.exec(bizSql)) !== null) {
+      allTableNames.push(match[1]);
+    }
+    
+    // 筛选匹配搜索关键词的表名
+    const matchedTables = allTableNames.filter(table => 
+      table.toLowerCase().includes(searchTable.toLowerCase())
+    );
+    
+    // 去重
+    const uniqueMatchedTables = [...new Set(matchedTables)];
+    const tableNameStr = uniqueMatchedTables.join(' , ');
+    
+    processedRows.push({
+      values: {
+        api_id: apiId,
+        matched_tables: tableNameStr || '-',
+        ds_id: dsId
+      },
+      // 保存完整的原始数据用于下钻
+      rawData: latestVersion
+    });
+  });
+  
+  console.log('处理后数据:', processedRows);
+  
+  return { rows: processedRows };
+}
+
+async function queryDataService(searchParam) {
+  const apiName = 'spx_mart.api_lineage_search';
+  const version = 'hg3ggpdp2lkgqlmc';
+  const personalToken = 'l7Vx4TGfwhmA1gtPn+JmUQ==';
+  const prestoQueueName = 'szsc-scheduled';
+  const endUser = 'tianyi.liang';
+  
+  // 步骤1: 提交查询
+  const submitUrl = `https://open-api.datasuite.shopee.io/dataservice/${apiName}/${version}`;
+  
+  const submitBody = {
+    olapPayload: {
+      expressions: [
+        {
+          parameterName: 'api_id',
+          value: searchParam
+        }
+      ],
+      prestoQueueName: prestoQueueName
+    }
+  };
+  
+  console.log('提交DataService查询:', {
+    url: submitUrl,
+    searchParam: searchParam
+  });
+  
+  const submitResponse = await fetch(submitUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': personalToken,
+      'X-End-User': endUser
+    },
+    body: JSON.stringify(submitBody)
+  });
+  
+  if (!submitResponse.ok) {
+    const errorText = await submitResponse.text();
+    console.error('提交失败:', errorText);
+    throw new Error(`提交查询失败 (${submitResponse.status})`);
+  }
+  
+  const submitResult = await submitResponse.json();
+  console.log('提交成功:', submitResult);
+  
+  if (!submitResult.jobId) {
+    throw new Error('未返回jobId');
+  }
+  
+  const jobId = submitResult.jobId;
+  
+  // 步骤2: 轮询元数据直到完成
+  showLineageStatus('loading', `任务已提交 (jobId: ${jobId})，正在执行查询...`);
+  
+  const maxAttempts = 120; // 增加最大尝试次数
+  let pollInterval = 1000; // 初始1秒轮询
+  
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    await new Promise(resolve => setTimeout(resolve, pollInterval));
+    
+    // 动态调整轮询间隔：前10次1秒，之后2秒，30次后3秒
+    if (attempt > 30) {
+      pollInterval = 3000;
+    } else if (attempt > 10) {
+      pollInterval = 2000;
+    }
+    
+    const metaUrl = `https://open-api.datasuite.shopee.io/dataservice/result/${jobId}`;
+    
+    const metaResponse = await fetch(metaUrl, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': personalToken,
+        'X-End-User': endUser
+      }
+    });
+    
+    if (!metaResponse.ok) {
+      throw new Error(`查询元数据失败 (${metaResponse.status})`);
+    }
+    
+    const metaResult = await metaResponse.json();
+    console.log(`元数据 (第${attempt}次, ${pollInterval}ms间隔):`, metaResult);
+    
+    const status = metaResult.status;
+    
+    if (status === 'FAILED') {
+      throw new Error(metaResult.message || '查询失败');
+    } else if (status === 'FINISH') {
+      // 查询完成，获取结果
+      showLineageStatus('loading', '查询完成，正在获取结果...');
+      return await fetchDataServiceResults(jobId, personalToken, endUser);
+    } else {
+      // RUNNING: 继续等待
+      showLineageStatus('loading', `查询执行中... (${attempt}/${maxAttempts})`);
+    }
+  }
+  
+  throw new Error('查询超时');
+}
+
+async function fetchDataServiceResults(jobId, personalToken, userAccount) {
+  const allRows = [];
+  let schema = null;
+  let shard = 0;
+  
+  // 获取所有分片的数据
+  while (true) {
+    const shardUrl = `https://open-api.datasuite.shopee.io/dataservice/result/${jobId}/${shard}`;
+    
+    const shardResponse = await fetch(shardUrl, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': personalToken,
+        'X-End-User': userAccount
+      }
+    });
+    
+    if (!shardResponse.ok) {
+      if (shard === 0) {
+        throw new Error(`获取结果失败 (${shardResponse.status})`);
+      }
+      // 没有更多分片了
+      break;
+    }
+    
+    const shardResult = await shardResponse.json();
+    console.log(`分片 ${shard} 结果:`, shardResult);
+    
+    if (shardResult.contentType === 'ERROR_MESSAGE') {
+      throw new Error(shardResult.message || '查询出错');
+    }
+    
+    if (shardResult.contentType === 'QUERY_DATA') {
+      if (!schema && shardResult.resultSchema) {
+        schema = shardResult.resultSchema;
+      }
+      
+      if (shardResult.rows && shardResult.rows.length > 0) {
+        allRows.push(...shardResult.rows);
+      }
+    }
+    
+    shard++;
+    
+    // 安全限制：最多获取100个分片
+    if (shard >= 100) {
+      break;
+    }
+  }
+  
+  return {
+    schema: schema,
+    rows: allRows
+  };
+}
+
+function displayApiToTableResults(results) {
+  const resultsDiv = document.getElementById('lineageResults');
+  const contentDiv = document.getElementById('lineageResultsContent');
+  
+  if (!results.rows || results.rows.length === 0) {
+    contentDiv.innerHTML = '<p style="text-align: center; color: #999; padding: 30px;">未找到相关数据</p>';
+    resultsDiv.style.display = 'block';
+    showLineageStatus('success', '查询完成，未找到结果');
+    return;
+  }
+  
+  let html = '<table class="lineage-results-table">';
+  html += '<thead><tr>';
+  html += '<th style="width: 35%;">API ID</th>';
+  html += '<th style="width: 45%;">使用的表</th>';
+  html += '<th style="width: 20%;">数据源</th>';
+  html += '</tr></thead>';
+  html += '<tbody>';
+  
+  results.rows.forEach((row, index) => {
+    const values = row.values;
+    const rawData = row.rawData || {};
+    const dsId = values.ds_id;
+    const dsName = getDsName(dsId);
+    const apiId = values.api_id || '-';
+    
+    // 主行 - 可点击展开
+    html += `<tr class="lineage-row-clickable" data-index="${index}">`;
+    html += `<td><span class="lineage-api-id">${escapeHtml(apiId)}</span> <span class="lineage-expand-icon">▼</span></td>`;
+    html += `<td><span class="lineage-table-name">${escapeHtml(values.table_name || '-')}</span></td>`;
+    html += `<td title="DS ID: ${dsId}">${escapeHtml(dsName)}</td>`;
+    html += '</tr>';
+    
+    // 详情行 - 默认隐藏
+    html += `<tr class="lineage-detail-row" data-index="${index}" style="display: none;">`;
+    html += '<td colspan="3">';
+    html += buildApiDetailHtml(rawData);
+    html += '</td>';
+    html += '</tr>';
+  });
+  
+  html += '</tbody></table>';
+  
+  contentDiv.innerHTML = html;
+  resultsDiv.style.display = 'block';
+  showLineageStatus('success', `查询完成！找到 ${results.rows.length} 条结果`);
+  
+  // 添加点击事件
+  attachRowClickEvents();
+}
+
+function displayTableToApiResults(results) {
+  const resultsDiv = document.getElementById('lineageResults');
+  const contentDiv = document.getElementById('lineageResultsContent');
+  
+  if (!results.rows || results.rows.length === 0) {
+    contentDiv.innerHTML = '<p style="text-align: center; color: #999; padding: 30px;">未找到相关数据</p>';
+    resultsDiv.style.display = 'block';
+    showLineageStatus('success', '查询完成，未找到结果');
+    return;
+  }
+  
+  let html = '<table class="lineage-results-table">';
+  html += '<thead><tr>';
+  html += '<th style="width: 35%;">API ID</th>';
+  html += '<th style="width: 45%;">匹配的表</th>';
+  html += '<th style="width: 20%;">数据源</th>';
+  html += '</tr></thead>';
+  html += '<tbody>';
+  
+  results.rows.forEach((row, index) => {
+    const values = row.values;
+    const rawData = row.rawData || {};
+    const dsId = values.ds_id;
+    const dsName = getDsName(dsId);
+    const apiId = values.api_id || '-';
+    
+    // 主行 - 可点击展开
+    html += `<tr class="lineage-row-clickable" data-index="${index}">`;
+    html += `<td><span class="lineage-api-id">${escapeHtml(apiId)}</span> <span class="lineage-expand-icon">▼</span></td>`;
+    html += `<td><span class="lineage-table-name">${escapeHtml(values.matched_tables || '-')}</span></td>`;
+    html += `<td title="DS ID: ${dsId}">${escapeHtml(dsName)}</td>`;
+    html += '</tr>';
+    
+    // 详情行 - 默认隐藏
+    html += `<tr class="lineage-detail-row" data-index="${index}" style="display: none;">`;
+    html += '<td colspan="3">';
+    html += buildApiDetailHtml(rawData);
+    html += '</td>';
+    html += '</tr>';
+  });
+  
+  html += '</tbody></table>';
+  
+  contentDiv.innerHTML = html;
+  resultsDiv.style.display = 'block';
+  showLineageStatus('success', `查询完成！找到 ${results.rows.length} 个API`);
+  
+  // 添加点击事件
+  attachRowClickEvents();
+}
+
+// 构建API详情HTML
+function buildApiDetailHtml(data) {
+  let html = '<div class="api-detail-panel">';
+  
+  // 基本信息
+  html += '<div class="api-detail-section">';
+  html += '<h4 class="api-detail-title">📋 基本信息</h4>';
+  html += '<div class="api-detail-grid">';
+  html += `<div class="api-detail-item"><label>API描述:</label><span>${escapeHtml(data.api_desc || '-')}</span></div>`;
+  html += `<div class="api-detail-item"><label>负责人:</label><span>${escapeHtml(data.owner_email || '-')}</span></div>`;
+  html += `<div class="api-detail-item"><label>业务组:</label><span>${escapeHtml(data.biz_group || '-')}</span></div>`;
+  html += `<div class="api-detail-item"><label>区域:</label><span>${escapeHtml(data.regions || '-')}</span></div>`;
+  html += `<div class="api-detail-item"><label>版本:</label><span>v${escapeHtml(data.api_version || '-')}</span></div>`;
+  html += `<div class="api-detail-item"><label>响应类型:</label><span>${escapeHtml(data.response_data_type || '-')}</span></div>`;
+  
+  // 最后修改时间
+  if (data.mtime) {
+    const modifyTime = formatTimestamp(data.mtime);
+    html += `<div class="api-detail-item"><label>最后修改:</label><span class="time-highlight">${modifyTime}</span></div>`;
+  }
+  
+  html += '</div>';
+  html += '</div>';
+  
+  // SQL逻辑
+  if (data.biz_sql) {
+    html += '<div class="api-detail-section">';
+    html += '<h4 class="api-detail-title">💻 SQL逻辑</h4>';
+    html += `<pre class="api-detail-sql">${escapeHtml(data.biz_sql)}</pre>`;
+    html += '</div>';
+  }
+  
+  // Dynamic Where SQL - 可视化展示（只有数据不为空时才显示）
+  if (data.dynamic_where_sql && data.dynamic_where_sql.trim() !== '' && data.dynamic_where_sql !== 'null') {
+    html += '<div class="api-detail-section">';
+    html += '<h4 class="api-detail-title">🔍 Dynamic Where 条件</h4>';
+    html += parseDynamicWhereConditions(data.dynamic_where_sql);
+    html += '</div>';
+  }
+  
+  html += '</div>';
+  return html;
+}
+
+// 格式化时间戳
+function formatTimestamp(timestamp) {
+  if (!timestamp) return '-';
+  
+  // 如果是毫秒时间戳
+  const ts = timestamp > 10000000000 ? timestamp : timestamp * 1000;
+  const date = new Date(ts);
+  
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const hour = String(date.getHours()).padStart(2, '0');
+  const minute = String(date.getMinutes()).padStart(2, '0');
+  const second = String(date.getSeconds()).padStart(2, '0');
+  
+  return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
+}
+
+// 解析并可视化展示Dynamic Where条件
+function parseDynamicWhereConditions(dynamicWhere) {
+  console.log('=== Dynamic Where 解析 ===');
+  console.log('原始值:', dynamicWhere);
+  console.log('数据类型:', typeof dynamicWhere);
+  
+  if (!dynamicWhere || dynamicWhere.trim() === '') {
+    return '<p style="color: #999; font-style: italic; padding: 10px;">无动态条件</p>';
+  }
+  
+  try {
+    // 尝试解析JSON格式的表格数据
+    const conditions = JSON.parse(dynamicWhere);
+    console.log('解析成功:', conditions);
+    console.log('是否数组:', Array.isArray(conditions));
+    
+    if (!Array.isArray(conditions) || conditions.length === 0) {
+      console.log('不是有效的数组或长度为0，显示原始文本');
+      return `<pre class="api-detail-sql" style="color: #333; background: #f8f9fa; padding: 12px; border-radius: 6px; font-size: 12px; line-height: 1.6;">${escapeHtml(dynamicWhere)}</pre>`;
+    }
+    
+    // 构建简洁的表格
+    let html = '<div style="overflow-x: auto; margin-top: 8px;">';
+    html += '<table style="width: 100%; border-collapse: collapse; background: white; border: 1px solid #e0e0e0;">';
+    html += '<thead>';
+    html += '<tr style="background: #f5f5f5;">';
+    html += '<th style="padding: 10px; text-align: left; border: 1px solid #e0e0e0; font-weight: 600; color: #333; font-size: 13px;">Variable</th>';
+    html += '<th style="padding: 10px; text-align: left; border: 1px solid #e0e0e0; font-weight: 600; color: #333; font-size: 13px;">Param</th>';
+    html += '<th style="padding: 10px; text-align: left; border: 1px solid #e0e0e0; font-weight: 600; color: #333; font-size: 13px;">Rule</th>';
+    html += '<th style="padding: 10px; text-align: left; border: 1px solid #e0e0e0; font-weight: 600; color: #333; font-size: 13px;">Value</th>';
+    html += '<th style="padding: 10px; text-align: left; border: 1px solid #e0e0e0; font-weight: 600; color: #333; font-size: 13px;">SQL</th>';
+    html += '</tr>';
+    html += '</thead>';
+    html += '<tbody>';
+    
+    conditions.forEach((cond, index) => {
+      console.log('处理条件:', cond);
+      const bgColor = index % 2 === 0 ? '#ffffff' : '#fafafa';
+      html += `<tr style="background: ${bgColor};">`;
+      html += `<td style="padding: 10px; border: 1px solid #e0e0e0; color: #333; font-size: 12px; font-family: monospace;">${escapeHtml(cond.variable || '-')}</td>`;
+      html += `<td style="padding: 10px; border: 1px solid #e0e0e0; color: #333; font-size: 12px; font-family: monospace;">${escapeHtml(cond.param || '-')}</td>`;
+      html += `<td style="padding: 10px; border: 1px solid #e0e0e0; color: #333; font-size: 12px; font-family: monospace;">${escapeHtml(cond.rule || '-')}</td>`;
+      html += `<td style="padding: 10px; border: 1px solid #e0e0e0; color: #333; font-size: 12px; font-family: monospace;">${escapeHtml(cond.value || '-')}</td>`;
+      html += `<td style="padding: 10px; border: 1px solid #e0e0e0; color: #333; font-size: 12px; font-family: monospace; word-break: break-all;">${escapeHtml(cond.sql || '-')}</td>`;
+      html += '</tr>';
+    });
+    
+    html += '</tbody></table>';
+    html += '</div>';
+    
+    console.log('表格HTML生成成功');
+    return html;
+    
+  } catch (e) {
+    // JSON解析失败，显示原始文本
+    console.error('解析Dynamic Where失败:', e);
+    console.log('显示为原始文本');
+    return `<pre class="api-detail-sql" style="color: #333; background: #f8f9fa; padding: 12px; border-radius: 6px; font-size: 12px; line-height: 1.6;">${escapeHtml(dynamicWhere)}</pre>`;
+  }
+}
+
+// 附加行点击事件
+function attachRowClickEvents() {
+  const clickableRows = document.querySelectorAll('.lineage-row-clickable');
+  clickableRows.forEach(row => {
+    row.addEventListener('click', function() {
+      const index = this.dataset.index;
+      const detailRow = document.querySelector(`.lineage-detail-row[data-index="${index}"]`);
+      const icon = this.querySelector('.lineage-expand-icon');
+      
+      if (detailRow.style.display === 'none') {
+        detailRow.style.display = 'table-row';
+        icon.textContent = '▲';
+        icon.style.color = '#667eea';
+      } else {
+        detailRow.style.display = 'none';
+        icon.textContent = '▼';
+        icon.style.color = '#999';
+      }
+    });
+  });
+}
+
+function copyLineageResults() {
+  const contentDiv = document.getElementById('lineageResultsContent');
+  const table = contentDiv.querySelector('table');
+  
+  if (!table) {
+    alert('没有可复制的内容');
+    return;
+  }
+  
+  // 提取表格数据为文本，排除明细行
+  let text = '';
+  const rows = table.querySelectorAll('tr');
+  rows.forEach(row => {
+    // 跳过明细行（lineage-detail-row）
+    if (row.classList.contains('lineage-detail-row')) {
+      return;
+    }
+    
+    const cells = row.querySelectorAll('th, td');
+    const rowData = Array.from(cells).map(cell => {
+      // 获取文本，但排除展开图标
+      const text = cell.innerText || cell.textContent;
+      // 移除展开图标（▼ ▲）
+      return text.replace(/[▼▲]/g, '').trim();
+    }).join('\t');
+    
+    if (rowData.trim()) {
+      text += rowData + '\n';
+    }
+  });
+  
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = document.getElementById('copyLineageResults');
+    const originalText = btn.textContent;
+    btn.textContent = '✅ 已复制';
+    btn.style.background = '#4caf50';
+    
+    setTimeout(() => {
+      btn.textContent = originalText;
+      btn.style.background = '';
+    }, 2000);
+  }).catch(err => {
+    console.error('复制失败:', err);
+    alert('复制失败，请手动复制');
+  });
+}
+
+function showLineageStatus(type, message) {
+  const statusDiv = document.getElementById('lineageStatus');
+  statusDiv.className = `lineage-status ${type}`;
+  
+  let icon = '';
+  if (type === 'loading') icon = '⏳';
+  else if (type === 'success') icon = '✅';
+  else if (type === 'error') icon = '❌';
+  
+  statusDiv.innerHTML = `${icon} ${escapeHtml(message)}`;
+}
+
+// ========================================
+// API血缘缓存预加载
+// ========================================
+async function preloadAPILineageCache() {
+  try {
+    console.log('🔄 [API缓存] 检查缓存状态...');
+    
+    // 检查缓存是否需要更新（每24小时更新一次）
+    const result = await chrome.storage.local.get(['apiLineageCache', 'apiLineageCacheTimestamp']);
+    const now = Date.now();
+    const cacheAge = now - (result.apiLineageCacheTimestamp || 0);
+    const CACHE_DURATION = 24 * 60 * 60 * 1000; // 24小时
+    
+    if (result.apiLineageCache && cacheAge < CACHE_DURATION) {
+      const cacheSize = Object.keys(result.apiLineageCache).length;
+      console.log(`✅ [API缓存] 缓存有效（${Math.round(cacheAge / 1000 / 60)}分钟前更新），共${cacheSize}个API，跳过预加载`);
+      return;
+    }
+    
+    console.log('🔄 [API缓存] 缓存过期或不存在，开始后台更新...');
+    
+    // 查询所有live环境的API血缘数据
+    const apiName = 'spx_mart.api_lineage_search';
+    const version = 'hg3ggpdp2lkgqlmc';
+    const personalToken = 'l7Vx4TGfwhmA1gtPn+JmUQ==';
+    const prestoQueueName = 'szsc-scheduled';
+    const endUser = 'tianyi.liang';
+    
+    // 提交查询（查询所有live环境的API）
+    const submitUrl = `https://open-api.datasuite.shopee.io/dataservice/${apiName}/${version}`;
+    
+    const submitBody = {
+      olapPayload: {
+        expressions: [
+          {
+            parameterName: 'api_id',
+            value: '%' // 查询所有API
+          }
+        ],
+        prestoQueueName: prestoQueueName
+      }
+    };
+    
+    const submitResponse = await fetch(submitUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': personalToken,
+        'X-End-User': endUser
+      },
+      body: JSON.stringify(submitBody)
+    });
+    
+    if (!submitResponse.ok) {
+      throw new Error(`提交失败: ${submitResponse.status}`);
+    }
+    
+    const submitResult = await submitResponse.json();
+    const jobId = submitResult.jobId;
+    
+    if (!jobId) {
+      throw new Error('未返回jobId');
+    }
+    
+    console.log('✅ [API缓存] 查询已提交, jobId:', jobId);
+    
+    // 轮询结果（后台静默）
+    const maxAttempts = 120;
+    let pollInterval = 2000; // 2秒间隔，避免频繁请求
+    
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, pollInterval));
+      
+      // 后期延长间隔
+      if (attempt > 60) pollInterval = 5000;
+      else if (attempt > 30) pollInterval = 3000;
+      
+      const metaUrl = `https://open-api.datasuite.shopee.io/dataservice/result/${jobId}`;
+      
+      const metaResponse = await fetch(metaUrl, {
+        headers: {
+          'Authorization': personalToken,
+          'X-End-User': endUser
+        }
+      });
+      
+      const metaResult = await metaResponse.json();
+      
+      // 每10次打印一次
+      if (attempt % 10 === 0) {
+        console.log(`🔄 [API缓存] 轮询 ${attempt}/${maxAttempts}, 状态: ${metaResult.status}`);
+      }
+      
+      if (metaResult.status === 'FINISH') {
+        console.log('✅ [API缓存] 查询完成，开始获取数据...');
+        
+        // 获取所有分片数据
+        const cache = {};
+        let shard = 0;
+        let totalRows = 0;
+        
+        while (true) {
+          const shardUrl = `https://open-api.datasuite.shopee.io/dataservice/result/${jobId}/${shard}`;
+          
+          const shardResponse = await fetch(shardUrl, {
+            headers: {
+              'Authorization': personalToken,
+              'X-End-User': endUser
+            }
+          });
+          
+          if (!shardResponse.ok) {
+            if (shard === 0) {
+              throw new Error(`获取结果失败: ${shardResponse.status}`);
+            }
+            break; // 没有更多分片
+          }
+          
+          const shardResult = await shardResponse.json();
+          
+          if (shardResult.contentType === 'ERROR_MESSAGE') {
+            throw new Error(shardResult.message || '查询出错');
+          }
+          
+          if (shardResult.contentType === 'QUERY_DATA' && shardResult.rows) {
+            // 处理这批数据，只保留live环境的
+            for (const row of shardResult.rows) {
+              const values = row.values;
+              if (values.publish_env === 'live') {
+                const apiId = values.api_id;
+                
+                // 提取表名
+                const bizSql = values.biz_sql || '';
+                const regex = /\{mgmt_db2\}\.([a-zA-Z0-9_\{\}\-]+)/g;
+                const tables = [];
+                let match;
+                while ((match = regex.exec(bizSql)) !== null) {
+                  if (!tables.includes(match[1])) {
+                    tables.push(match[1]);
+                  }
+                }
+                
+                // 存入缓存（以api_id为key）
+                cache[apiId] = {
+                  apiId: apiId,
+                  bizSql: bizSql,
+                  dsId: values.ds_id,
+                  tables: tables,
+                  publishEnv: 'live'
+                };
+                
+                totalRows++;
+              }
+            }
+          }
+          
+          shard++;
+        }
+        
+        // 保存缓存
+        await chrome.storage.local.set({
+          apiLineageCache: cache,
+          apiLineageCacheTimestamp: now
+        });
+        
+        const cacheSize = Object.keys(cache).length;
+        console.log(`✅ [API缓存] 预加载完成！处理${totalRows}行数据，缓存${cacheSize}个API的血缘信息`);
+        
+        return;
+      } else if (metaResult.status === 'FAILED') {
+        throw new Error(metaResult.message || '查询失败');
+      }
+    }
+    
+    throw new Error('预加载超时');
+    
+  } catch (error) {
+    console.error('❌ [API缓存] 预加载失败:', error);
+    // 失败不影响其他功能，用户仍可手动查询
+  }
+}

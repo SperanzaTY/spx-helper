@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SPX Helper - 文本选取功能测试页面</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      max-width: 800px;
+      margin: 50px auto;
+      padding: 20px;
+      line-height: 1.6;
+    }
+    .test-section {
+      background: #f8f9fa;
+      border-radius: 8px;
+      padding: 20px;
+      margin: 20px 0;
+    }
+    .test-section h3 {
+      margin-top: 0;
+      color: #667eea;
+    }
+    .number-demo {
+      font-size: 24px;
+      font-weight: bold;
+      margin: 10px 0;
+      padding: 10px;
+      background: white;
+      border-radius: 4px;
+      display: inline-block;
+    }
+    .instruction {
+      background: #fff3cd;
+      padding: 15px;
+      border-radius: 6px;
+      margin: 20px 0;
+      border-left: 4px solid #f59e0b;
+    }
+    .console-check {
+      background: #1e1e1e;
+      color: #d4d4d4;
+      padding: 15px;
+      border-radius: 6px;
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
+      margin: 20px 0;
+    }
+    .console-check code {
+      color: #4ec9b0;
+    }
+  </style>
+</head>
+<body>
+  <h1>🔍 SPX Helper - 文本选取功能测试</h1>
+  
+  <div class="instruction">
+    <strong>📋 测试步骤：</strong>
+    <ol>
+      <li>按 <code>F12</code> 打开开发者工具，切换到 Console 标签</li>
+      <li>刷新此页面（Cmd+R 或 F5）</li>
+      <li>查看 Console 是否有日志：<code>🚀 [SPX Helper] Content Script 开始加载...</code></li>
+      <li>拖动鼠标选择下面的数字</li>
+      <li>查看是否出现浮动按钮 "🔍 查找来源"</li>
+    </ol>
+  </div>
+
+  <div class="test-section">
+    <h3>测试用例 1：带千分位的数字</h3>
+    <div class="number-demo">1,234,567</div>
+    <p>👆 拖动鼠标选择这个数字</p>
+  </div>
+
+  <div class="test-section">
+    <h3>测试用例 2：带货币符号的金额</h3>
+    <div class="number-demo">$1,234.56</div>
+    <p>👆 拖动鼠标选择这个金额</p>
+  </div>
+
+  <div class="test-section">
+    <h3>测试用例 3：带百分号的数字</h3>
+    <div class="number-demo">98.5%</div>
+    <p>👆 拖动鼠标选择这个百分比</p>
+  </div>
+
+  <div class="test-section">
+    <h3>测试用例 4：欧洲格式</h3>
+    <div class="number-demo">€1.234,56</div>
+    <p>👆 拖动鼠标选择这个金额</p>
+  </div>
+
+  <div class="test-section">
+    <h3>测试用例 5：纯数字</h3>
+    <div class="number-demo">123456789</div>
+    <p>👆 拖动鼠标选择这个数字</p>
+  </div>
+
+  <div class="console-check">
+    <strong>🔍 Console 调试检查清单：</strong><br><br>
+    
+    <strong>1. 检查扩展是否加载</strong><br>
+    <code>console.log(typeof APIDataTracker);</code><br>
+    → 应该输出: <code>"function"</code><br><br>
+    
+    <strong>2. 检查初始化日志</strong><br>
+    应该看到以下日志：<br>
+    • 🚀 [SPX Helper] Content Script 开始加载...<br>
+    • 🔍 [SPX Helper] Content Script 已加载<br>
+    • ✅ [SPX Helper] 初始化文本选取监听器<br>
+    • ✅ [SPX Helper] Content Script 已就绪<br><br>
+    
+    <strong>3. 选择文本时的日志</strong><br>
+    拖动选择文本后，应该看到：<br>
+    • 🖱️ [SPX Helper] mouseup 事件触发<br>
+    • 📝 [SPX Helper] 选中的文本: 1234 长度: 4<br>
+    • ✅ [SPX Helper] 用户选取文本: 1234<br>
+    • ✅ [SPX Helper] 显示文本选取浮动按钮<br><br>
+    
+    <strong>4. 如果没有任何日志</strong><br>
+    执行: <code>location.reload();</code> 刷新页面再试<br>
+    或者: 打开 chrome://extensions/ 重新加载扩展
+  </div>
+
+  <div class="instruction">
+    <strong>⚠️ 如果仍然没有日志输出：</strong><br>
+    1. 检查扩展是否已启用（chrome://extensions/）<br>
+    2. 检查 manifest.json 中的 content_scripts.matches 是否包含此页面<br>
+    3. 查看 Console 是否有错误信息（红色文字）<br>
+    4. 尝试在其他网站（如 https://www.google.com）测试
+  </div>
+
+  <script>
+    // 模拟 API 数据（用于测试）
+    console.log('📄 测试页面已加载');
+    console.log('💡 提示: 如果看到这条日志，说明页面 JavaScript 正常运行');
+    console.log('🔍 现在请检查是否有 SPX Helper 的日志');
+  </script>
+</body>
+</html>
