@@ -499,14 +499,27 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
               return;
             }
             
-            // 只取live环境的第一条记录
-            let liveRecord = null;
-            for (const row of data.rows) {
-              if (row.values.publish_env === 'live') {
-                liveRecord = row.values;
-                break;
-              }
+            // 筛选live环境的记录，并按版本号排序取最新的
+            const liveRecords = data.rows
+              .filter(row => row.values.publish_env === 'live')
+              .map(row => row.values)
+              .sort((a, b) => {
+                // 按api_version降序排序（最新的在前）
+                const versionA = parseInt(a.api_version) || 0;
+                const versionB = parseInt(b.api_version) || 0;
+                return versionB - versionA;
+              });
+            
+            if (liveRecords.length === 0) {
+              sendResponse({
+                success: false,
+                error: '该API未发布到live环境'
+              });
+              return;
             }
+            
+            const liveRecord = liveRecords[0]; // 取最新版本
+            console.log(`📌 Background: 选择版本 ${liveRecord.api_version} (共${liveRecords.length}个live版本)`);
             
             if (!liveRecord) {
               sendResponse({

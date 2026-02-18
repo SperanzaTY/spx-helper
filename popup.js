@@ -10783,11 +10783,20 @@ async function preloadAPILineageCache() {
           }
           
           if (shardResult.contentType === 'QUERY_DATA' && shardResult.rows) {
-            // 处理这批数据，只保留live环境的
+            // 处理这批数据，只保留live环境的最新版本
             for (const row of shardResult.rows) {
               const values = row.values;
               if (values.publish_env === 'live') {
                 const apiId = values.api_id;
+                const apiVersion = parseInt(values.api_version) || 0;
+                
+                // 如果缓存中已有这个API，比较版本号
+                if (cache[apiId]) {
+                  const cachedVersion = parseInt(cache[apiId].apiVersion) || 0;
+                  if (apiVersion <= cachedVersion) {
+                    continue; // 跳过旧版本
+                  }
+                }
                 
                 // 提取表名
                 const bizSql = values.biz_sql || '';
@@ -10800,9 +10809,10 @@ async function preloadAPILineageCache() {
                   }
                 }
                 
-                // 存入缓存（以api_id为key）
+                // 存入缓存（以api_id为key，保留最新版本）
                 cache[apiId] = {
                   apiId: apiId,
+                  apiVersion: apiVersion,
                   bizSql: bizSql,
                   dsId: values.ds_id,
                   tables: tables,
