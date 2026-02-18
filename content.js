@@ -1707,9 +1707,11 @@ class APIDataTracker {
     // 构建业务SQL部分
     let bizSqlSection = '';
     let deploymentInfo = '';
+    let sqlPreview = ''; // 提前定义，供后面prompt使用
+    
     if (lineageInfo && lineageInfo.bizSql) {
       // 直接使用完整SQL，不截断
-      const sqlPreview = lineageInfo.bizSql;
+      sqlPreview = lineageInfo.bizSql;
       
       bizSqlSection = `
 
