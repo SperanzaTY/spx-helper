@@ -510,6 +510,16 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
                 return versionB - versionA;
               });
             
+            // 调试：打印所有live版本
+            console.log(`🔍 Background: 找到 ${liveRecords.length} 个live版本:`);
+            liveRecords.forEach((rec, idx) => {
+              console.log(`   ${idx + 1}. 版本 ${rec.api_version}, SQL长度: ${(rec.biz_sql || '').length}字符`);
+              if (idx === 0) {
+                console.log(`   📌 将使用此版本`);
+                console.log(`   SQL预览（前100字符）: ${(rec.biz_sql || '').substring(0, 100)}`);
+              }
+            });
+            
             if (liveRecords.length === 0) {
               sendResponse({
                 success: false,
@@ -519,7 +529,7 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
             }
             
             const liveRecord = liveRecords[0]; // 取最新版本
-            console.log(`📌 Background: 选择版本 ${liveRecord.api_version} (共${liveRecords.length}个live版本)`);
+            console.log(`✅ Background: 最终选择版本 ${liveRecord.api_version}`);
             
             if (!liveRecord) {
               sendResponse({
@@ -542,6 +552,7 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
             
             const resultInfo = {
               apiId: liveRecord.api_id,
+              apiVersion: liveRecord.api_version, // 添加版本号
               bizSql: bizSql,
               dsId: liveRecord.ds_id,
               tables: tables,

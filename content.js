@@ -1300,6 +1300,7 @@ class APIDataTracker {
       
       // 调试：输出prompt信息
       console.log('📝 [SPX Helper] 传给AI的prompt长度:', prompt.length);
+      console.log('📝 [SPX Helper] API版本:', lineageInfo?.apiVersion || '未知');
       console.log('📝 [SPX Helper] SQL长度:', lineageInfo?.bizSql?.length || 0);
       if (lineageInfo?.bizSql) {
         console.log('📝 [SPX Helper] SQL内容（前200字符）:', lineageInfo.bizSql.substring(0, 200));
@@ -1722,6 +1723,7 @@ ${sqlPreview}
 
       deploymentInfo = `
 - 发布环境: ${lineageInfo.publishEnv || '未知'}
+- API版本: ${lineageInfo.apiVersion || '未知'}
 - 数据源ID: DS_${lineageInfo.dsId || '?'}
 - ClickHouse集群: ${this.getDsClusterName(lineageInfo.dsId)}`;
     }
