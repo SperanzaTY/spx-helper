@@ -499,25 +499,27 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
               return;
             }
             
-            // 筛选live环境的记录，并按版本号排序取最新的
-            const liveRecords = data.rows
-              .filter(row => row.values.publish_env === 'live')
-              .map(row => row.values)
-              .sort((a, b) => {
-                // 按api_version降序排序（最新的在前）
-                const versionA = parseInt(a.api_version) || 0;
-                const versionB = parseInt(b.api_version) || 0;
-                return versionB - versionA;
-              });
-            
-            // 调试：打印所有live版本
-            console.log(`🔍 Background: 找到 ${liveRecords.length} 个live版本:`);
-            liveRecords.forEach((rec, idx) => {
-              console.log(`   ${idx + 1}. 版本 ${rec.api_version}, SQL长度: ${(rec.biz_sql || '').length}字符`);
-              if (idx === 0) {
-                console.log(`   📌 将使用此版本`);
-                console.log(`   SQL预览（前100字符）: ${(rec.biz_sql || '').substring(0, 100)}`);
+            // 筛选live环境的记录，按api_id分组，每组取最新版本
+            const liveRecordsMap = {};
+            data.rows.forEach(row => {
+              if (row.values.publish_env === 'live') {
+                const record = row.values;
+                const apiId = record.api_id;
+                const version = parseInt(record.api_version) || 0;
+                
+                // 如果该api_id还没有记录，或者当前版本更新，则更新
+                if (!liveRecordsMap[apiId] || version > (parseInt(liveRecordsMap[apiId].api_version) || 0)) {
+                  liveRecordsMap[apiId] = record;
+                }
               }
+            });
+            
+            const liveRecords = Object.values(liveRecordsMap);
+            
+            // 调试：打印所有API及其版本
+            console.log(`🔍 Background: 找到 ${liveRecords.length} 个不同的API (live环境):`);
+            liveRecords.forEach((rec, idx) => {
+              console.log(`   ${idx + 1}. API: ${rec.api_id}, 版本: ${rec.api_version}, SQL长度: ${(rec.biz_sql || '').length}字符`);
             });
             
             if (liveRecords.length === 0) {
@@ -528,8 +530,17 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
               return;
             }
             
-            const liveRecord = liveRecords[0]; // 取最新版本
-            console.log(`✅ Background: 最终选择版本 ${liveRecord.api_version}`);
+            // 精确匹配或模糊匹配apiId
+            let liveRecord = liveRecords.find(rec => rec.api_id === apiId);
+            if (!liveRecord && liveRecords.length === 1) {
+              // 如果只有一个结果，直接使用
+              liveRecord = liveRecords[0];
+            } else if (!liveRecord) {
+              // 多个结果，尝试模糊匹配
+              liveRecord = liveRecords.find(rec => rec.api_id.includes(apiId) || apiId.includes(rec.api_id));
+            }
+            
+            console.log(`✅ Background: 最终选择 API=${liveRecord?.api_id}, 版本=${liveRecord?.api_version}`);
             
             if (!liveRecord) {
               sendResponse({
