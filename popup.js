@@ -505,7 +505,7 @@ function renderLinkCategories(categories, allLinks) {
               <button class="btn-icon delete-category-btn" data-id="${cat.id}" title="删除分类">🗑️</button>
             </div>
           </div>
-          <div class="links-grid category-content" id="${cat.id}Links" style="display: ${isExpanded ? 'flex' : 'none'};">
+          <div class="links-grid category-content ${isExpanded ? 'active' : ''}" id="${cat.id}Links">
             ${linksHtml}
           </div>
         </div>
