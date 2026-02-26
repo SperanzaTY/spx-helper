@@ -11,6 +11,8 @@ console.log('🚀 [SPX Helper] Content Script 开始加载...');
 // ========================================
 // 扩展上下文检查（防止reload后报错）
 // ========================================
+let contextInvalidWarningShown = false;
+
 function isExtensionContextValid() {
   try {
     return !!(chrome && chrome.runtime && chrome.runtime.id);
@@ -21,11 +23,17 @@ function isExtensionContextValid() {
 
 function safeRuntimeCall(fn) {
   if (!isExtensionContextValid()) {
-    console.warn('⚠️ [SPX Helper] 扩展上下文已失效，跳过调用');
+    // 只在第一次检测到时输出友好提示
+    if (!contextInvalidWarningShown) {
+      console.log('%c💡 [SPX Helper] 扩展已更新', 'color: #667eea; font-weight: bold;');
+      console.log('%c   请刷新页面以使用最新版本', 'color: #999;');
+      contextInvalidWarningShown = true;
+    }
     return Promise.resolve(null);
   }
   return fn();
 }
+
 
 class APIDataTracker {
   constructor() {
