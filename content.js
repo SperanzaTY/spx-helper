@@ -1359,6 +1359,10 @@ class APIDataTracker {
   }
   
   async queryAPILineage(apiId) {
+    // 检查扩展上下文
+    if (!isExtensionContextValid()) {
+      throw new Error('Extension context invalidated');
+    }
     // 调用API血缘查询
     return new Promise((resolve, reject) => {
       chrome.runtime.sendMessage({
@@ -1382,6 +1386,10 @@ class APIDataTracker {
   
   async callAIAPI(prompt) {
     console.log('📤 [SPX Helper] 发送AI请求...');
+    // 检查扩展上下文
+    if (!isExtensionContextValid()) {
+      throw new Error('Extension context invalidated');
+    }
     
     // 通过background script代理请求（避免CORS问题）
     const response = await chrome.runtime.sendMessage({
