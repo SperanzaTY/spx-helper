@@ -391,16 +391,58 @@ function initLinks() {
   chrome.storage.local.get(['allLinks', 'linkCategories'], function(result) {
     let allLinks = result.allLinks;
     let linkCategories = result.linkCategories;
+    let needsUpdate = false;
     
-    // 首次使用，初始化默认数据
-    if (!allLinks || allLinks.length === 0) {
+    // 验证并修复链接数据
+    if (!Array.isArray(allLinks) || allLinks.length === 0) {
+      console.log('🔧 [SPX Helper] 初始化默认链接配置 (' + DEFAULT_LINKS.length + '个)');
       allLinks = DEFAULT_LINKS;
-      chrome.storage.local.set({ allLinks: allLinks });
+      needsUpdate = true;
+    } else {
+      // 验证数据完整性
+      const isValid = allLinks.every(link => 
+        link && 
+        typeof link.id !== 'undefined' && 
+        typeof link.name === 'string' && 
+        typeof link.url === 'string' &&
+        typeof link.category === 'string'
+      );
+      
+      if (!isValid) {
+        console.warn('⚠️ [SPX Helper] 检测到损坏的链接数据，重置为默认配置');
+        allLinks = DEFAULT_LINKS;
+        needsUpdate = true;
+      }
     }
     
-    if (!linkCategories || linkCategories.length === 0) {
+    // 验证并修复分类数据
+    if (!Array.isArray(linkCategories) || linkCategories.length === 0) {
+      console.log('🔧 [SPX Helper] 初始化默认分类配置');
       linkCategories = DEFAULT_LINK_CATEGORIES;
-      chrome.storage.local.set({ linkCategories: linkCategories });
+      needsUpdate = true;
+    } else {
+      // 验证分类完整性
+      const isValid = linkCategories.every(cat => 
+        cat && 
+        typeof cat.id === 'string' && 
+        typeof cat.name === 'string'
+      );
+      
+      if (!isValid) {
+        console.warn('⚠️ [SPX Helper] 检测到损坏的分类数据，重置为默认配置');
+        linkCategories = DEFAULT_LINK_CATEGORIES;
+        needsUpdate = true;
+      }
+    }
+    
+    // 如果数据被修复，保存到storage
+    if (needsUpdate) {
+      chrome.storage.local.set({ 
+        allLinks: allLinks,
+        linkCategories: linkCategories 
+      }, function() {
+        console.log('✅ [SPX Helper] 快速链接配置已恢复');
+      });
     }
     
     // 渲染所有分类
@@ -410,6 +452,7 @@ function initLinks() {
     updateCategorySelectors(linkCategories);
   });
 }
+
 
 function renderLinkCategories(categories, allLinks) {
   const container = document.getElementById('linksContainer');
