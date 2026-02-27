@@ -550,26 +550,46 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
               return;
             }
             
-            // 解析SQL提取表名
+            // 解析SQL提取表名（增强版：支持多种格式）
             const bizSql = liveRecord.biz_sql || '';
-            const regex = /\{mgmt_db2\}\.([a-zA-Z0-9_\{\}\-]+)/g;
-            const tables = [];
+            const tables = new Set();
+            
+            // 方式1: 提取 {mgmt_db2}.table 格式（变量）
+            const varTableRegex = /\{mgmt_db2\}\.([a-zA-Z0-9_\{\}\-]+)/g;
             let match;
-            while ((match = regex.exec(bizSql)) !== null) {
-              if (!tables.includes(match[1])) {
-                tables.push(match[1]);
+            while ((match = varTableRegex.exec(bizSql)) !== null) {
+              tables.add(match[1]);
+            }
+            
+            // 方式2: 提取 FROM/JOIN database.table 格式（硬编码）
+            const hardcodedTableRegex = /\b(?:from|join)\s+(?:[a-zA-Z0-9_]+\.)?([a-zA-Z0-9_]+)/gi;
+            while ((match = hardcodedTableRegex.exec(bizSql)) !== null) {
+              const tableName = match[1];
+              // 过滤掉常见的SQL关键字
+              if (tableName && !['select', 'where', 'and', 'or', 'as', 'on', 'final', 'all'].includes(tableName.toLowerCase())) {
+                tables.add(tableName);
               }
+            }
+            
+            // 方式3: 提取完整的 database.table 格式
+            const fullTableRegex = /\b(?:from|join)\s+([a-zA-Z0-9_]+)\.([a-zA-Z0-9_]+)/gi;
+            while ((match = fullTableRegex.exec(bizSql)) !== null) {
+              const dbName = match[1];
+              const tableName = match[2];
+              tables.add(tableName); // 添加表名
+              tables.add(`${dbName}.${tableName}`); // 添加完整引用
             }
             
             const resultInfo = {
               apiId: liveRecord.api_id,
-              apiVersion: liveRecord.api_version, // 添加版本号
+              apiVersion: liveRecord.api_version,
               bizSql: bizSql,
               dsId: liveRecord.ds_id,
-              tables: tables,
+              tables: Array.from(tables), // 转为数组，去重
               publishEnv: liveRecord.publish_env,
               fromCache: false
             };
+
             
             // 更新缓存（下次查询更快）
             chrome.storage.local.get(['apiLineageCache'], function(cacheResult) {
