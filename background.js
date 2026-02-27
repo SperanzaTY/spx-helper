@@ -550,34 +550,24 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
               return;
             }
             
-            // 解析SQL提取表名（增强版：支持多种格式）
+            // 精确的表名提取（只提取带点号的引用）
             const bizSql = liveRecord.biz_sql || '';
             const tables = new Set();
+            let match;
             
             // 方式1: 提取 {mgmt_db2}.table 格式（变量）
             const varTableRegex = /\{mgmt_db2\}\.([a-zA-Z0-9_\{\}\-]+)/g;
-            let match;
             while ((match = varTableRegex.exec(bizSql)) !== null) {
               tables.add(match[1]);
             }
             
-            // 方式2: 提取 FROM/JOIN database.table 格式（硬编码）
-            const hardcodedTableRegex = /\b(?:from|join)\s+(?:[a-zA-Z0-9_]+\.)?([a-zA-Z0-9_]+)/gi;
-            while ((match = hardcodedTableRegex.exec(bizSql)) !== null) {
-              const tableName = match[1];
-              // 过滤掉常见的SQL关键字
-              if (tableName && !['select', 'where', 'and', 'or', 'as', 'on', 'final', 'all'].includes(tableName.toLowerCase())) {
-                tables.add(tableName);
-              }
-            }
-            
-            // 方式3: 提取完整的 database.table 格式
-            const fullTableRegex = /\b(?:from|join)\s+([a-zA-Z0-9_]+)\.([a-zA-Z0-9_]+)/gi;
-            while ((match = fullTableRegex.exec(bizSql)) !== null) {
+            // 方式2: 提取 database.table 格式（FROM/JOIN后，有点号）
+            const dbTableRegex = /\b(?:from|join)\s+([a-zA-Z0-9_]+)\.([a-zA-Z0-9_]+)(?:\s+(?:as\s+)?[a-zA-Z0-9_]+)?/gi;
+            while ((match = dbTableRegex.exec(bizSql)) !== null) {
               const dbName = match[1];
               const tableName = match[2];
-              tables.add(tableName); // 添加表名
-              tables.add(`${dbName}.${tableName}`); // 添加完整引用
+              tables.add(tableName);
+              tables.add(`${dbName}.${tableName}`);
             }
             
             const resultInfo = {
@@ -585,9 +575,11 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
               apiVersion: liveRecord.api_version,
               bizSql: bizSql,
               dsId: liveRecord.ds_id,
-              tables: Array.from(tables), // 转为数组，去重
+              tables: Array.from(tables),
               publishEnv: liveRecord.publish_env,
               fromCache: false
+            };
+
             };
 
             

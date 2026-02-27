@@ -10111,7 +10111,7 @@ function processApiToTableData(results, searchApiId, selectedEnvs) {
     const bizSql = latestVersion.biz_sql || '';
     const dsId = latestVersion.ds_id;
     
-    // 增强的表名提取（支持多种格式）
+    // 精确的表名提取（只提取带点号的引用）
     const tableNames = new Set();
     let match;
     
@@ -10121,19 +10121,9 @@ function processApiToTableData(results, searchApiId, selectedEnvs) {
       tableNames.add(match[1]);
     }
     
-    // 方式2: 提取 FROM/JOIN database.table 格式（硬编码）
-    const hardcodedTableRegex = /\b(?:from|join)\s+(?:[a-zA-Z0-9_]+\.)?([a-zA-Z0-9_]+)/gi;
-    while ((match = hardcodedTableRegex.exec(bizSql)) !== null) {
-      const tableName = match[1];
-      // 过滤SQL关键字
-      if (tableName && !['select', 'where', 'and', 'or', 'as', 'on', 'final', 'all'].includes(tableName.toLowerCase())) {
-        tableNames.add(tableName);
-      }
-    }
-    
-    // 方式3: 提取完整的 database.table 格式
-    const fullTableRegex = /\b(?:from|join)\s+([a-zA-Z0-9_]+)\.([a-zA-Z0-9_]+)/gi;
-    while ((match = fullTableRegex.exec(bizSql)) !== null) {
+    // 方式2: 提取 database.table 格式（FROM/JOIN后，有点号）
+    const dbTableRegex = /\b(?:from|join)\s+([a-zA-Z0-9_]+)\.([a-zA-Z0-9_]+)(?:\s+(?:as\s+)?[a-zA-Z0-9_]+)?/gi;
+    while ((match = dbTableRegex.exec(bizSql)) !== null) {
       const dbName = match[1];
       const tableName = match[2];
       tableNames.add(tableName);
@@ -10142,9 +10132,7 @@ function processApiToTableData(results, searchApiId, selectedEnvs) {
     
     // 转换为数组
     const tableNamesArray = Array.from(tableNames);
-    
-    // 表名已去重
-    const uniqueTableNames = tableNamesArray;
+
     const tableNameStr = uniqueTableNames.join(' , ');
     
     processedRows.push({
