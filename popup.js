@@ -10111,21 +10111,40 @@ function processApiToTableData(results, searchApiId, selectedEnvs) {
     const bizSql = latestVersion.biz_sql || '';
     const dsId = latestVersion.ds_id;
     
-    // 检查是否包含 mgmt_db2
-    if (!bizSql.includes('mgmt_db2')) {
-      return;
-    }
-    
-    // 用正则提取表名: {mgmt_db2}.表名
-    const regex = /\{mgmt_db2\}\.([a-zA-Z0-9_\{\}\-]+)/g;
-    const tableNames = [];
+    // 增强的表名提取（支持多种格式）
+    const tableNames = new Set();
     let match;
-    while ((match = regex.exec(bizSql)) !== null) {
-      tableNames.push(match[1]);
+    
+    // 方式1: 提取 {mgmt_db2}.table 格式（变量）
+    const varTableRegex = /\{mgmt_db2\}\.([a-zA-Z0-9_\{\}\-]+)/g;
+    while ((match = varTableRegex.exec(bizSql)) !== null) {
+      tableNames.add(match[1]);
     }
     
-    // 去重
-    const uniqueTableNames = [...new Set(tableNames)];
+    // 方式2: 提取 FROM/JOIN database.table 格式（硬编码）
+    const hardcodedTableRegex = /\b(?:from|join)\s+(?:[a-zA-Z0-9_]+\.)?([a-zA-Z0-9_]+)/gi;
+    while ((match = hardcodedTableRegex.exec(bizSql)) !== null) {
+      const tableName = match[1];
+      // 过滤SQL关键字
+      if (tableName && !['select', 'where', 'and', 'or', 'as', 'on', 'final', 'all'].includes(tableName.toLowerCase())) {
+        tableNames.add(tableName);
+      }
+    }
+    
+    // 方式3: 提取完整的 database.table 格式
+    const fullTableRegex = /\b(?:from|join)\s+([a-zA-Z0-9_]+)\.([a-zA-Z0-9_]+)/gi;
+    while ((match = fullTableRegex.exec(bizSql)) !== null) {
+      const dbName = match[1];
+      const tableName = match[2];
+      tableNames.add(tableName);
+      tableNames.add(`${dbName}.${tableName}`);
+    }
+    
+    // 转换为数组
+    const tableNamesArray = Array.from(tableNames);
+    
+    // 表名已去重
+    const uniqueTableNames = tableNamesArray;
     const tableNameStr = uniqueTableNames.join(' , ');
     
     processedRows.push({
