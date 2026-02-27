@@ -10133,7 +10133,7 @@ function processApiToTableData(results, searchApiId, selectedEnvs) {
     // 转换为数组
     const tableNamesArray = Array.from(tableNames);
 
-    const tableNameStr = uniqueTableNames.join(' , ');
+    const tableNameStr = tableNamesArray.join(' , ');
     
     processedRows.push({
       values: {
