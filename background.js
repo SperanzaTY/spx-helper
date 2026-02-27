@@ -550,24 +550,23 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
               return;
             }
             
-            // 精确的表名提取（只提取带点号的引用）
+            // 精确的表名提取（支持占位符，只显示表名）
             const bizSql = liveRecord.biz_sql || '';
             const tables = new Set();
             let match;
             
-            // 方式1: 提取 {mgmt_db2}.table 格式（变量）
+            // 方式1: 提取 {mgmt_db2}.table 格式（变量，支持占位符）
             const varTableRegex = /\{mgmt_db2\}\.([a-zA-Z0-9_\{\}\-]+)/g;
             while ((match = varTableRegex.exec(bizSql)) !== null) {
               tables.add(match[1]);
             }
             
-            // 方式2: 提取 database.table 格式（FROM/JOIN后，有点号）
-            const dbTableRegex = /\b(?:from|join)\s+([a-zA-Z0-9_]+)\.([a-zA-Z0-9_]+)(?:\s+(?:as\s+)?[a-zA-Z0-9_]+)?/gi;
+            // 方式2: 提取 database.table 格式（FROM/JOIN后，支持占位符）
+            const dbTableRegex = /\b(?:from|join)\s+[a-zA-Z0-9_]+\.([a-zA-Z0-9_\{\}\-]+)(?:\s+(?:as\s+)?[a-zA-Z0-9_]+)?/gi;
             while ((match = dbTableRegex.exec(bizSql)) !== null) {
-              const dbName = match[1];
-              const tableName = match[2];
+              const tableName = match[1];
+              // 只添加表名，不添加 database.table 完整引用
               tables.add(tableName);
-              tables.add(`${dbName}.${tableName}`);
             }
             
             const resultInfo = {
@@ -579,6 +578,7 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
               publishEnv: liveRecord.publish_env,
               fromCache: false
             };
+
 
             };
 
