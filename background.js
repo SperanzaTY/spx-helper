@@ -580,7 +580,6 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
             };
 
 
-            };
 
             
             // 更新缓存（下次查询更快）
