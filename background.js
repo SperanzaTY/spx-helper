@@ -777,7 +777,16 @@ chrome.notifications.onClicked.addListener(function(notificationId) {
 
 
 // === Presto REST API实现 ===
-// 这段代码替换 background.js 中的 queryPrestoSQL 函数
+// 使用Personal SQL API查询Presto
+// 
+// 参数说明:
+//   - username: 用户名（会自动转为邮箱格式）
+//   - password: 密码（已废弃，不再使用）
+//   - sql: SQL查询语句
+//   - queue: Presto队列名称，如 'szsc-adhoc' 或 'szsc-scheduled'
+//   - region: IDC集群，可选值: 'sg' (新加坡) 或 'us' (美国)
+//   - catalog: Catalog名称，默认 'hive'
+//   - schema: Schema名称，默认 'shopee'
 
 async function queryPrestoSQL(username, password, sql, queue, region, catalog = 'hive', schema = 'shopee') {
   // 使用 Personal SQL API（不再直接连接Presto）
