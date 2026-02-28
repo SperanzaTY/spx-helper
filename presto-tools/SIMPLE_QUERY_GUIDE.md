@@ -250,7 +250,7 @@ id,name,value
 
 ### Q: 如何获取Personal Token?
 
-A: 登录DataSuite → 右上角头像 → Personal Token
+A: 登录DataSuite → 左上角三个横线菜单（☰）→ 获取Personal Token
 
 ### Q: 查询超时怎么办?
 

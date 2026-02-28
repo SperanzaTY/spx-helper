@@ -129,8 +129,8 @@ pip3 install mcp
 ### 获取Personal Token
 
 1. 访问 https://datasuite.shopee.io/dataservice/ds_api_management
-2. 点击右上角头像
-3. 选择 **Personal Token**
+2. 点击页面左上角的三个横线菜单（☰）
+3. 在展开的菜单中选择"获取Personal Token"
 4. 复制token
 
 ## 📖 详细文档

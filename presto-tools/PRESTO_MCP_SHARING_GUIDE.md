@@ -118,7 +118,7 @@ cd SPX_Helper/sri
 **第2步: 获取你的Personal Token**
 
 1. 访问 https://datasuite.shopee.io/dataservice/ds_api_management
-2. 点击右上角头像 → Personal Token
+2. 点击页面左上角的三个横线菜单（☰） → Personal Token
 3. 复制token
 
 **第3步: 配置Cursor**
@@ -148,7 +148,7 @@ cd SPX_Helper/sri
 
 ### Q: Token从哪里获取？
 
-A: DataSuite → 右上角头像 → Personal Token
+A: DataSuite → 左上角三个横线菜单（☰）→ 获取Personal Token
 
 ### Q: Token会过期吗？
 
