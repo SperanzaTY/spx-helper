@@ -391,16 +391,58 @@ function initLinks() {
   chrome.storage.local.get(['allLinks', 'linkCategories'], function(result) {
     let allLinks = result.allLinks;
     let linkCategories = result.linkCategories;
+    let needsUpdate = false;
     
-    // 首次使用，初始化默认数据
-    if (!allLinks || allLinks.length === 0) {
+    // 验证并修复链接数据
+    if (!Array.isArray(allLinks) || allLinks.length === 0) {
+      console.log('🔧 [SPX Helper] 初始化默认链接配置 (' + DEFAULT_LINKS.length + '个)');
       allLinks = DEFAULT_LINKS;
-      chrome.storage.local.set({ allLinks: allLinks });
+      needsUpdate = true;
+    } else {
+      // 验证数据完整性
+      const isValid = allLinks.every(link => 
+        link && 
+        typeof link.id !== 'undefined' && 
+        typeof link.name === 'string' && 
+        typeof link.url === 'string' &&
+        typeof link.category === 'string'
+      );
+      
+      if (!isValid) {
+        console.warn('⚠️ [SPX Helper] 检测到损坏的链接数据，重置为默认配置');
+        allLinks = DEFAULT_LINKS;
+        needsUpdate = true;
+      }
     }
     
-    if (!linkCategories || linkCategories.length === 0) {
+    // 验证并修复分类数据
+    if (!Array.isArray(linkCategories) || linkCategories.length === 0) {
+      console.log('🔧 [SPX Helper] 初始化默认分类配置');
       linkCategories = DEFAULT_LINK_CATEGORIES;
-      chrome.storage.local.set({ linkCategories: linkCategories });
+      needsUpdate = true;
+    } else {
+      // 验证分类完整性
+      const isValid = linkCategories.every(cat => 
+        cat && 
+        typeof cat.id === 'string' && 
+        typeof cat.name === 'string'
+      );
+      
+      if (!isValid) {
+        console.warn('⚠️ [SPX Helper] 检测到损坏的分类数据，重置为默认配置');
+        linkCategories = DEFAULT_LINK_CATEGORIES;
+        needsUpdate = true;
+      }
+    }
+    
+    // 如果数据被修复，保存到storage
+    if (needsUpdate) {
+      chrome.storage.local.set({ 
+        allLinks: allLinks,
+        linkCategories: linkCategories 
+      }, function() {
+        console.log('✅ [SPX Helper] 快速链接配置已恢复');
+      });
     }
     
     // 渲染所有分类
@@ -410,6 +452,7 @@ function initLinks() {
     updateCategorySelectors(linkCategories);
   });
 }
+
 
 function renderLinkCategories(categories, allLinks) {
   const container = document.getElementById('linksContainer');
@@ -462,7 +505,7 @@ function renderLinkCategories(categories, allLinks) {
               <button class="btn-icon delete-category-btn" data-id="${cat.id}" title="删除分类">🗑️</button>
             </div>
           </div>
-          <div class="links-grid category-content" id="${cat.id}Links" style="display: ${isExpanded ? 'flex' : 'none'};">
+          <div class="links-grid category-content ${isExpanded ? 'active' : ''}" id="${cat.id}Links">
             ${linksHtml}
           </div>
         </div>
@@ -10068,22 +10111,28 @@ function processApiToTableData(results, searchApiId, selectedEnvs) {
     const bizSql = latestVersion.biz_sql || '';
     const dsId = latestVersion.ds_id;
     
-    // 检查是否包含 mgmt_db2
-    if (!bizSql.includes('mgmt_db2')) {
-      return;
-    }
-    
-    // 用正则提取表名: {mgmt_db2}.表名
-    const regex = /\{mgmt_db2\}\.([a-zA-Z0-9_\{\}\-]+)/g;
-    const tableNames = [];
+    // 精确的表名提取（支持占位符，只显示表名）
+    const tableNames = new Set();
     let match;
-    while ((match = regex.exec(bizSql)) !== null) {
-      tableNames.push(match[1]);
+    
+    // 方式1: 提取 {mgmt_db2}.table 格式（变量，支持占位符）
+    const varTableRegex = /\{mgmt_db2\}\.([a-zA-Z0-9_\{\}\-]+)/g;
+    while ((match = varTableRegex.exec(bizSql)) !== null) {
+      tableNames.add(match[1]);
     }
     
-    // 去重
-    const uniqueTableNames = [...new Set(tableNames)];
-    const tableNameStr = uniqueTableNames.join(' , ');
+    // 方式2: 提取 database.table 格式（FROM/JOIN后，支持占位符）
+    const dbTableRegex = /\b(?:from|join)\s+[a-zA-Z0-9_]+\.([a-zA-Z0-9_\{\}\-]+)(?:\s+(?:as\s+)?[a-zA-Z0-9_]+)?/gi;
+    while ((match = dbTableRegex.exec(bizSql)) !== null) {
+      const tableName = match[1];
+      // 只添加表名，不添加 database.table 完整引用
+      tableNames.add(tableName);
+    }
+    
+    // 转换为数组
+    const tableNamesArray = Array.from(tableNames);
+
+    const tableNameStr = tableNamesArray.join(' , ');
     
     processedRows.push({
       values: {
@@ -10783,11 +10832,20 @@ async function preloadAPILineageCache() {
           }
           
           if (shardResult.contentType === 'QUERY_DATA' && shardResult.rows) {
-            // 处理这批数据，只保留live环境的
+            // 处理这批数据，只保留live环境的最新版本
             for (const row of shardResult.rows) {
               const values = row.values;
               if (values.publish_env === 'live') {
                 const apiId = values.api_id;
+                const apiVersion = parseInt(values.api_version) || 0;
+                
+                // 如果缓存中已有这个API，比较版本号
+                if (cache[apiId]) {
+                  const cachedVersion = parseInt(cache[apiId].apiVersion) || 0;
+                  if (apiVersion <= cachedVersion) {
+                    continue; // 跳过旧版本
+                  }
+                }
                 
                 // 提取表名
                 const bizSql = values.biz_sql || '';
@@ -10800,9 +10858,10 @@ async function preloadAPILineageCache() {
                   }
                 }
                 
-                // 存入缓存（以api_id为key）
+                // 存入缓存（以api_id为key，保留最新版本）
                 cache[apiId] = {
                   apiId: apiId,
+                  apiVersion: apiVersion,
                   bizSql: bizSql,
                   dsId: values.ds_id,
                   tables: tables,

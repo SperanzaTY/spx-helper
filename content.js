@@ -11,6 +11,8 @@ console.log('🚀 [SPX Helper] Content Script 开始加载...');
 // ========================================
 // 扩展上下文检查（防止reload后报错）
 // ========================================
+let contextInvalidWarningShown = false;
+
 function isExtensionContextValid() {
   try {
     return !!(chrome && chrome.runtime && chrome.runtime.id);
@@ -21,11 +23,17 @@ function isExtensionContextValid() {
 
 function safeRuntimeCall(fn) {
   if (!isExtensionContextValid()) {
-    console.warn('⚠️ [SPX Helper] 扩展上下文已失效，跳过调用');
+    // 只在第一次检测到时输出友好提示
+    if (!contextInvalidWarningShown) {
+      console.log('%c💡 [SPX Helper] 扩展已更新', 'color: #667eea; font-weight: bold;');
+      console.log('%c   请刷新页面以使用最新版本', 'color: #999;');
+      contextInvalidWarningShown = true;
+    }
     return Promise.resolve(null);
   }
   return fn();
 }
+
 
 class APIDataTracker {
   constructor() {
@@ -1300,6 +1308,7 @@ class APIDataTracker {
       
       // 调试：输出prompt信息
       console.log('📝 [SPX Helper] 传给AI的prompt长度:', prompt.length);
+      console.log('📝 [SPX Helper] API版本:', lineageInfo?.apiVersion || '未知');
       console.log('📝 [SPX Helper] SQL长度:', lineageInfo?.bizSql?.length || 0);
       if (lineageInfo?.bizSql) {
         console.log('📝 [SPX Helper] SQL内容（前200字符）:', lineageInfo.bizSql.substring(0, 200));
@@ -1358,6 +1367,10 @@ class APIDataTracker {
   }
   
   async queryAPILineage(apiId) {
+    // 检查扩展上下文
+    if (!isExtensionContextValid()) {
+      throw new Error('Extension context invalidated');
+    }
     // 调用API血缘查询
     return new Promise((resolve, reject) => {
       chrome.runtime.sendMessage({
@@ -1381,6 +1394,10 @@ class APIDataTracker {
   
   async callAIAPI(prompt) {
     console.log('📤 [SPX Helper] 发送AI请求...');
+    // 检查扩展上下文
+    if (!isExtensionContextValid()) {
+      throw new Error('Extension context invalidated');
+    }
     
     // 通过background script代理请求（避免CORS问题）
     const response = await chrome.runtime.sendMessage({
@@ -1707,9 +1724,11 @@ class APIDataTracker {
     // 构建业务SQL部分
     let bizSqlSection = '';
     let deploymentInfo = '';
+    let sqlPreview = ''; // 提前定义，供后面prompt使用
+    
     if (lineageInfo && lineageInfo.bizSql) {
       // 直接使用完整SQL，不截断
-      const sqlPreview = lineageInfo.bizSql;
+      sqlPreview = lineageInfo.bizSql;
       
       bizSqlSection = `
 
@@ -1720,6 +1739,7 @@ ${sqlPreview}
 
       deploymentInfo = `
 - 发布环境: ${lineageInfo.publishEnv || '未知'}
+- API版本: ${lineageInfo.apiVersion || '未知'}
 - 数据源ID: DS_${lineageInfo.dsId || '?'}
 - ClickHouse集群: ${this.getDsClusterName(lineageInfo.dsId)}`;
     }
@@ -1737,21 +1757,34 @@ ${selectedFieldsInfo}
 
 ---
 
-请简洁分析（每个问题2-3句话）：
+请按以下格式分析：
 
 ## 🎯 这个页面/接口的功能是什么？
 
 用1-2句话说明这个接口对应的页面整体功能和业务场景。
 
-## 📊 页面上的指标都是什么？
+${lineageInfo ? `
+## 📝 完整SQL逻辑
 
-${lineageInfo ? '从SQL中列出主要的业务指标（SELECT的字段），每个指标的含义和作用。' : '从响应数据中说明主要返回了哪些业务指标。'}
+\`\`\`sql
+${sqlPreview}
+\`\`\`
+
+**SQL逻辑分析**：
+- **主要指标**: 列出SELECT中的关键业务字段（5-8个主要指标即可）
+- **数据源**: FROM哪个表，JOIN了什么表（如果有）
+- **过滤条件**: WHERE的主要条件和业务含义
+- **计算逻辑**: 关键的聚合函数（SUM/COUNT/IF等）和计算方式
+
+` : `## 📊 页面上的指标都是什么？
+
+从响应数据中说明主要返回了哪些业务指标。`}
 
 ## 🔍 用户选中的这个指标：${selectedFieldsInfo}
 
-${lineageInfo ? '从SQL分析：' : '从响应数据分析：'}
+${lineageInfo ? '从上面的SQL找到这个字段：' : '从响应数据分析：'}
 - **业务含义**: 这个指标代表什么业务含义
-- **计算逻辑**: 数据来源（哪个表/字段）和计算方式（聚合、条件、函数等）
+- **计算逻辑**: 具体的计算公式和数据来源
 - **数值含义**: 这个数值的单位和业务解释
 
 ## 🛠️ 如果这个指标有问题，怎么排查？

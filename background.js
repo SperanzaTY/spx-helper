@@ -406,7 +406,7 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
         const version = 'hg3ggpdp2lkgqlmc';
         const personalToken = 'l7Vx4TGfwhmA1gtPn+JmUQ==';
         const prestoQueueName = 'szsc-scheduled';
-        const endUser = 'tianyi.liang';
+        const endUser = 'tianyi.liang@shopee.com';
         
         const submitUrl = `https://open-api.datasuite.shopee.io/dataservice/${apiName}/${version}`;
         
@@ -499,14 +499,48 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
               return;
             }
             
-            // 只取live环境的第一条记录
-            let liveRecord = null;
-            for (const row of data.rows) {
+            // 筛选live环境的记录，按api_id分组，每组取最新版本
+            const liveRecordsMap = {};
+            data.rows.forEach(row => {
               if (row.values.publish_env === 'live') {
-                liveRecord = row.values;
-                break;
+                const record = row.values;
+                const apiId = record.api_id;
+                const version = parseInt(record.api_version) || 0;
+                
+                // 如果该api_id还没有记录，或者当前版本更新，则更新
+                if (!liveRecordsMap[apiId] || version > (parseInt(liveRecordsMap[apiId].api_version) || 0)) {
+                  liveRecordsMap[apiId] = record;
+                }
               }
+            });
+            
+            const liveRecords = Object.values(liveRecordsMap);
+            
+            // 调试：打印所有API及其版本
+            console.log(`🔍 Background: 找到 ${liveRecords.length} 个不同的API (live环境):`);
+            liveRecords.forEach((rec, idx) => {
+              console.log(`   ${idx + 1}. API: ${rec.api_id}, 版本: ${rec.api_version}, SQL长度: ${(rec.biz_sql || '').length}字符`);
+            });
+            
+            if (liveRecords.length === 0) {
+              sendResponse({
+                success: false,
+                error: '该API未发布到live环境'
+              });
+              return;
             }
+            
+            // 精确匹配或模糊匹配apiId
+            let liveRecord = liveRecords.find(rec => rec.api_id === apiId);
+            if (!liveRecord && liveRecords.length === 1) {
+              // 如果只有一个结果，直接使用
+              liveRecord = liveRecords[0];
+            } else if (!liveRecord) {
+              // 多个结果，尝试模糊匹配
+              liveRecord = liveRecords.find(rec => rec.api_id.includes(apiId) || apiId.includes(rec.api_id));
+            }
+            
+            console.log(`✅ Background: 最终选择 API=${liveRecord?.api_id}, 版本=${liveRecord?.api_version}`);
             
             if (!liveRecord) {
               sendResponse({
@@ -516,25 +550,37 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
               return;
             }
             
-            // 解析SQL提取表名
+            // 精确的表名提取（支持占位符，只显示表名）
             const bizSql = liveRecord.biz_sql || '';
-            const regex = /\{mgmt_db2\}\.([a-zA-Z0-9_\{\}\-]+)/g;
-            const tables = [];
+            const tables = new Set();
             let match;
-            while ((match = regex.exec(bizSql)) !== null) {
-              if (!tables.includes(match[1])) {
-                tables.push(match[1]);
-              }
+            
+            // 方式1: 提取 {mgmt_db2}.table 格式（变量，支持占位符）
+            const varTableRegex = /\{mgmt_db2\}\.([a-zA-Z0-9_\{\}\-]+)/g;
+            while ((match = varTableRegex.exec(bizSql)) !== null) {
+              tables.add(match[1]);
+            }
+            
+            // 方式2: 提取 database.table 格式（FROM/JOIN后，支持占位符）
+            const dbTableRegex = /\b(?:from|join)\s+[a-zA-Z0-9_]+\.([a-zA-Z0-9_\{\}\-]+)(?:\s+(?:as\s+)?[a-zA-Z0-9_]+)?/gi;
+            while ((match = dbTableRegex.exec(bizSql)) !== null) {
+              const tableName = match[1];
+              // 只添加表名，不添加 database.table 完整引用
+              tables.add(tableName);
             }
             
             const resultInfo = {
               apiId: liveRecord.api_id,
+              apiVersion: liveRecord.api_version,
               bizSql: bizSql,
               dsId: liveRecord.ds_id,
-              tables: tables,
+              tables: Array.from(tables),
               publishEnv: liveRecord.publish_env,
               fromCache: false
             };
+
+
+
             
             // 更新缓存（下次查询更快）
             chrome.storage.local.get(['apiLineageCache'], function(cacheResult) {
@@ -694,6 +740,33 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
     return true;
   }
   
+
+  // === Presto查询处理 ===
+  if (request.action === 'QUERY_PRESTO') {
+    console.log('📊 Background: 收到Presto查询请求');
+    
+    const { username, password, sql, queue, region, catalog, schema } = request;
+    
+    // 提交查询到Presto
+    queryPrestoSQL(username, password, sql, queue, region, catalog, schema)
+      .then(result => {
+        console.log('✅ Background: Presto查询成功');
+        sendResponse({
+          success: true,
+          data: result
+        });
+      })
+      .catch(error => {
+        console.error('❌ Background: Presto查询失败:', error);
+        sendResponse({
+          success: false,
+          error: error.message || 'Presto查询失败'
+        });
+      });
+    
+    return true;
+  }
+  
   return true;
 });
 
@@ -702,4 +775,123 @@ chrome.notifications.onClicked.addListener(function(notificationId) {
   console.log('通知被点击:', notificationId);
 });
 
+
+// === Presto REST API实现 ===
+// 使用Personal SQL API查询Presto
+// 
+// 参数说明:
+//   - username: 用户名（会自动转为邮箱格式）
+//   - password: 密码（已废弃，不再使用）
+//   - sql: SQL查询语句
+//   - queue: Presto队列名称，如 'szsc-adhoc' 或 'szsc-scheduled'
+//   - region: IDC集群，可选值: 'SG' (新加坡) 或 'US' (美国)
+//   - catalog: Catalog名称，默认 'hive'
+//   - schema: Schema名称，默认 'shopee'
+
+async function queryPrestoSQL(username, password, sql, queue, region, catalog = 'hive', schema = 'shopee') {
+  // 使用 Personal SQL API（不再直接连接Presto）
+  const personalToken = 'l7Vx4TGfwhmA1gtPn+JmUQ==';  // 你的Personal Token
+  const endUser = username.includes('@') ? username : username + '@shopee.com';
+  
+  console.log('📤 [Personal SQL API] 提交查询...');
+  console.log('   Queue:', queue);
+  console.log('   Region:', region);
+  console.log('   SQL:', sql.substring(0, 100) + (sql.length > 100 ? '...' : ''));
+  
+  // Step 1: 提交查询
+  const submitUrl = 'https://open-api.datasuite.shopee.io/dataservice/personal/query/presto';
+  
+  const submitBody = {
+    sql: sql,
+    prestoQueue: queue,
+    idcRegion: region,
+    priority: '3'
+  };
+  
+  const submitResponse = await fetch(submitUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': personalToken,
+      'X-End-User': endUser
+    },
+    body: JSON.stringify(submitBody)
+  });
+  
+  if (!submitResponse.ok) {
+    throw new Error(`提交查询失败: ${submitResponse.status}`);
+  }
+  
+  const submitResult = await submitResponse.json();
+  const jobId = submitResult.jobId;
+  
+  console.log('✅ [Personal SQL API] 查询已提交, jobId:', jobId);
+  
+  // Step 2: 轮询查询状态
+  const maxAttempts = 60;
+  let pollInterval = 500;
+  
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    await new Promise(resolve => setTimeout(resolve, pollInterval));
+    
+    // 动态调整间隔
+    if (attempt > 20) pollInterval = 2000;
+    else if (attempt > 5) pollInterval = 1000;
+    
+    const statusUrl = `https://open-api.datasuite.shopee.io/dataservice/personal/status/${jobId}`;
+    
+    const statusResponse = await fetch(statusUrl, {
+      headers: {
+        'Authorization': personalToken,
+        'X-End-User': endUser
+      }
+    });
+    
+    const statusResult = await statusResponse.json();
+    
+    if (attempt % 5 === 0 || statusResult.status === 'FINISH' || statusResult.status === 'FAILED') {
+      console.log(`🔄 [Personal SQL API] 轮询 ${attempt}/${maxAttempts}, 状态:`, statusResult.status);
+    }
+    
+    if (statusResult.status === 'FINISH') {
+      // Step 3: 获取结果
+      const resultUrl = `https://open-api.datasuite.shopee.io/dataservice/personal/result/${jobId}`;
+      
+      const resultResponse = await fetch(resultUrl, {
+        headers: {
+          'Authorization': personalToken,
+          'X-End-User': endUser
+        }
+      });
+      
+      const resultData = await resultResponse.json();
+      
+      console.log('✅ [Personal SQL API] 查询完成');
+      
+      // 解析结果格式
+      const columns = resultData.resultSchema?.map(col => col.columnName) || [];
+      const rows = resultData.rows?.map(row => {
+        // 将 {values: {col1: val1, col2: val2}} 转换为数组 [val1, val2]
+        const values = row.values || {};
+        return columns.map(col => values[col]);
+      }) || [];
+      
+      console.log('   列数:', columns.length);
+      console.log('   行数:', rows.length);
+      
+      return {
+        columns: columns,
+        rows: rows,
+        stats: {
+          engine: resultData.engine,
+          pageSize: resultData.pageSize
+        }
+      };
+    } else if (statusResult.status === 'FAILED') {
+      throw new Error(statusResult.message || '查询失败');
+    }
+  }
+  
+  throw new Error('查询超时（60秒）');
+}
 console.log('SPX Helper Service Worker 初始化完成');
