@@ -117,7 +117,7 @@ cd SPX_Helper/sri
 
 **第2步: 获取你的Personal Token**
 
-1. 访问 https://datasuite.shopee.io
+1. 访问 https://datasuite.shopee.io/dataservice/ds_api_management
 2. 点击右上角头像 → Personal Token
 3. 复制token
 

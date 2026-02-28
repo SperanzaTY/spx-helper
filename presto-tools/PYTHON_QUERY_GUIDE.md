@@ -274,6 +274,6 @@ id,name,value
 
 ## 📚 更多资源
 
-- DataSuite文档: https://datasuite.shopee.io
+- DataSuite文档: https://datasuite.shopee.io/dataservice/ds_api_management
 - Personal SQL API文档: https://datasuite.shopee.io/forum/article/detail/a39b7c7d4d8d45e6be83d13db72aeb59
 - Presto SQL语法: https://trino.io/docs/current/sql.html

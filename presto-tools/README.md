@@ -123,12 +123,12 @@ pip3 install mcp
 ## 🔑 配置说明
 
 所有工具都需要：
-1. **Personal Token** - 从[DataSuite](https://datasuite.shopee.io)获取
+1. **Personal Token** - 从[DataSuite](https://datasuite.shopee.io/dataservice/ds_api_management
 2. **用户名** - 你的用户名
 
 ### 获取Personal Token
 
-1. 访问 https://datasuite.shopee.io
+1. 访问 https://datasuite.shopee.io/dataservice/ds_api_management
 2. 点击右上角头像
 3. 选择 **Personal Token**
 4. 复制token
@@ -204,7 +204,7 @@ pip3 install mcp
 
 ## 🔗 相关链接
 
-- DataSuite: https://datasuite.shopee.io
+- DataSuite: https://datasuite.shopee.io/dataservice/ds_api_management
 - Personal SQL API文档: (内部文档链接)
 
 ---
