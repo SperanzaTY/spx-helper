@@ -406,7 +406,7 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
         const version = 'hg3ggpdp2lkgqlmc';
         const personalToken = 'l7Vx4TGfwhmA1gtPn+JmUQ==';
         const prestoQueueName = 'szsc-scheduled';
-        const endUser = 'tianyi.liang';
+        const endUser = 'tianyi.liang@shopee.com';
         
         const submitUrl = `https://open-api.datasuite.shopee.io/dataservice/${apiName}/${version}`;
         
@@ -740,6 +740,33 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
     return true;
   }
   
+
+  // === Presto查询处理 ===
+  if (request.action === 'QUERY_PRESTO') {
+    console.log('📊 Background: 收到Presto查询请求');
+    
+    const { username, password, sql, queue, region, catalog, schema } = request;
+    
+    // 提交查询到Presto
+    queryPrestoSQL(username, password, sql, queue, region, catalog, schema)
+      .then(result => {
+        console.log('✅ Background: Presto查询成功');
+        sendResponse({
+          success: true,
+          data: result
+        });
+      })
+      .catch(error => {
+        console.error('❌ Background: Presto查询失败:', error);
+        sendResponse({
+          success: false,
+          error: error.message || 'Presto查询失败'
+        });
+      });
+    
+    return true;
+  }
+  
   return true;
 });
 
@@ -748,4 +775,114 @@ chrome.notifications.onClicked.addListener(function(notificationId) {
   console.log('通知被点击:', notificationId);
 });
 
+
+// === Presto REST API实现 ===
+// 这段代码替换 background.js 中的 queryPrestoSQL 函数
+
+async function queryPrestoSQL(username, password, sql, queue, region, catalog = 'hive', schema = 'shopee') {
+  // 使用 Personal SQL API（不再直接连接Presto）
+  const personalToken = 'l7Vx4TGfwhmA1gtPn+JmUQ==';  // 你的Personal Token
+  const endUser = username.includes('@') ? username : username + '@shopee.com';
+  
+  console.log('📤 [Personal SQL API] 提交查询...');
+  console.log('   Queue:', queue);
+  console.log('   Region:', region);
+  console.log('   SQL:', sql.substring(0, 100) + (sql.length > 100 ? '...' : ''));
+  
+  // Step 1: 提交查询
+  const submitUrl = 'https://open-api.datasuite.shopee.io/dataservice/personal/query/presto';
+  
+  const submitBody = {
+    sql: sql,
+    prestoQueue: queue,
+    idcRegion: region,
+    priority: '3'
+  };
+  
+  const submitResponse = await fetch(submitUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': personalToken,
+      'X-End-User': endUser
+    },
+    body: JSON.stringify(submitBody)
+  });
+  
+  if (!submitResponse.ok) {
+    throw new Error(`提交查询失败: ${submitResponse.status}`);
+  }
+  
+  const submitResult = await submitResponse.json();
+  const jobId = submitResult.jobId;
+  
+  console.log('✅ [Personal SQL API] 查询已提交, jobId:', jobId);
+  
+  // Step 2: 轮询查询状态
+  const maxAttempts = 60;
+  let pollInterval = 500;
+  
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    await new Promise(resolve => setTimeout(resolve, pollInterval));
+    
+    // 动态调整间隔
+    if (attempt > 20) pollInterval = 2000;
+    else if (attempt > 5) pollInterval = 1000;
+    
+    const statusUrl = `https://open-api.datasuite.shopee.io/dataservice/personal/status/${jobId}`;
+    
+    const statusResponse = await fetch(statusUrl, {
+      headers: {
+        'Authorization': personalToken,
+        'X-End-User': endUser
+      }
+    });
+    
+    const statusResult = await statusResponse.json();
+    
+    if (attempt % 5 === 0 || statusResult.status === 'FINISH' || statusResult.status === 'FAILED') {
+      console.log(`🔄 [Personal SQL API] 轮询 ${attempt}/${maxAttempts}, 状态:`, statusResult.status);
+    }
+    
+    if (statusResult.status === 'FINISH') {
+      // Step 3: 获取结果
+      const resultUrl = `https://open-api.datasuite.shopee.io/dataservice/personal/result/${jobId}`;
+      
+      const resultResponse = await fetch(resultUrl, {
+        headers: {
+          'Authorization': personalToken,
+          'X-End-User': endUser
+        }
+      });
+      
+      const resultData = await resultResponse.json();
+      
+      console.log('✅ [Personal SQL API] 查询完成');
+      
+      // 解析结果格式
+      const columns = resultData.resultSchema?.map(col => col.columnName) || [];
+      const rows = resultData.rows?.map(row => {
+        // 将 {values: {col1: val1, col2: val2}} 转换为数组 [val1, val2]
+        const values = row.values || {};
+        return columns.map(col => values[col]);
+      }) || [];
+      
+      console.log('   列数:', columns.length);
+      console.log('   行数:', rows.length);
+      
+      return {
+        columns: columns,
+        rows: rows,
+        stats: {
+          engine: resultData.engine,
+          pageSize: resultData.pageSize
+        }
+      };
+    } else if (statusResult.status === 'FAILED') {
+      throw new Error(statusResult.message || '查询失败');
+    }
+  }
+  
+  throw new Error('查询超时（60秒）');
+}
 console.log('SPX Helper Service Worker 初始化完成');
