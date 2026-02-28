@@ -784,7 +784,7 @@ chrome.notifications.onClicked.addListener(function(notificationId) {
 //   - password: 密码（已废弃，不再使用）
 //   - sql: SQL查询语句
 //   - queue: Presto队列名称，如 'szsc-adhoc' 或 'szsc-scheduled'
-//   - region: IDC集群，可选值: 'sg' (新加坡) 或 'us' (美国)
+//   - region: IDC集群，可选值: 'SG' (新加坡) 或 'US' (美国)
 //   - catalog: Catalog名称，默认 'hive'
 //   - schema: Schema名称，默认 'shopee'
 
