@@ -205,6 +205,97 @@ function initSettings() {
   if (clearAllDataBtn) {
     clearAllDataBtn.addEventListener('click', clearAllData);
   }
+  
+  // DataSuite配置
+  const datasuiteToken = document.getElementById('datasuite-token');
+  const datasuiteUsername = document.getElementById('datasuite-username');
+  const saveDatasuite = document.getElementById('save-datasuite-config');
+  const testDatasuite = document.getElementById('test-datasuite-config');
+  const toggleTokenBtn = document.getElementById('toggle-token-visibility');
+  const configStatus = document.getElementById('datasuite-config-status');
+  
+  // 加载已保存的DataSuite配置
+  chrome.storage.local.get(['datasuiteConfig'], function(result) {
+    if (result.datasuiteConfig) {
+      if (datasuiteToken) datasuiteToken.value = result.datasuiteConfig.token || '';
+      if (datasuiteUsername) datasuiteUsername.value = result.datasuiteConfig.username || '';
+    }
+  });
+  
+  // 显示/隐藏token
+  if (toggleTokenBtn) {
+    toggleTokenBtn.addEventListener('click', function() {
+      if (datasuiteToken.type === 'password') {
+        datasuiteToken.type = 'text';
+      } else {
+        datasuiteToken.type = 'password';
+      }
+    });
+  }
+  
+  // 保存DataSuite配置
+  if (saveDatasuite) {
+    saveDatasuite.addEventListener('click', function() {
+      const token = datasuiteToken.value.trim();
+      const username = datasuiteUsername.value.trim();
+      
+      if (!token || !username) {
+        if (configStatus) {
+          configStatus.style.color = '#d32f2f';
+          configStatus.textContent = '❌ 请填写完整的配置信息';
+        }
+        return;
+      }
+      
+      const config = { token, username };
+      chrome.storage.local.set({ datasuiteConfig: config }, function() {
+        if (configStatus) {
+          configStatus.style.color = '#388e3c';
+          configStatus.textContent = '✅ 配置已保存';
+          setTimeout(() => { configStatus.textContent = ''; }, 3000);
+        }
+      });
+    });
+  }
+  
+  // 测试DataSuite连接
+  if (testDatasuite) {
+    testDatasuite.addEventListener('click', async function() {
+      const token = datasuiteToken.value.trim();
+      const username = datasuiteUsername.value.trim();
+      
+      if (!token || !username) {
+        if (configStatus) {
+          configStatus.style.color = '#d32f2f';
+          configStatus.textContent = '❌ 请先填写配置信息';
+        }
+        return;
+      }
+      
+      if (configStatus) {
+        configStatus.style.color = '#1976d2';
+        configStatus.textContent = '🔄 正在测试连接...';
+      }
+      testDatasuite.disabled = true;
+      
+      chrome.runtime.sendMessage({
+        action: 'TEST_DATASUITE_CONFIG',
+        config: { token, username }
+      }, function(response) {
+        testDatasuite.disabled = false;
+        if (configStatus) {
+          if (response && response.success) {
+            configStatus.style.color = '#388e3c';
+            configStatus.textContent = '✅ 连接测试成功！';
+          } else {
+            configStatus.style.color = '#d32f2f';
+            configStatus.textContent = `❌ 连接失败: ${response?.error || '未知错误'}`;
+          }
+          setTimeout(() => { configStatus.textContent = ''; }, 5000);
+        }
+      });
+    });
+  }
 }
 
 // 导出所有数据

@@ -70,6 +70,35 @@
           <div class="settings-divider"></div>
           
           <div class="setting-section">
+            <div class="setting-section-title">🔐 DataSuite API 配置</div>
+            <div class="setting-section-desc">配置你的Personal Token以使用AI血缘分析功能</div>
+            <div class="setting-form">
+              <div class="setting-form-group">
+                <label for="datasuite-token">Personal Token:</label>
+                <input type="password" id="datasuite-token" class="input-field" placeholder="输入你的DataSuite Personal Token">
+                <button id="toggle-token-visibility" class="btn btn-secondary btn-small" style="margin-top: 5px;">👁️ 显示/隐藏</button>
+              </div>
+              <div class="setting-form-group">
+                <label for="datasuite-username">用户名 (邮箱前缀):</label>
+                <input type="text" id="datasuite-username" class="input-field" placeholder="如: tianyi.liang">
+              </div>
+              <div class="setting-actions">
+                <button id="save-datasuite-config" class="btn btn-primary btn-small">💾 保存配置</button>
+                <button id="test-datasuite-config" class="btn btn-secondary btn-small">🧪 测试连接</button>
+              </div>
+              <div id="datasuite-config-status" style="margin-top: 10px; font-size: 12px;"></div>
+              <div style="margin-top: 10px; padding: 10px; background: #e3f2fd; border-radius: 6px; font-size: 12px; color: #0277bd;">
+                <strong>💡 如何获取Personal Token:</strong><br>
+                1. 访问 <a href="https://datasuite.shopee.io/dataservice/ds_api_management" target="_blank" style="color: #0277bd; text-decoration: underline;">DataSuite API管理</a><br>
+                2. 点击左上角三个横线菜单（☰）<br>
+                3. 选择"获取Personal Token"
+              </div>
+            </div>
+          </div>
+          
+          <div class="settings-divider"></div>
+          
+          <div class="setting-section">
             <div class="setting-section-title">关于</div>
             <div class="version-info">
               <div class="version-item">

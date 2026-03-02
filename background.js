@@ -224,6 +224,47 @@ checkWindowModeSetting();
 chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
   console.log('收到消息:', request);
   
+  // 测试DataSuite配置
+  if (request.action === 'TEST_DATASUITE_CONFIG') {
+    (async () => {
+      try {
+        const { token, username } = request.config;
+        const endUser = username.includes('@') ? username : `${username}@shopee.com`;
+        
+        // 测试一个简单的查询
+        const testUrl = 'https://open-api.datasuite.shopee.io/dataservice/spx_mart.api_lineage_search/hg3ggpdp2lkgqlmc';
+        
+        const response = await fetch(testUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': token,
+            'X-End-User': endUser
+          },
+          body: JSON.stringify({
+            olapPayload: {
+              expressions: [{ parameterName: 'api_id', value: 'test%' }],
+              prestoQueueName: 'szsc-scheduled'
+            }
+          })
+        });
+        
+        if (response.ok) {
+          const result = await response.json();
+          if (result.jobId) {
+            sendResponse({ success: true, message: '配置验证成功' });
+          } else {
+            sendResponse({ success: false, error: '响应格式不正确' });
+          }
+        } else {
+          sendResponse({ success: false, error: `HTTP ${response.status}: ${response.statusText}` });
+        }
+      } catch (error) {
+        sendResponse({ success: false, error: error.message });
+      }
+    })();
+    return true; // 保持消息通道开启
+  }
   
   // HTTP 请求代理（解决 CORS 问题）
   if (request.action === 'httpRequest') {
@@ -404,9 +445,24 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
         // 缓存未命中，执行实时查询
         const apiName = 'spx_mart.api_lineage_search';
         const version = 'hg3ggpdp2lkgqlmc';
-        const personalToken = 'l7Vx4TGfwhmA1gtPn+JmUQ==';
         const prestoQueueName = 'szsc-scheduled';
-        const endUser = 'tianyi.liang@shopee.com';
+        
+        // 从存储读取配置
+        const configResult = await new Promise(resolve => {
+          chrome.storage.local.get(['datasuiteConfig'], resolve);
+        });
+        
+        const personalToken = configResult.datasuiteConfig?.token || '';
+        const username = configResult.datasuiteConfig?.username || '';
+        const endUser = username.includes('@') ? username : `${username}@shopee.com`;
+        
+        if (!personalToken || !username) {
+          sendResponse({
+            success: false,
+            error: 'DataSuite配置未设置，请在扩展设置中配置Personal Token和用户名'
+          });
+          return;
+        }
         
         const submitUrl = `https://open-api.datasuite.shopee.io/dataservice/${apiName}/${version}`;
         
