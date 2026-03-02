@@ -1270,6 +1270,54 @@ class APIDataTracker {
   }
   
   // 新增：HTML 转义
+  highlightSQL(sql) {
+    // SQL 关键词列表
+    const keywords = [
+      'SELECT','FROM','WHERE','JOIN','LEFT','RIGHT','INNER','OUTER','FULL','CROSS',
+      'ON','AS','AND','OR','NOT','IN','EXISTS','BETWEEN','LIKE','IS','NULL',
+      'GROUP BY','ORDER BY','HAVING','LIMIT','OFFSET','UNION','ALL','DISTINCT',
+      'INSERT','INTO','VALUES','UPDATE','SET','DELETE','CREATE','TABLE','DROP',
+      'WITH','CASE','WHEN','THEN','ELSE','END','IF','IIF',
+      'COUNT','SUM','AVG','MAX','MIN','COALESCE','IFNULL','NULLIF',
+      'DATE','DATETIME','TIMESTAMP','NOW','TODAY',
+      'CAST','CONVERT','ROUND','FLOOR','CEIL','ABS','LENGTH','CONCAT','TRIM',
+      'ASC','DESC','BY','TOP','ROWNUM','PARTITION','OVER','ROW_NUMBER',
+      'groupArray','argMax','argMin','toDate','toDateTime','formatDateTime',
+      'arrayJoin','arrayFilter','arrayMap','arraySum','arrayMax','arrayMin',
+      'dictGet','dictHas','assumeNotNull','isNull','isNotNull',
+      'FINAL','PREWHERE','SAMPLE','ARRAY','JOIN'
+    ];
+    
+    // 先 escape HTML
+    let result = sql
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+    
+    // 高亮字符串（单引号）
+    result = result.replace(/'([^']*)'/g, '<span style="color:#16a34a;">\'$1\'</span>');
+    
+    // 高亮注释（-- 开头到行尾）
+    result = result.replace(/(--[^\n]*)/g, '<span style="color:#9ca3af;">$1</span>');
+    
+    // 高亮数字
+    result = result.replace(/\b(\d+\.?\d*)\b/g, '<span style="color:#d97706;">$1</span>');
+    
+    // 高亮关键词（不区分大小写）
+    const kwPattern = new RegExp('\\b(' + keywords.join('|') + ')\\b', 'gi');
+    result = result.replace(kwPattern, (match) => {
+      return '<span style="color:#2563eb;font-weight:600;">' + match.toUpperCase() + '</span>';
+    });
+    
+    // 高亮表名/字段（{mgmt_db2}.xxx 格式）
+    result = result.replace(/\{([^}]+)\}/g, '<span style="color:#7c3aed;">{$1}</span>');
+    
+    // 高亮反引号包裹的标识符
+    result = result.replace(/`([^`]+)`/g, '<span style="color:#0891b2;">`$1`</span>');
+    
+    return result;
+  }
+
   escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
@@ -1339,7 +1387,8 @@ class APIDataTracker {
       // 步骤5: 调用AI API
       const analysis = await this.callAIAPI(prompt);
       
-      // 步骤6: 显示分析结果
+      // 步骤6: 显示分析结果（把 lineageInfo 存到 source 供面板展示SQL）
+      source.lineageInfo = lineageInfo;
       this.showAIAnalysisPanel('result', source, analysis);
       
     } catch (err) {
@@ -1519,6 +1568,21 @@ class APIDataTracker {
           </div>
         </div>
         <div style="padding: 24px; max-height: calc(85vh - 120px); overflow-y: auto; background: #fafbfc;">
+          ${source.lineageInfo && source.lineageInfo.bizSql ? `
+          <details style="background: #f8f9fa; border: 1px solid #e5e7eb; border-radius: 10px; margin-bottom: 16px; overflow: hidden;">
+            <summary style="padding: 12px 16px; cursor: pointer; font-weight: 600; color: #374151; user-select: none; display: flex; align-items: center; gap: 8px; font-size: 13px;">
+              <span style="transition: transform 0.2s; display: inline-block; font-size: 10px;">▶</span>
+              📋 业务SQL（点击展开查看完整SQL，共 ${source.lineageInfo.bizSql.length} 字符）
+            </summary>
+            <div style="padding: 16px; border-top: 1px solid #e5e7eb; background: #ffffff;">
+              <pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word; font-size: 12px; line-height: 1.6; font-family: 'Consolas', 'Monaco', monospace;">${this.highlightSQL(source.lineageInfo.bizSql)}</pre>
+            </div>
+          </details>
+          <style>
+            #spx-ai-analysis-panel details[open] summary span:first-child { transform: rotate(90deg) !important; }
+            #spx-ai-analysis-panel details summary:hover { background: #f3f4f6 !important; }
+          </style>
+          ` : ''}
           <div style="background: #ffffff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 22px; line-height: 1.7; color: #1f2937; font-size: 14px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
             ${this.formatAIResponse(content)}
           </div>
@@ -1747,14 +1811,27 @@ class APIDataTracker {
     let sqlPreview = ''; // 提前定义，供后面prompt使用
     
     if (lineageInfo && lineageInfo.bizSql) {
-      // 直接使用完整SQL，不截断
-      sqlPreview = lineageInfo.bizSql;
+      // 提取表名用于概要
+      const tables = Array.from(new Set(
+        (lineageInfo.bizSql.match(/(?:FROM|JOIN)\s+`?(\w+)`?/gi) || [])
+          .map(m => m.replace(/(?:FROM|JOIN)\s+`?/i, '').trim())
+          .filter(t => t.length > 2 && t !== 'SELECT')
+      ));
+      
+      sqlPreview = `SQL涉及 ${tables.length} 个表（${tables.slice(0, 5).join(', ')}${tables.length > 5 ? '...' : ''}），共 ${lineageInfo.bizSql.length} 字符`;
+      
+      const sqlTruncated = lineageInfo.bizSql.length > 300 
+        ? lineageInfo.bizSql.substring(0, 300) + '\n...(已截断，完整SQL在分析面板顶部可查看)'
+        : lineageInfo.bizSql;
       
       bizSqlSection = `
 
-**业务SQL逻辑**
+**SQL信息概要**（完整SQL已在分析面板顶部展示，可点击查看，无需在分析中返回）
+- 涉及的表: ${tables.slice(0, 8).join(', ')}
+- SQL长度: ${lineageInfo.bizSql.length} 字符
+- SQL前300字符预览:
 \`\`\`sql
-${sqlPreview}
+${sqlTruncated}
 \`\`\``;
 
       deploymentInfo = `
@@ -1784,13 +1861,9 @@ ${selectedFieldsInfo}
 用1-2句话说明这个接口对应的页面整体功能和业务场景。
 
 ${lineageInfo ? `
-## 📝 完整SQL逻辑
+## 📊 SQL与字段分析
 
-\`\`\`sql
-${sqlPreview}
-\`\`\`
-
-**SQL逻辑分析**：
+**SQL逻辑分析**（完整SQL已在面板顶部展示，无需重复返回SQL）：
 - **主要指标**: 列出SELECT中的关键业务字段（5-8个主要指标即可）
 - **数据源**: FROM哪个表，JOIN了什么表（如果有）
 - **过滤条件**: WHERE的主要条件和业务含义

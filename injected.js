@@ -108,6 +108,7 @@
   XMLHttpRequest.prototype.send = function(...args) {
     const xhr = this;
     
+    // 调试：记录 send 的参数
     // 记录请求体
     let requestPayload = null;
     try {
@@ -119,7 +120,6 @@
     } catch (e) {
       requestPayload = args[0];
     }
-    
     // 获取调用栈
     const callStack = new Error().stack
       .split('\n')
@@ -136,7 +136,7 @@
           const duration = Date.now() - xhr.__spxTracker.startTime;
           
           // 记录所有 API（不再在这里过滤）
-          const record = {
+                    const record = {
             id: xhr.__spxTracker.requestId,
             url: xhr.__spxTracker.url,
             method: xhr.__spxTracker.method,
