@@ -1393,48 +1393,77 @@ class APIDataTracker {
   async queryAPILineage(apiId) {
     // 检查扩展上下文
     if (!isExtensionContextValid()) {
-      throw new Error('Extension context invalidated');
+      throw new Error('扩展已重新加载，请刷新页面后重试');
     }
+    
     // 调用API血缘查询
     return new Promise((resolve, reject) => {
-      chrome.runtime.sendMessage({
-        action: 'QUERY_API_LINEAGE',
-        apiId: apiId
-      }, response => {
-        if (chrome.runtime.lastError) {
-          reject(new Error(chrome.runtime.lastError.message));
-          return;
-        }
-        
-        if (!response || !response.success) {
-          reject(new Error(response?.error || 'API血缘查询失败'));
-          return;
-        }
-        
-        resolve(response.lineageInfo);
-      });
+      try {
+        chrome.runtime.sendMessage({
+          action: 'QUERY_API_LINEAGE',
+          apiId: apiId
+        }, response => {
+          if (chrome.runtime.lastError) {
+            console.error('❌ [SPX Helper] Chrome runtime error:', chrome.runtime.lastError);
+            reject(new Error('扩展通信失败，请刷新页面后重试'));
+            return;
+          }
+          
+          if (!response || !response.success) {
+            reject(new Error(response?.error || 'API血缘查询失败'));
+            return;
+          }
+          
+          resolve(response.lineageInfo);
+        });
+      } catch (error) {
+        console.error('❌ [SPX Helper] sendMessage exception:', error);
+        reject(new Error('扩展通信异常，请刷新页面后重试'));
+      }
     });
   }
   
   async callAIAPI(prompt) {
     console.log('📤 [SPX Helper] 发送AI请求...');
+    
     // 检查扩展上下文
     if (!isExtensionContextValid()) {
-      throw new Error('Extension context invalidated');
+      throw new Error('扩展已重新加载，请刷新页面后重试');
     }
     
-    // 通过background script代理请求（避免CORS问题）
-    const response = await chrome.runtime.sendMessage({
-      action: 'CALL_AI_API',
-      prompt: prompt
+    // 使用Promise包装，避免context失效时的异常
+    return new Promise((resolve, reject) => {
+      try {
+        chrome.runtime.sendMessage({
+          action: 'CALL_AI_API',
+          prompt: prompt
+        }, response => {
+          // 检查runtime错误
+          if (chrome.runtime.lastError) {
+            console.error('❌ [SPX Helper] Chrome runtime error:', chrome.runtime.lastError);
+            reject(new Error('扩展通信失败，请刷新页面后重试'));
+            return;
+          }
+          
+          // 检查响应
+          if (!response) {
+            reject(new Error('未收到AI响应'));
+            return;
+          }
+          
+          if (!response.success) {
+            reject(new Error(response.error || 'AI请求失败'));
+            return;
+          }
+          
+          console.log('📥 [SPX Helper] AI响应成功');
+          resolve(response.result);
+        });
+      } catch (error) {
+        console.error('❌ [SPX Helper] sendMessage exception:', error);
+        reject(new Error('扩展通信异常，请刷新页面后重试'));
+      }
     });
-    
-    if (!response.success) {
-      throw new Error(response.error || 'AI请求失败');
-    }
-    
-    console.log('📥 [SPX Helper] AI响应成功');
-    return response.result;
   }
   
   showAIAnalysisPanel(state, source, content = '', statusText = '') {
@@ -1498,11 +1527,22 @@ class APIDataTracker {
           <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 15px; color: #991b1b;">
             <strong>错误信息:</strong> ${this.escapeHtml(content)}
           </div>
-          <div style="margin-top: 15px; color: #666; font-size: 13px;">
-            可能的原因：<br>
-            • 网络连接问题<br>
-            • AI服务暂时不可用<br>
-            • 请求参数格式错误
+          <div style="margin-top: 15px; padding: 12px; background: #fef9e7; border: 1px solid #f9e79f; border-radius: 6px; color: #7d6608; font-size: 13px;">
+            ${content.includes('扩展') || content.includes('刷新') ? `
+              <strong>💡 解决方法：</strong><br>
+              <div style="margin-top: 8px; padding-left: 10px; border-left: 3px solid #f39c12;">
+                1️⃣ <strong>刷新当前页面</strong> (Ctrl/Cmd + R)<br>
+                2️⃣ 重新执行操作
+              </div>
+              <div style="margin-top: 10px; font-size: 12px; color: #95a5a6;">
+                ℹ️ 扩展更新或重新加载后需要刷新页面才能正常工作
+              </div>
+            ` : `
+              <strong>可能的原因：</strong><br>
+              • 网络连接问题<br>
+              • AI服务暂时不可用<br>
+              • 请求参数格式错误
+            `}
           </div>
         </div>
       `;
