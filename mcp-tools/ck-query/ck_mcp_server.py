@@ -15,19 +15,19 @@ ClickHouse MCP Server - 为 Cursor 提供 ClickHouse 查询能力
 }
 """
 
-import asyncio
 import base64
 import hashlib
 import hmac
 import json
 import time
-from typing import Any
+from typing import Optional
 
 import requests
-from mcp.server import NotificationOptions, Server
-from mcp.server.models import InitializationOptions
-from mcp.server.stdio import stdio_server
-from mcp.types import TextContent, Tool
+import urllib3
+from mcp.server.fastmcp import FastMCP
+
+# 屏蔽 SSL 警告（TEST 直连走自签证书）
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # ====== LIVE 环境：JWT 配置（与浏览器扩展保持一致）======
 JWT_ACCOUNT = 'test_project_account'
@@ -46,10 +46,10 @@ TEST_CK_USER = 'spx_mart-cluster_szsc_data_shared_online'
 TEST_CK_PASSWORD = 'RtL3jHWkDoHp'
 TEST_CK_DATABASE = 'spx_mart_pub'
 
-server = Server("ck-query-server")
+mcp = FastMCP("ck-query")
 
 
-# ==================== LIVE 环境 ====================
+# ==================== LIVE 环境工具函数 ====================
 
 def base64url_encode(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).rstrip(b'=').decode('utf-8')
@@ -109,7 +109,7 @@ def execute_live(sql: str, cluster: str, max_rows: int) -> dict:
         return {'success': False, 'error': f'执行错误: {str(e)}'}
 
 
-# ==================== TEST 环境 ====================
+# ==================== TEST 环境工具函数 ====================
 
 def execute_test(sql: str, database: str, max_rows: int) -> dict:
     """直连 TEST 环境 ClickHouse（HTTPS + Basic Auth），支持 SELECT 和写入"""
@@ -128,10 +128,10 @@ def execute_test(sql: str, database: str, max_rows: int) -> dict:
                     'message': response.text.strip() or '执行成功'}
 
         # SELECT：追加 FORMAT TabSeparatedWithNames 获取列名
-        if 'format' not in sql_stripped.lower():
-            sql_stripped += ' FORMAT TabSeparatedWithNames'
+        query_sql = sql_stripped if 'format' in sql_stripped.lower() \
+            else sql_stripped + ' FORMAT TabSeparatedWithNames'
 
-        response = requests.post(url, headers=headers, data=sql_stripped,
+        response = requests.post(url, headers=headers, data=query_sql,
                                  params={'database': database}, timeout=60, verify=False)
         response.raise_for_status()
 
@@ -181,104 +181,61 @@ def format_result_as_table(columns: list, rows: list) -> str:
     return "\n".join(lines)
 
 
-# ==================== MCP Tool 定义 ====================
+# ==================== MCP Tool ====================
 
-@server.list_tools()
-async def handle_list_tools() -> list[Tool]:
-    return [
-        Tool(
-            name="query_ck",
-            description=f"""查询 ClickHouse 数据库，通过 env 参数区分 LIVE / TEST 环境。
+@mcp.tool()
+def query_ck(
+    sql: str,
+    env: str,
+    cluster: Optional[str] = None,
+    database: str = TEST_CK_DATABASE,
+    max_rows: int = 200
+) -> str:
+    """查询 ClickHouse 数据库，通过 env 参数区分 LIVE / TEST 环境。
 
-【调用前必须确认以下两点】
-1. env（环境）：
-   - live：查询 LIVE 生产数据（只读）
-   - test：查询/写入 TEST 数据（支持 SELECT、INSERT、CREATE 等）
-2. 若 env=live，还需确认 cluster（集群）：
-   - ck2：CK2 集群
-   - ck6：CK6 集群
+    【调用前必须确认以下两点】
+    1. env（环境）：
+       - live：查询 LIVE 生产数据（只读）
+       - test：查询/写入 TEST 数据（支持 SELECT、INSERT、CREATE 等）
+    2. 若 env=live，还需确认 cluster（集群）：
+       - ck2：CK2 集群
+       - ck6：CK6 集群
 
-如果用户未明确说明以上信息，请在调用前先问清楚。
+    如果用户未明确说明以上信息，请在调用前先问清楚。
 
-环境说明：
-- LIVE（env=live）：通过 API 网关查询，仅支持只读 SELECT，SQL 末尾会自动补充 ', 1 as flag'
-- TEST（env=test）：直连 TEST ClickHouse，支持读写操作，写入前需向用户确认，默认库：{TEST_CK_DATABASE}
+    环境说明：
+    - LIVE（env=live）：通过 API 网关查询，仅支持只读 SELECT，SQL 末尾会自动补充 ', 1 as flag'
+    - TEST（env=test）：直连 TEST ClickHouse，支持读写操作，写入前需向用户确认，默认库：spx_mart_pub
 
-注意：
-- 每次最多返回 200 行（可通过 max_rows 调整，最大 1000）
-- 请求超时时间为 60 秒""",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "sql": {
-                        "type": "string",
-                        "description": "要执行的 SQL 语句"
-                    },
-                    "env": {
-                        "type": "string",
-                        "description": "环境：live（LIVE 只读）或 test（TEST 读写），调用前需向用户确认",
-                        "enum": ["live", "test"]
-                    },
-                    "cluster": {
-                        "type": "string",
-                        "description": "CK 集群（env=live 时必填）：ck2 或 ck6，调用前需向用户确认",
-                        "enum": ["ck2", "ck6"]
-                    },
-                    "database": {
-                        "type": "string",
-                        "description": f"目标数据库（env=test 时有效，默认：{TEST_CK_DATABASE}）",
-                        "default": TEST_CK_DATABASE
-                    },
-                    "max_rows": {
-                        "type": "integer",
-                        "description": "SELECT 最多返回行数（默认 200，最大 1000）",
-                        "default": 200,
-                        "minimum": 1,
-                        "maximum": 1000
-                    }
-                },
-                "required": ["sql", "env"]
-            }
-        )
-    ]
+    注意：
+    - 每次最多返回 200 行（可通过 max_rows 调整，最大 1000）
+    - 请求超时时间为 60 秒
 
-
-@server.call_tool()
-async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
-    if name != "query_ck":
-        raise ValueError(f"未知工具: {name}")
-
-    sql = arguments.get("sql")
-    env = arguments.get("env")
-    max_rows = arguments.get("max_rows", 200)
-
-    if not sql:
-        return [TextContent(type="text", text="错误: 缺少 sql 参数")]
-    if not env:
-        return [TextContent(type="text", text="错误: 缺少 env 参数，请指定 live 或 test")]
-
+    Args:
+        sql: 要执行的 SQL 语句
+        env: 环境，live（LIVE 只读）或 test（TEST 读写），调用前需向用户确认
+        cluster: CK 集群（env=live 时必填）：ck2 或 ck6，调用前需向用户确认
+        database: 目标数据库（env=test 时有效，默认：spx_mart_pub）
+        max_rows: SELECT 最多返回行数（默认 200，最大 1000）
+    """
     if env == "live":
-        cluster = arguments.get("cluster")
         if not cluster:
-            return [TextContent(type="text", text="错误: env=live 时必须指定 cluster（ck2 或 ck6）")]
-
+            return "错误: env=live 时必须指定 cluster（ck2 或 ck6），请先询问用户"
         result = execute_live(sql=sql, cluster=cluster, max_rows=max_rows)
         env_label = f"LIVE {cluster}"
 
     elif env == "test":
-        database = arguments.get("database", TEST_CK_DATABASE)
         result = execute_test(sql=sql, database=database, max_rows=max_rows)
         env_label = f"TEST / {database}"
 
     else:
-        return [TextContent(type="text", text=f"错误: 不支持的 env 值 '{env}'，请使用 live 或 test")]
+        return f"错误: 不支持的 env 值 '{env}'，请使用 live 或 test"
 
     if not result['success']:
-        return [TextContent(type="text", text=f"❌ 执行失败（{env_label}）\n\n错误: {result['error']}")]
+        return f"❌ 执行失败（{env_label}）\n\n错误: {result['error']}"
 
     if result.get('is_write'):
-        output = f"✅ 执行成功（{env_label}）\n\n{result.get('message', '操作已完成')}"
-        return [TextContent(type="text", text=output)]
+        return f"✅ 执行成功（{env_label}）\n\n{result.get('message', '操作已完成')}"
 
     table = format_result_as_table(result['columns'], result['rows'])
     output = f"✅ 查询成功（{env_label}）\n\n"
@@ -286,24 +243,8 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[TextCon
     if result['truncated']:
         output += f"⚠️ 结果已截断（只显示前 {max_rows} 行）\n"
     output += f"\n{table}"
-    return [TextContent(type="text", text=output)]
-
-
-async def main():
-    async with stdio_server() as (read_stream, write_stream):
-        await server.run(
-            read_stream,
-            write_stream,
-            InitializationOptions(
-                server_name="ck-query",
-                server_version="1.1.0",
-                capabilities=server.get_capabilities(
-                    notification_options=NotificationOptions(),
-                    experimental_capabilities={},
-                ),
-            ),
-        )
+    return output
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    mcp.run()
