@@ -1162,7 +1162,28 @@ class APIDataTracker {
           <p><strong>URL:</strong> ${this.escapeHtml(record.url)}</p>
           <p><strong>Method:</strong> ${record.method} | <strong>Status:</strong> ${record.status} | <strong>Duration:</strong> ${record.duration}ms</p>
           <p><strong>Time:</strong> ${record.requestTime}</p>
+          ${record.requestPayload ? `<p><strong>Request:</strong> ${record.method}</p>` : ''}
         </div>
+        
+        ${record.requestPayload ? `
+          <details style="background: #252526; border: 1px solid #3c3c3c; border-radius: 8px; margin-bottom: 15px; overflow: hidden;">
+            <summary style="padding: 12px 15px; cursor: pointer; font-weight: 600; color: #4ec9b0; user-select: none; display: flex; align-items: center; gap: 8px;">
+              <span style="transition: transform 0.2s; display: inline-block;">▶</span>
+              📤 请求参数 (Request Payload)
+            </summary>
+            <div style="padding: 15px; background: #1e1e1e; border-top: 1px solid #3c3c3c;">
+              <pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word; font-size: 13px; color: #ce9178;">${this.escapeHtml(JSON.stringify(record.requestPayload, null, 2))}</pre>
+            </div>
+          </details>
+          <style>
+            details summary:hover {
+              background: #2d2d30 !important;
+            }
+            details[open] summary span:first-child {
+              transform: rotate(90deg) !important;
+            }
+          </style>
+        ` : ''}
         
         ${matchPaths.length > 0 ? `
           <div class="match-info">
