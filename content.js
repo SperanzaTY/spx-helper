@@ -1288,6 +1288,9 @@ class APIDataTracker {
           lineageInfo = await this.queryAPILineage(apiId);
           console.log('✅ [SPX Helper] API血缘查询成功:', lineageInfo);
           
+          // 保存lineageInfo到source，供展示使用
+          source.lineageInfo = lineageInfo;
+          
           // 显示缓存命中状态
           const cacheStatus = lineageInfo.fromCache ? '（📦 缓存命中）' : '（🌐 实时查询）';
           this.updateAIAnalysisPanelStatus(`步骤 1/2：已获取接口代码${cacheStatus}`);
@@ -1499,6 +1502,36 @@ class APIDataTracker {
           </div>
         </div>
         <div style="padding: 24px; max-height: calc(85vh - 120px); overflow-y: auto; background: #fafbfc;">
+          
+          ${source.lineageInfo && source.lineageInfo.bizSql ? `
+          <!-- SQL展示区 -->
+          <details style="background: #ffffff; border: 1px solid #e5e7eb; border-radius: 10px; margin-bottom: 16px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+            <summary style="padding: 16px; cursor: pointer; background: linear-gradient(90deg, #f9fafb 0%, #f3f4f6 100%); font-weight: 600; color: #374151; font-size: 14px; user-select: none; display: flex; align-items: center; gap: 8px; transition: background 0.2s;">
+              <span style="transition: transform 0.2s; display: inline-block;">▶</span>
+              📝 业务SQL逻辑 
+              <span style="font-weight: 400; color: #6b7280; font-size: 12px;">(${source.lineageInfo.bizSql.length} 字符)</span>
+            </summary>
+            <div style="padding: 16px; background: #fafbfc;">
+              <pre style="background: #282c34; color: #abb2bf; padding: 16px; border-radius: 8px; overflow-x: auto; margin: 0; font-size: 12px; line-height: 1.5; font-family: 'Consolas', 'Monaco', 'Courier New', monospace; max-height: 400px;">${this.escapeHtml(source.lineageInfo.bizSql)}</pre>
+              <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #e5e7eb; display: flex; gap: 8px; font-size: 12px; color: #6b7280;">
+                <span>📊 涉及表: <strong>${Array.from(new Set((source.lineageInfo.bizSql.match(/\{mgmt_db2\}\.([a-zA-Z0-9_]+)/g) || []).map(m => m.split('.')[1]))).join(', ')}</strong></span>
+              </div>
+            </div>
+          </details>
+          <style>
+            details summary:hover {
+              background: linear-gradient(90deg, #f3f4f6 0%, #e5e7eb 100%) !important;
+            }
+            details[open] summary span:first-child {
+              transform: rotate(90deg) !important;
+            }
+            details[open] {
+              box-shadow: 0 2px 8px rgba(0,0,0,0.08) !important;
+            }
+          </style>
+          ` : ''}
+          
+          <!-- AI分析结果 -->
           <div style="background: #ffffff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 22px; line-height: 1.7; color: #1f2937; font-size: 14px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
             ${this.formatAIResponse(content)}
           </div>
@@ -1727,329 +1760,17 @@ class APIDataTracker {
     let sqlPreview = ''; // 提前定义，供后面prompt使用
     
     if (lineageInfo && lineageInfo.bizSql) {
-      // 直接使用完整SQL，不截断
-      sqlPreview = lineageInfo.bizSql;
+      // 提取表名用于概要
+      const tables = Array.from(new Set(
+        (lineageInfo.bizSql.match(/\{mgmt_db2\}\.([a-zA-Z0-9_]+)/g) || [])
+          .map(m => m.split('.')[1])
+      ));
+      
+      sqlPreview = `SQL概要: 涉及${tables.length}个表，共${lineageInfo.bizSql.length}字符`;
       
       bizSqlSection = `
 
-**业务SQL逻辑**
-\`\`\`sql
-${sqlPreview}
-\`\`\``;
+**SQL信息概要**（完整SQL已在页面上方展示，可点击查看）
+- 涉及的表: ${tables.join(', ')}
+- SQL长度: ${lineageInfo.bizSql.length} 字符`;
 
-      deploymentInfo = `
-- 发布环境: ${lineageInfo.publishEnv || '未知'}
-- API版本: ${lineageInfo.apiVersion || '未知'}
-- 数据源ID: DS_${lineageInfo.dsId || '?'}
-- ClickHouse集群: ${this.getDsClusterName(lineageInfo.dsId)}`;
-    }
-    
-    // 构建精简的分析提示 - 实战运维视角
-    const prompt = `你是后端开发工程师，正在排查线上问题。
-
-**接口信息**
-- URL: \`${record.url}\`${lineageInfo && lineageInfo.apiId ? `
-- API ID: ${lineageInfo.apiId}` : ''}${deploymentInfo}
-${bizSqlSection}
-
-**用户选中的字段**:
-${selectedFieldsInfo}
-
----
-
-请按以下格式分析：
-
-## 🎯 这个页面/接口的功能是什么？
-
-用1-2句话说明这个接口对应的页面整体功能和业务场景。
-
-${lineageInfo ? `
-## 📝 完整SQL逻辑
-
-\`\`\`sql
-${sqlPreview}
-\`\`\`
-
-**SQL逻辑分析**：
-- **主要指标**: 列出SELECT中的关键业务字段（5-8个主要指标即可）
-- **数据源**: FROM哪个表，JOIN了什么表（如果有）
-- **过滤条件**: WHERE的主要条件和业务含义
-- **计算逻辑**: 关键的聚合函数（SUM/COUNT/IF等）和计算方式
-
-` : `## 📊 页面上的指标都是什么？
-
-从响应数据中说明主要返回了哪些业务指标。`}
-
-## 🔍 用户选中的这个指标：${selectedFieldsInfo}
-
-${lineageInfo ? '从上面的SQL找到这个字段：' : '从响应数据分析：'}
-- **业务含义**: 这个指标代表什么业务含义
-- **计算逻辑**: 具体的计算公式和数据来源
-- **数值含义**: 这个数值的单位和业务解释
-
-## 🛠️ 如果这个指标有问题，怎么排查？
-
-- **环境定位**: ${lineageInfo && lineageInfo.publishEnv ? lineageInfo.publishEnv : '对应环境'}环境，${lineageInfo && lineageInfo.dsId ? `ClickHouse集群: ${this.getDsClusterName(lineageInfo.dsId)}` : '对应数据源'}
-- **数据源检查**: 查哪个表和字段，检查原始数据是否正常
-- **逻辑验证**: 检查什么计算逻辑（JOIN、WHERE、聚合等）
-
----
-
-**要求**: 简洁、直接、实用。使用Markdown格式。`;
-
-    return prompt;
-  }
-  
-  showToast(message) {
-    const toast = document.createElement('div');
-    toast.style.cssText = `
-      position: fixed;
-      top: 20px;
-      right: 20px;
-      background: rgba(0, 0, 0, 0.85);
-      color: white;
-      padding: 12px 20px;
-      border-radius: 8px;
-      font-size: 14px;
-      z-index: 2147483647;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-      animation: slideIn 0.3s ease;
-    `;
-    toast.textContent = message;
-    
-    document.body.appendChild(toast);
-    
-    setTimeout(() => {
-      toast.style.animation = 'slideOut 0.3s ease';
-      setTimeout(() => toast.remove(), 300);
-    }, 2000);
-  }
-  
-  // ========================================
-  // UI 辅助函数
-  // ========================================
-  highlightElement(element) {
-    this.clearHighlight();
-    
-    this.highlightedElement = element;
-    element.style.outline = '2px solid #667eea';
-    element.style.outlineOffset = '2px';
-    element.style.backgroundColor = 'rgba(102, 126, 234, 0.1)';
-    
-    this.showElementInfo(element);
-  }
-  
-  clearHighlight() {
-    if (this.highlightedElement) {
-      this.highlightedElement.style.outline = '';
-      this.highlightedElement.style.outlineOffset = '';
-      this.highlightedElement.style.backgroundColor = '';
-      this.highlightedElement = null;
-    }
-    
-    const infoBox = document.getElementById('spx-api-tracker-element-info');
-    if (infoBox) infoBox.remove();
-  }
-  
-  showElementInfo(element) {
-    const existingInfo = document.getElementById('spx-api-tracker-element-info');
-    if (existingInfo) existingInfo.remove();
-    
-    const rect = element.getBoundingClientRect();
-    const infoBox = document.createElement('div');
-    infoBox.id = 'spx-api-tracker-element-info';
-    infoBox.style.cssText = `
-      position: fixed;
-      top: ${Math.max(5, rect.top - 25)}px;
-      left: ${rect.left}px;
-      background: rgba(102, 126, 234, 0.95);
-      color: white;
-      padding: 4px 8px;
-      border-radius: 4px;
-      font-size: 11px;
-      z-index: 2147483645;
-      pointer-events: none;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    `;
-    
-    let className = '';
-    if (element.className) {
-      if (typeof element.className === 'string') {
-        className = element.className.split(' ')[0];
-      } else if (element.className.baseVal) {
-        className = element.className.baseVal.split(' ')[0];
-      }
-    }
-    
-    infoBox.textContent = `${element.tagName.toLowerCase()}${className ? '.' + className : ''}`;
-    document.body.appendChild(infoBox);
-  }
-  
-  isOurElement(element) {
-    let current = element;
-    while (current) {
-      if (current.id && (
-        current.id.startsWith('spx-') ||
-        current.id === 'spx-api-source-panel' || current.id === 'spx-api-no-source-panel' ||
-        current.id === 'spx-api-tracker-tooltip' || current.id === 'spx-api-tracker-element-info' ||
-        current.id === 'spx-close-panel' || current.id === 'spx-no-source-close-btn' ||
-        current.id === 'spx-exit-inspector' || current.id === 'spx-selection-floating-btn'
-      )) {
-        return true;
-      }
-      
-      if (current.className) {
-        let classNames = (typeof current.className === 'string') 
-          ? current.className 
-          : (current.className.baseVal || '');
-        if (classNames && (classNames.includes('spx-') || classNames.includes('spx-api-tracker') || classNames.includes('spx-selection-floating'))) {
-          return true;
-        }
-      }
-      
-      current = current.parentElement;
-    }
-    return false;
-  }
-  
-  addInspectorStyles() {
-    if (document.getElementById('spx-inspector-styles')) return;
-    
-    const style = document.createElement('style');
-    style.id = 'spx-inspector-styles';
-    style.textContent = `
-      * {
-        cursor: crosshair !important;
-      }
-    `;
-    document.head.appendChild(style);
-  }
-  
-  showInspectorTip() {
-    const tip = document.createElement('div');
-    tip.id = 'spx-api-tracker-tip';
-    tip.style.cssText = `
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      color: white;
-      padding: 12px 20px;
-      text-align: center;
-      z-index: 2147483646;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      font-size: 14px;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.2);
-    `;
-    tip.innerHTML = `
-      <span>🎯 API 数据溯源检查器已启动</span>
-      <span style="margin: 0 20px;">|</span>
-      <span>移动鼠标查看元素数据来源（点击查看详情）</span>
-      <button id="spx-exit-inspector" style="margin-left: 20px; padding: 6px 15px; background: rgba(255,255,255,0.2); border: 1px solid white; border-radius: 6px; color: white; cursor: pointer; font-size: 12px;">退出</button>
-    `;
-    document.body.appendChild(tip);
-    
-    document.getElementById('spx-exit-inspector').addEventListener('click', () => {
-      this.disableInspectorMode();
-    });
-  }
-  
-  removeInspectorTip() {
-    const tip = document.getElementById('spx-api-tracker-tip');
-    if (tip) tip.remove();
-    
-    const styles = document.getElementById('spx-inspector-styles');
-    if (styles) styles.remove();
-  }
-  
-  // ========================================
-  // 消息监听
-  // ========================================
-  setupMessageListener() {
-    chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-      if (request.action === 'START_INSPECTOR') {
-        this.enableInspectorMode();
-        sendResponse({ success: true });
-      }
-      
-      if (request.action === 'STOP_INSPECTOR') {
-        this.disableInspectorMode();
-        sendResponse({ success: true });
-      }
-      
-      // 新增：更新文本选取状态
-      if (request.action === 'UPDATE_TEXT_SELECTION_STATE') {
-        const wasEnabled = this.textSelectionEnabled;
-        this.textSelectionEnabled = request.enabled;
-        console.log('🔄 [SPX Helper] 文本选取功能状态已更新:', request.enabled ? '开启' : '关闭');
-        
-        if (!request.enabled) {
-          // 如果禁用，隐藏当前的浮动按钮
-          this.hideSelectionFloatingBtn();
-          console.log('✅ [SPX Helper] 文本选取功能已禁用');
-        } else if (!wasEnabled && request.enabled) {
-          // 如果从禁用切换到启用，确保监听器存在
-          console.log('🔄 [SPX Helper] 重新启用文本选取功能');
-          if (!this.textSelectionListenerAdded) {
-            try {
-              this.initTextSelectionListener();
-            } catch (err) {
-              console.error('❌ [SPX Helper] 重新初始化监听器失败:', err);
-            }
-          } else {
-            console.log('✅ [SPX Helper] 监听器已存在，功能已激活');
-          }
-        }
-        
-        sendResponse({ success: true });
-      }
-      
-      // 新增：更新 API 过滤条件
-      if (request.action === 'UPDATE_API_FILTER') {
-        const keywords = request.keywords || '';
-        
-        if (keywords.trim() === '') {
-          // 空字符串表示不过滤
-          this.apiFilterKeywords = [];
-          console.log('🔄 [SPX Helper] API 过滤条件已更新: 显示所有接口');
-        } else {
-          this.apiFilterKeywords = keywords.split(',').map(k => k.trim()).filter(k => k);
-          console.log('🔄 [SPX Helper] API 过滤条件已更新:', this.apiFilterKeywords);
-        }
-        
-        sendResponse({ success: true });
-      }
-      
-      if (request.action === 'GET_API_RECORDS') {
-        const records = Array.from(this.apiRecords.values());
-        sendResponse({ records });
-      }
-      
-      if (request.action === 'GET_API_RECORD_DETAIL') {
-        const record = this.apiRecords.get(request.recordId);
-        if (record) {
-          sendResponse({ record });
-        } else {
-          sendResponse({ record: null });
-        }
-      }
-      
-      return true;
-    });
-  }
-}
-
-// ========================================
-// 初始化
-// ========================================
-const apiTracker = new APIDataTracker();
-apiTracker.setupMessageListener();
-
-// 暴露到 window 对象以便调试
-window.__spxApiTracker = apiTracker;
-window.APIDataTracker = APIDataTracker;
-
-console.log('✅ [SPX Helper] Content Script 已就绪');
-console.log('🔧 [SPX Helper] 调试: window.__spxApiTracker 可用');
