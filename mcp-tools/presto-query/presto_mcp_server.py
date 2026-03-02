@@ -15,10 +15,10 @@ Presto MCP Server - 为 Cursor 提供 Presto 查询能力
 }
 """
 
+import asyncio
 import os
 import sys
 import time
-from typing import Optional
 
 import requests
 from mcp.server.fastmcp import FastMCP
@@ -31,89 +31,29 @@ DEFAULT_REGION = os.environ.get('PRESTO_REGION', 'SG')
 
 if not PERSONAL_TOKEN:
     print("错误: 未设置 PRESTO_PERSONAL_TOKEN 环境变量", file=sys.stderr)
-    print("请在 mcp.json 中配置 env.PRESTO_PERSONAL_TOKEN", file=sys.stderr)
     sys.exit(1)
 
 if not DEFAULT_USERNAME:
     print("错误: 未设置 PRESTO_USERNAME 环境变量", file=sys.stderr)
-    print("请在 mcp.json 中配置 env.PRESTO_USERNAME", file=sys.stderr)
     sys.exit(1)
 
 mcp = FastMCP("presto-query")
 
+BASE_URL = "https://open-api.datasuite.shopee.io/dataservice/personal"
 
-def run_presto_query(sql: str, username: str, queue: str, region: str, max_rows: int) -> dict:
-    """执行 Presto 查询（提交 → 轮询 → 取结果）"""
-    end_user = username if '@' in username else f"{username}@shopee.com"
-    base_url = "https://open-api.datasuite.shopee.io/dataservice/personal"
-    headers = {
-        'Authorization': PERSONAL_TOKEN,
-        'X-End-User': end_user,
-        'Content-Type': 'application/json'
-    }
 
-    try:
-        # 1. 提交查询
-        response = requests.post(
-            f"{base_url}/query/presto",
-            headers=headers,
-            json={'sql': sql.strip(), 'prestoQueue': queue, 'idcRegion': region, 'priority': '3'},
-            timeout=10
-        )
-        response.raise_for_status()
-        data = response.json()
+def _http_post(url: str, headers: dict, payload: dict, timeout: int = 10) -> dict:
+    """同步 POST，在线程池中执行"""
+    resp = requests.post(url, headers=headers, json=payload, timeout=timeout)
+    resp.raise_for_status()
+    return resp.json()
 
-        job_id = data.get('jobId')
-        if not job_id:
-            return {'success': False, 'error': f"提交失败: {data.get('errorMsg', data.get('message', 'Unknown error'))}"}
 
-        # 2. 轮询状态
-        start_time = time.time()
-        while True:
-            if time.time() - start_time > 300:
-                return {'success': False, 'error': '查询超时 (>300秒)', 'jobId': job_id}
-
-            status_resp = requests.get(f"{base_url}/status/{job_id}", headers=headers, timeout=10)
-            status_resp.raise_for_status()
-            status_data = status_resp.json()
-            query_status = status_data.get('status')
-
-            if query_status == 'FINISH':
-                break
-            elif query_status == 'FAILED':
-                return {'success': False, 'error': f"查询失败: {status_data.get('errorMessage', 'Unknown error')}", 'jobId': job_id}
-            elif query_status in ['RUNNING', 'PENDING', 'QUEUED']:
-                time.sleep(2)
-            else:
-                return {'success': False, 'error': f'未知状态: {query_status}', 'jobId': job_id}
-
-        # 3. 获取结果
-        result_resp = requests.get(f"{base_url}/result/{job_id}", headers=headers, timeout=30)
-        result_resp.raise_for_status()
-        result_data = result_resp.json()
-
-        if 'resultSchema' not in result_data:
-            return {'success': False, 'error': f"获取结果失败: {result_data.get('errorMsg', 'Unknown error')}", 'jobId': job_id}
-
-        columns = [col['columnName'] for col in result_data.get('resultSchema', [])]
-        rows_raw = result_data.get('rows', [])
-        total_rows = len(rows_raw)
-        rows = [row.get('values', {}) for row in rows_raw[:max_rows]]
-
-        return {
-            'success': True,
-            'jobId': job_id,
-            'columns': columns,
-            'rows': rows,
-            'total_rows': total_rows,
-            'displayed_rows': len(rows),
-            'truncated': total_rows > max_rows
-        }
-
-    except requests.exceptions.RequestException as e:
-        return {'success': False, 'error': f'请求失败: {str(e)}'}
-    except Exception as e:
-        return {'success': False, 'error': f'执行错误: {str(e)}'}
+def _http_get(url: str, headers: dict, timeout: int = 10) -> dict:
+    """同步 GET，在线程池中执行"""
+    resp = requests.get(url, headers=headers, timeout=timeout)
+    resp.raise_for_status()
+    return resp.json()
 
 
 def format_result_as_table(columns: list, rows: list) -> str:
@@ -142,7 +82,7 @@ def format_result_as_table(columns: list, rows: list) -> str:
 
 
 @mcp.tool()
-def query_presto(
+async def query_presto(
     sql: str,
     username: str = DEFAULT_USERNAME,
     queue: str = DEFAULT_QUEUE,
@@ -170,28 +110,71 @@ def query_presto(
         region: IDC 集群，SG 或 US（默认 SG）
         max_rows: 最多返回行数（默认 100，最大 2000）
     """
-    result = run_presto_query(
-        sql=sql,
-        username=username,
-        queue=queue,
-        region=region,
-        max_rows=min(max_rows, 2000)
-    )
+    end_user = username if '@' in username else f"{username}@shopee.com"
+    headers = {
+        'Authorization': PERSONAL_TOKEN,
+        'X-End-User': end_user,
+        'Content-Type': 'application/json'
+    }
+    max_rows = min(max_rows, 2000)
 
-    if not result['success']:
-        error_msg = f"❌ 查询失败\n\n错误: {result['error']}"
-        if 'jobId' in result:
-            error_msg += f"\nJob ID: {result['jobId']}"
-        return error_msg
+    try:
+        # 1. 提交查询（在线程池中执行，不阻塞事件循环）
+        data = await asyncio.to_thread(
+            _http_post,
+            f"{BASE_URL}/query/presto",
+            headers,
+            {'sql': sql.strip(), 'prestoQueue': queue, 'idcRegion': region, 'priority': '3'}
+        )
+        job_id = data.get('jobId')
+        if not job_id:
+            return f"❌ 提交失败: {data.get('errorMsg', data.get('message', 'Unknown error'))}"
 
-    table = format_result_as_table(result['columns'], result['rows'])
-    output = f"✅ 查询成功\n\n"
-    output += f"Job ID: {result['jobId']}\n"
-    output += f"总行数: {result['total_rows']}，显示行数: {result['displayed_rows']}\n"
-    if result['truncated']:
-        output += f"⚠️ 结果已截断（只显示前 {max_rows} 行）\n"
-    output += f"\n{table}\n\n列名: {', '.join(result['columns'])}"
-    return output
+        # 2. 异步轮询状态（asyncio.sleep 不阻塞事件循环）
+        start_time = time.time()
+        while True:
+            if time.time() - start_time > 300:
+                return f"❌ 查询超时 (>300秒)\nJob ID: {job_id}"
+
+            status_data = await asyncio.to_thread(
+                _http_get, f"{BASE_URL}/status/{job_id}", headers
+            )
+            query_status = status_data.get('status')
+
+            if query_status == 'FINISH':
+                break
+            elif query_status == 'FAILED':
+                return f"❌ 查询失败: {status_data.get('errorMessage', 'Unknown error')}\nJob ID: {job_id}"
+            elif query_status in ['RUNNING', 'PENDING', 'QUEUED']:
+                await asyncio.sleep(2)  # 异步等待，不阻塞 MCP 心跳
+            else:
+                return f"❌ 未知状态: {query_status}\nJob ID: {job_id}"
+
+        # 3. 获取结果
+        result_data = await asyncio.to_thread(
+            _http_get, f"{BASE_URL}/result/{job_id}", headers
+        )
+        if 'resultSchema' not in result_data:
+            return f"❌ 获取结果失败: {result_data.get('errorMsg', 'Unknown error')}\nJob ID: {job_id}"
+
+        columns = [col['columnName'] for col in result_data.get('resultSchema', [])]
+        rows_raw = result_data.get('rows', [])
+        total_rows = len(rows_raw)
+        rows = [row.get('values', {}) for row in rows_raw[:max_rows]]
+
+        table = format_result_as_table(columns, rows)
+        output = f"✅ 查询成功\n\n"
+        output += f"Job ID: {job_id}\n"
+        output += f"总行数: {total_rows}，显示行数: {len(rows)}\n"
+        if total_rows > max_rows:
+            output += f"⚠️ 结果已截断（只显示前 {max_rows} 行）\n"
+        output += f"\n{table}\n\n列名: {', '.join(columns)}"
+        return output
+
+    except requests.exceptions.RequestException as e:
+        return f"❌ 请求失败: {str(e)}"
+    except Exception as e:
+        return f"❌ 执行错误: {str(e)}"
 
 
 if __name__ == "__main__":

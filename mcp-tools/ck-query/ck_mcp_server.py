@@ -15,6 +15,7 @@ ClickHouse MCP Server - 为 Cursor 提供 ClickHouse 查询能力
 }
 """
 
+import asyncio
 import base64
 import hashlib
 import hmac
@@ -184,7 +185,7 @@ def format_result_as_table(columns: list, rows: list) -> str:
 # ==================== MCP Tool ====================
 
 @mcp.tool()
-def query_ck(
+async def query_ck(
     sql: str,
     env: str,
     cluster: Optional[str] = None,
@@ -221,11 +222,11 @@ def query_ck(
     if env == "live":
         if not cluster:
             return "错误: env=live 时必须指定 cluster（ck2 或 ck6），请先询问用户"
-        result = execute_live(sql=sql, cluster=cluster, max_rows=max_rows)
+        result = await asyncio.to_thread(execute_live, sql, cluster, max_rows)
         env_label = f"LIVE {cluster}"
 
     elif env == "test":
-        result = execute_test(sql=sql, database=database, max_rows=max_rows)
+        result = await asyncio.to_thread(execute_test, sql, database, max_rows)
         env_label = f"TEST / {database}"
 
     else:
