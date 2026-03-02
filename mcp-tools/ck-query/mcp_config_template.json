@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "ck-query": {
+      "command": "python3",
+      "args": ["/Users/tianyi.liang/Cursor/SPX_Helper/ck-tools/ck_mcp_server.py"]
+    }
+  }
+}
