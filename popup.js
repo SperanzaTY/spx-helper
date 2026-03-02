@@ -7433,6 +7433,10 @@ function showToast(message, duration = 3000) {
 // ===== 站点查询工具 =====
 // 站点查询 - 使用 ApiMart 接口
 const STATION_API_URL = 'https://mgmt-data.ssc.test.shopeemobile.com/api_mart/mgmt_app/data_api/internal_search';
+const CK_API_URLS = {
+  ck2: 'https://mgmt-data.ssc.test.shopeemobile.com/api_mart/mgmt_app/data_api/internal_search_ck2',
+  ck6: 'https://mgmt-data.ssc.test.shopeemobile.com/api_mart/mgmt_app/data_api/internal_search_ck6'
+};
 
 // ========================================
 // ClickHouse 直连配置（TEST 环境）
@@ -7512,17 +7516,17 @@ async function executeTestClickHouseSQL(sql) {
 }
 
 // 通用的 ClickHouse SQL 执行函数（通过 internal_search API，查询 LIVE 数据）
-async function executeClickHouseSQL(sql) {
-  /**
-   * 通过 API 执行 ClickHouse SQL（查询 LIVE 环境数据）
-   * 
-   * 用途：站点查询等（后端连接 LIVE ClickHouse）
-   * 
-   * @param {string} sql - SQL 语句（必须以 ", 1 as flag" 结尾）
-   * @returns {Promise<Object>} - 返回格式：{ success: boolean, data?: any, error?: string }
-   */
+// @param {string} sql - SQL 语句（必须以 ", 1 as flag" 结尾）
+// @param {string} cluster - CK 集群，'ck2' 或 'ck6'，默认 'ck2'
+async function executeClickHouseSQL(sql, cluster = 'ck2') {
   try {
+    const apiUrl = CK_API_URLS[cluster];
+    if (!apiUrl) {
+      return { success: false, error: `不支持的集群: ${cluster}，可选值为 ck2、ck6` };
+    }
+
     console.log('🔵 [ClickHouse SQL 执行器 - API] 开始执行');
+    console.log(`🖥️ 集群: ${cluster}`);
     console.log('📝 SQL:', sql);
     
     // 生成 JWT Token
@@ -7530,7 +7534,7 @@ async function executeClickHouseSQL(sql) {
     console.log('🔑 JWT Token 已生成');
     
     // 发送请求
-    const response = await fetch(STATION_API_URL, {
+    const response = await fetch(apiUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -7599,26 +7603,28 @@ document.querySelectorAll('.station-search-tab').forEach(tab => {
 document.getElementById('searchStationById')?.addEventListener('click', async function() {
   const stationId = document.getElementById('stationIdInput').value.trim();
   const market = document.getElementById('stationMarketSelect').value;
+  const cluster = document.getElementById('stationClusterSelect').value;
   
   if (!stationId) {
     showStationError('请输入站点 ID');
     return;
   }
   
-  await queryStationById(stationId, market);
+  await queryStationById(stationId, market, cluster);
 });
 
 // 按站点名称查询
 document.getElementById('searchStationByName')?.addEventListener('click', async function() {
   const stationName = document.getElementById('stationNameInput').value.trim();
   const market = document.getElementById('stationMarketSelectName').value;
+  const cluster = document.getElementById('stationClusterSelectName').value;
   
   if (!stationName) {
     showStationError('请输入站点名称关键词');
     return;
   }
   
-  await queryStationByName(stationName, market);
+  await queryStationByName(stationName, market, cluster);
 });
 
 // 回车键触发查询
@@ -7635,19 +7641,14 @@ document.getElementById('stationNameInput')?.addEventListener('keypress', functi
 });
 
 // 查询站点 ID
-async function queryStationById(stationId, market = '') {
+async function queryStationById(stationId, market = '', cluster = 'ck2') {
   const resultsContainer = document.getElementById('stationResults');
   resultsContainer.innerHTML = '<div class="station-loading"><div class="station-loading-spinner"></div><div class="station-loading-text">查询中...</div></div>';
   
   console.log('=== 开始查询站点 ID ===');
-  console.log('📋 输入参数:', { stationId, market });
+  console.log('📋 输入参数:', { stationId, market, cluster });
   
   try {
-    // 生成 JWT Token
-    console.log('🔑 生成 JWT Token...');
-    const jwtToken = await generateApiMartJwtToken();
-    console.log('🔑 JWT Token:', jwtToken.substring(0, 50) + '...');
-    
     // 构造 SQL 查询
     const markets = ['sg', 'id', 'my', 'th', 'ph', 'vn', 'tw', 'br'];
     const targetMarkets = market ? [market] : markets;
@@ -7655,53 +7656,31 @@ async function queryStationById(stationId, market = '') {
     
     // 构造 UNION ALL 查询以支持跨市场查询
     const sqlParts = targetMarkets.map(m => 
-      `SELECT '${m}' as market, station_id, station_name, station_type, status, city_name, district_id, latitude, longitude, manager, manager_email, director, director_email, is_active_site_l7d, station_region, station_area, station_sub_area, is_own_fleet, xpt_flag, address, bi_station_type, 1 as flag FROM spx_mart_manage_app.dim_spx_station_tab_${m}_all WHERE station_id = ${stationId}`
+      `SELECT '${m}' as market, station_id, station_name, station_type, status, city_name, district_id, latitude, longitude, manager, manager_email, director, director_email, is_active_site_l7d, station_region, station_area, station_sub_area, xpt_flag, bi_station_type, 1 as flag FROM spx_mart_manage_app.dim_spx_station_tab_${m}_all WHERE station_id = ${stationId}`
     );
     const sql = sqlParts.join(' UNION ALL ');
     
     console.log('📝 查询 SQL:', sql);
-    console.log('📝 SQL 长度:', sql.length);
     
     const startTime = Date.now();
-    console.log('🌐 发送请求到:', STATION_API_URL);
-    
-    const response = await fetch(STATION_API_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'jwt-token': jwtToken
-      },
-      body: JSON.stringify({ sql })
-    });
-    
-    console.log('📡 响应状态:', response.status, response.statusText);
-    
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('❌ 响应错误:', errorText);
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-    
-    const result = await response.json();
+    const result = await executeClickHouseSQL(sql, cluster);
     const queryTime = ((Date.now() - startTime) / 1000).toFixed(2) + 's';
     
-    console.log('✅ 查询结果:', result);
-    console.log('✅ result.data:', result.data);
-    console.log('✅ result.data.list:', result.data?.list);
-    console.log('✅ 数据长度:', result.data?.list?.length);
+    if (!result.success) {
+      throw new Error(result.error || '查询失败');
+    }
+    
+    console.log('✅ 查询结果:', result.data);
     console.log('✅ 查询耗时:', queryTime);
     
     // 检查返回数据 (数据在 result.data.list 数组中)
-    if (result && result.retcode === 0 && result.data && result.data.list && Array.isArray(result.data.list) && result.data.list.length > 0) {
-      console.log('✅ 渲染结果...');
+    if (result.data && result.data.list && Array.isArray(result.data.list) && result.data.list.length > 0) {
       renderStationResults(result.data.list, queryTime);
     } else {
-      console.warn('⚠️ 未找到数据');
       showStationEmpty(`未找到站点 ID: ${stationId}`);
     }
   } catch (error) {
     console.error('❌ 查询失败:', error);
-    console.error('❌ 错误堆栈:', error.stack);
     showStationError(`查询失败: ${error.message}`);
   }
   
@@ -7709,19 +7688,14 @@ async function queryStationById(stationId, market = '') {
 }
 
 // 查询站点名称
-async function queryStationByName(stationName, market = '') {
+async function queryStationByName(stationName, market = '', cluster = 'ck2') {
   const resultsContainer = document.getElementById('stationResults');
   resultsContainer.innerHTML = '<div class="station-loading"><div class="station-loading-spinner"></div><div class="station-loading-text">搜索中...</div></div>';
   
   console.log('=== 开始搜索站点名称 ===');
-  console.log('📋 输入参数:', { stationName, market });
+  console.log('📋 输入参数:', { stationName, market, cluster });
   
   try {
-    // 生成 JWT Token
-    console.log('🔑 生成 JWT Token...');
-    const jwtToken = await generateApiMartJwtToken();
-    console.log('🔑 JWT Token:', jwtToken.substring(0, 50) + '...');
-    
     // 构造 SQL 查询（使用 LIKE 模糊匹配）
     const markets = ['sg', 'id', 'my', 'th', 'ph', 'vn', 'tw', 'br'];
     const targetMarkets = market ? [market] : markets;
@@ -7729,53 +7703,31 @@ async function queryStationByName(stationName, market = '') {
     
     // 构造 UNION ALL 查询以支持跨市场查询
     const sqlParts = targetMarkets.map(m => 
-      `SELECT '${m}' as market, station_id, station_name, station_type, status, city_name, district_id, latitude, longitude, manager, manager_email, director, director_email, is_active_site_l7d, station_region, station_area, station_sub_area, is_own_fleet, xpt_flag, address, bi_station_type, 1 as flag FROM spx_mart_manage_app.dim_spx_station_tab_${m}_all WHERE station_name LIKE '%${stationName}%' LIMIT 50`
+      `SELECT '${m}' as market, station_id, station_name, station_type, status, city_name, district_id, latitude, longitude, manager, manager_email, director, director_email, is_active_site_l7d, station_region, station_area, station_sub_area, xpt_flag, bi_station_type, 1 as flag FROM spx_mart_manage_app.dim_spx_station_tab_${m}_all WHERE station_name LIKE '%${stationName}%' LIMIT 50`
     );
     const sql = sqlParts.join(' UNION ALL ');
     
     console.log('📝 搜索 SQL:', sql);
-    console.log('📝 SQL 长度:', sql.length);
     
     const startTime = Date.now();
-    console.log('🌐 发送请求到:', STATION_API_URL);
-    
-    const response = await fetch(STATION_API_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'jwt-token': jwtToken
-      },
-      body: JSON.stringify({ sql })
-    });
-    
-    console.log('📡 响应状态:', response.status, response.statusText);
-    
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('❌ 响应错误:', errorText);
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-    
-    const result = await response.json();
+    const result = await executeClickHouseSQL(sql, cluster);
     const queryTime = ((Date.now() - startTime) / 1000).toFixed(2) + 's';
     
-    console.log('✅ 搜索结果:', result);
-    console.log('✅ result.data:', result.data);
-    console.log('✅ result.data.list:', result.data?.list);
-    console.log('✅ 数据长度:', result.data?.list?.length);
+    if (!result.success) {
+      throw new Error(result.error || '查询失败');
+    }
+    
+    console.log('✅ 搜索结果:', result.data);
     console.log('✅ 查询耗时:', queryTime);
     
     // 检查返回数据 (数据在 result.data.list 数组中)
-    if (result && result.retcode === 0 && result.data && result.data.list && Array.isArray(result.data.list) && result.data.list.length > 0) {
-      console.log('✅ 渲染结果...');
+    if (result.data && result.data.list && Array.isArray(result.data.list) && result.data.list.length > 0) {
       renderStationResults(result.data.list, queryTime);
     } else {
-      console.warn('⚠️ 未找到数据');
       showStationEmpty(`未找到包含 "${stationName}" 的站点`);
     }
   } catch (error) {
     console.error('❌ 搜索失败:', error);
-    console.error('❌ 错误堆栈:', error.stack);
     showStationError(`搜索失败: ${error.message}`);
   }
   
@@ -7840,10 +7792,6 @@ function renderStationResults(stations, queryTime) {
             <div class="station-result-label">坐标</div>
             <div class="station-result-value" style="font-size: 12px;">${station.latitude || '-'}, ${station.longitude || '-'}</div>
           </div>
-          <div class="station-result-field" style="grid-column: 1 / -1;">
-            <div class="station-result-label">地址</div>
-            <div class="station-result-value" style="font-size: 12px;">${station.address || '-'}</div>
-          </div>
         </div>
         <div class="station-result-actions">
           <button class="btn btn-secondary btn-small copy-station-id" data-id="${station.station_id}">📋 复制 ID</button>
@@ -7873,8 +7821,7 @@ function renderStationResults(stations, queryTime) {
         `站点名称: ${info.station_name}\n` +
         `类型: ${info.bi_station_type}\n` +
         `城市: ${info.city_name}\n` +
-        `经理: ${info.manager} (${info.manager_email})\n` +
-        `地址: ${info.address}`;
+        `经理: ${info.manager} (${info.manager_email})`;
       
       copyToClipboard(text);
       showToast('✅ 站点详情已复制到剪贴板');
