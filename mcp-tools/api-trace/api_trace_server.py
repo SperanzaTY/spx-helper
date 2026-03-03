@@ -344,11 +344,32 @@ LIMIT 5
         if not query_tables:
             query_tables = all_tables[:2]
 
+        # CK 库前缀：这些库在 ClickHouse 里，不在 Presto 里
+        CK_SCHEMAS = ('spx_mart_manage_app', 'spx_mart_pub', 'spx_mart_manage_app_pub')
+
         for table_full in query_tables:
+            output.append(f"\n### 源表：`{table_full}`")
+
+            # 检查是否含未替换的占位符（如 {region}、{market} 等）
+            remaining_placeholders = re.findall(r'\{(\w+)\}', table_full)
+            if remaining_placeholders:
+                output.append(f"⚠️ 表名含动态占位符：`{'`, `'.join(remaining_placeholders)}`，无法直接用 Presto 查询。")
+                output.append(f"  该表为 ClickHouse 表，请用 `query_ck` 工具查询，例如：")
+                example_table = re.sub(r'\{region\}', 'sg', table_full)
+                example_table = re.sub(r'\{market\}', 'sg', example_table)
+                output.append(f"  ```\n  query_ck(env=live, cluster=ck2, sql=\"SELECT * FROM {example_table} LIMIT 5\")\n  ```")
+                continue
+
+            # 检查是否是 CK 库
+            table_schema = table_full.split('.')[0] if '.' in table_full else ''
+            if table_schema in CK_SCHEMAS:
+                where_clause = f"WHERE {custom_where}" if custom_where else ""
+                output.append(f"ℹ️ `{table_schema}` 是 ClickHouse 库，无法通过 Presto 查询，请用 `query_ck` 工具：")
+                output.append(f"  ```\n  query_ck(env=live, cluster=ck2, sql=\"SELECT * FROM {table_full} {where_clause} LIMIT {max_rows}\")\n  ```")
+                continue
+
             where_clause = f"WHERE {custom_where}" if custom_where else ""
             source_sql = f"SELECT * FROM {table_full} {where_clause} LIMIT {max_rows}"
-
-            output.append(f"\n### 源表：`{table_full}`")
             output.append(f"```sql\n{source_sql}\n```")
 
             source_result = await run_presto(source_sql, max_rows=max_rows)
