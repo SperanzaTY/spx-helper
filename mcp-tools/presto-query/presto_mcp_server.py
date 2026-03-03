@@ -144,7 +144,16 @@ async def query_presto(
             if query_status == 'FINISH':
                 break
             elif query_status == 'FAILED':
-                return f"❌ 查询失败: {status_data.get('errorMessage', 'Unknown error')}\nJob ID: {job_id}"
+                # 尝试多个可能的错误字段名，并附上完整响应便于调试
+                err_msg = (
+                    status_data.get('errorMessage')
+                    or status_data.get('errorMsg')
+                    or status_data.get('error')
+                    or status_data.get('message')
+                    or status_data.get('msg')
+                    or str(status_data)  # fallback：输出完整响应
+                )
+                return f"❌ 查询失败\n\nJob ID: {job_id}\n错误: {err_msg}"
             elif query_status in ['RUNNING', 'PENDING', 'QUEUED']:
                 await asyncio.sleep(2)  # 异步等待，不阻塞 MCP 心跳
             else:

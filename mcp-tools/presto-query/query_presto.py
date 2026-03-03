@@ -33,7 +33,7 @@ class PrestoQueryClient:
     def _get_headers(self) -> Dict[str, str]:
         """获取请求头"""
         return {
-            'Authorization': f'Bearer {self.personal_token}',
+            'Authorization': self.personal_token,
             'X-End-User': self.username,
             'Content-Type': 'application/json'
         }
@@ -80,13 +80,12 @@ class PrestoQueryClient:
             response.raise_for_status()
             
             data = response.json()
-            
-            if data.get('status') == 'success':
-                job_id = data.get('data', {}).get('jobId')
+            job_id = data.get('jobId')
+            if job_id:
                 print(f"✅ 查询已提交! jobId: {job_id}")
                 return job_id
             else:
-                error_msg = data.get('errorMsg', data.get('message', 'Unknown error'))
+                error_msg = data.get('errorMsg', data.get('message', str(data)))
                 raise Exception(f"提交查询失败: {error_msg}")
                 
         except requests.exceptions.RequestException as e:
@@ -109,12 +108,8 @@ class PrestoQueryClient:
             response.raise_for_status()
             
             data = response.json()
-            
-            if data.get('status') == 'success':
-                return data.get('data', {})
-            else:
-                error_msg = data.get('errorMsg', data.get('message', 'Unknown error'))
-                raise Exception(f"检查状态失败: {error_msg}")
+            # 直接返回完整响应（jobId、status、errorMessage 等都在顶层）
+            return data
                 
         except requests.exceptions.RequestException as e:
             raise Exception(f"请求失败: {str(e)}")
@@ -136,11 +131,10 @@ class PrestoQueryClient:
             response.raise_for_status()
             
             data = response.json()
-            
-            if data.get('status') == 'success':
-                return data.get('data', {})
+            if 'resultSchema' in data:
+                return data
             else:
-                error_msg = data.get('errorMsg', data.get('message', 'Unknown error'))
+                error_msg = data.get('errorMsg', data.get('message', str(data)))
                 raise Exception(f"获取结果失败: {error_msg}")
                 
         except requests.exceptions.RequestException as e:
@@ -182,7 +176,14 @@ class PrestoQueryClient:
                 print(f"✅ 查询完成！(轮询 {poll_count} 次)")
                 break
             elif status == 'FAILED':
-                error_msg = status_data.get('errorMessage', 'Unknown error')
+                error_msg = (
+                    status_data.get('errorMessage')
+                    or status_data.get('errorMsg')
+                    or status_data.get('error')
+                    or status_data.get('message')
+                    or status_data.get('msg')
+                    or str(status_data)
+                )
                 raise Exception(f"查询失败: {error_msg}")
             elif status in ['RUNNING', 'PENDING', 'QUEUED']:
                 elapsed = time.time() - start_time
@@ -198,7 +199,7 @@ class PrestoQueryClient:
         result = self.get_result(job_id)
         
         # 解析结果
-        columns = [col['name'] for col in result.get('resultSchema', [])]
+        columns = [col.get('columnName', col.get('name', '')) for col in result.get('resultSchema', [])]
         rows = []
         
         for row_data in result.get('rows', []):
