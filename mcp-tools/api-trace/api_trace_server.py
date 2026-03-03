@@ -345,7 +345,14 @@ LIMIT 5
             query_tables = all_tables[:2]
 
         # CK 库前缀：这些库在 ClickHouse 里，不在 Presto 里
+        # 集群说明：ck2(online2/online5 互为读写)，ck6(online6/online7 互为读写)
+        # spx_mart_manage_app / spx_mart_pub 在 ck6 集群
         CK_SCHEMAS = ('spx_mart_manage_app', 'spx_mart_pub', 'spx_mart_manage_app_pub')
+        CK_SCHEMA_CLUSTER = {
+            'spx_mart_manage_app': 'ck6',
+            'spx_mart_pub': 'ck6',
+            'spx_mart_manage_app_pub': 'ck6',
+        }
 
         for table_full in query_tables:
             output.append(f"\n### 源表：`{table_full}`")
@@ -357,15 +364,18 @@ LIMIT 5
                 output.append(f"  该表为 ClickHouse 表，请用 `query_ck` 工具查询，例如：")
                 example_table = re.sub(r'\{region\}', 'sg', table_full)
                 example_table = re.sub(r'\{market\}', 'sg', example_table)
-                output.append(f"  ```\n  query_ck(env=live, cluster=ck2, sql=\"SELECT * FROM {example_table} LIMIT 5\")\n  ```")
+                schema = table_full.split('.')[0] if '.' in table_full else ''
+                cluster_hint = CK_SCHEMA_CLUSTER.get(schema, 'ck6')
+                output.append(f"  ```\n  query_ck(env=live, cluster={cluster_hint}, sql=\"SELECT * FROM {example_table} LIMIT 5\")\n  ```")
                 continue
 
             # 检查是否是 CK 库
             table_schema = table_full.split('.')[0] if '.' in table_full else ''
             if table_schema in CK_SCHEMAS:
+                cluster_hint = CK_SCHEMA_CLUSTER.get(table_schema, 'ck6')
                 where_clause = f"WHERE {custom_where}" if custom_where else ""
-                output.append(f"ℹ️ `{table_schema}` 是 ClickHouse 库，无法通过 Presto 查询，请用 `query_ck` 工具：")
-                output.append(f"  ```\n  query_ck(env=live, cluster=ck2, sql=\"SELECT * FROM {table_full} {where_clause} LIMIT {max_rows}\")\n  ```")
+                output.append(f"ℹ️ `{table_schema}` 是 ClickHouse 库（集群：{cluster_hint}），无法通过 Presto 查询，请用 `query_ck` 工具：")
+                output.append(f"  ```\n  query_ck(env=live, cluster={cluster_hint}, sql=\"SELECT * FROM {table_full} {where_clause} LIMIT {max_rows}\")\n  ```")
                 continue
 
             where_clause = f"WHERE {custom_where}" if custom_where else ""
@@ -397,7 +407,7 @@ LIMIT 5
         if tables:
             output.append(f"1. 对比 API 响应与源表 `{tables[0]['full']}` 中的数据")
         output.append("2. 如有具体数据 ID，在 custom_where 中传入精准条件重新查询")
-        output.append("3. 可用 `query_ck(env=live)` 查询 CK 层数据，对比 Presto 源表是否一致")
+        output.append("3. 可用 `query_ck(env=live, cluster=ck6)` 查询 CK 层数据（spx_mart_manage_app 在 ck6），对比 Presto 源表是否一致")
         output.append("4. 检查 biz_sql 中的 JOIN 逻辑和过滤条件是否符合预期")
 
     output.append(f"\n---\n*溯源完成，如需深入排查可继续使用 query_presto / query_ck 工具*")
