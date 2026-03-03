@@ -46,8 +46,11 @@ if not DEFAULT_USERNAME:
     print("错误: 未设置 PRESTO_USERNAME 环境变量", file=sys.stderr)
     sys.exit(1)
 
-# API 血缘 Presto 表（DataService spx_mart.api_lineage_search 的底层源表）
-LINEAGE_TABLE = os.environ.get('LINEAGE_PRESTO_TABLE', 'spx_mart.api_lineage')
+# API 血缘表（sls_mart 中的 API 元数据表）
+LINEAGE_TABLE = os.environ.get(
+    'LINEAGE_PRESTO_TABLE',
+    'sls_mart.shopee_ssc_data_api_mart_db__api_mart_api_tab__reg_continuous_s0_live'
+)
 
 BASE_URL = "https://open-api.datasuite.shopee.io/dataservice/personal"
 
@@ -219,11 +222,35 @@ async def api_trace(
     output.append(f"查询表：`{LINEAGE_TABLE}`\n")
 
     lineage_sql = f"""
-SELECT api_id, api_version, biz_sql, ds_id, publish_env
-FROM {LINEAGE_TABLE}
-WHERE api_id LIKE '%{api_id}%'
-  AND publish_env = 'live'
-ORDER BY CAST(api_version AS BIGINT) DESC
+SELECT
+    api_id,
+    api_version,
+    biz_sql,
+    ds_id,
+    publish_env,
+    array_join(
+        array_distinct(
+            regexp_extract_all(biz_sql, '\\{{mgmt_db2\\}}\\.([a-zA-Z0-9_{{}}\\-]+)', 1)
+        ), ', '
+    ) AS mgmt_tables,
+    array_join(
+        array_distinct(
+            regexp_extract_all(
+                lower(biz_sql),
+                '\\bfrom\\s+([a-zA-Z0-9_]+\\.[a-zA-Z0-9_{{}}\\-]+)',
+                1
+            )
+        ), ', '
+    ) AS all_tables
+FROM (
+    SELECT *,
+           row_number() OVER (PARTITION BY api_id ORDER BY api_version DESC) AS rn
+    FROM {LINEAGE_TABLE}
+    WHERE publish_env = 'live'
+      AND api_id LIKE '%{api_id}%'
+)
+WHERE rn = 1
+ORDER BY api_id ASC
 LIMIT 5
 """
     lineage_result = await run_presto(lineage_sql, max_rows=5)
@@ -249,6 +276,8 @@ LIMIT 5
     api_version = row.get('api_version', 'unknown')
     biz_sql = row.get('biz_sql', '')
     ds_id = row.get('ds_id', '')
+    mgmt_tables_str = row.get('mgmt_tables', '')
+    all_tables_str = row.get('all_tables', '')
 
     output.append(f"✅ 找到血缘记录")
     output.append(f"- **api_id**: `{found_api_id}`")
@@ -262,17 +291,44 @@ LIMIT 5
         output.append("⚠️ biz_sql 为空，无法继续溯源")
         return "\n".join(output)
 
+    # 用 Presto 已解析的表名结果
+    mgmt_tables = [t.strip() for t in mgmt_tables_str.split(',') if t.strip()]
+    all_tables_raw = [t.strip() for t in all_tables_str.split(',') if t.strip()]
+    # 去掉 {mgmt_db2} 占位符表，用真实库名替换后加回
+    all_tables = []
+    seen = set()
+    for t in all_tables_raw:
+        t_replaced = replace_sql_placeholders(t)
+        if t_replaced not in seen:
+            seen.add(t_replaced)
+            all_tables.append(t_replaced)
+
     tables = extract_tables_from_sql(biz_sql)
     columns = extract_select_columns(biz_sql)
     readable_sql = replace_sql_placeholders(biz_sql)
 
-    output.append(f"\n**源表列表**（共 {len(tables)} 张）：")
-    for t in tables:
-        output.append(f"  - `{t['full']}`")
+    # 检测 dynamic where（条件 SQL 特征）
+    has_dynamic_where = bool(
+        re.search(r'\$\{|#\{|\{where\}|\{filter\}|dynamic.*where|where.*dynamic', biz_sql, re.IGNORECASE)
+    )
+
+    if mgmt_tables:
+        output.append(f"\n**{'{mgmt_db2}'} 源表**（已识别 {len(mgmt_tables)} 张）：")
+        for t in mgmt_tables:
+            output.append(f"  - `spx_mart_manage_app.{t}`")
+
+    if all_tables:
+        output.append(f"\n**所有源表**（FROM/JOIN 解析）：")
+        for t in all_tables:
+            output.append(f"  - `{t}`")
 
     if columns:
         output.append(f"\n**SELECT 字段**（前20列）：")
         output.append("  " + ", ".join(f"`{c}`" for c in columns[:20]))
+
+    if has_dynamic_where:
+        output.append("\n⚠️ **检测到 Dynamic WHERE**：biz_sql 中包含动态条件占位符，")
+        output.append("  实际查询条件由调用方传入，直查源表时需手动补充 WHERE 条件。")
 
     output.append(f"\n**biz_sql**（占位符已替换）：")
     output.append("```sql")
@@ -280,14 +336,17 @@ LIMIT 5
     output.append("```")
 
     # ===== Step 3：直接查询源表 =====
-    if query_source_data and tables:
+    if query_source_data and (mgmt_tables or all_tables):
         output.append("\n## Step 3：直接查询源表数据（Presto）")
 
-        for t in tables[:3]:  # 最多查前3张表
-            table_full = replace_sql_placeholders(t['full'])
-            # 构建查询：SELECT * 或尽量复用 biz_sql 中的字段
-            where_clause = f"WHERE {custom_where}" if custom_where else "-- 未指定 WHERE 条件，返回全表样本"
-            source_sql = f"SELECT * FROM {table_full} {where_clause if custom_where else ''} LIMIT {max_rows}"
+        # 优先查 mgmt_db2 源表（最常见）
+        query_tables = [f"spx_mart_manage_app.{t}" for t in mgmt_tables[:2]]
+        if not query_tables:
+            query_tables = all_tables[:2]
+
+        for table_full in query_tables:
+            where_clause = f"WHERE {custom_where}" if custom_where else ""
+            source_sql = f"SELECT * FROM {table_full} {where_clause} LIMIT {max_rows}"
 
             output.append(f"\n### 源表：`{table_full}`")
             output.append(f"```sql\n{source_sql}\n```")
@@ -297,9 +356,7 @@ LIMIT 5
             if not source_result['success']:
                 output.append(f"⚠️ 查询失败：{source_result['error']}")
             elif not source_result['rows']:
-                output.append("📭 查询返回 0 行")
-                if custom_where:
-                    output.append(f"   提示：WHERE 条件 `{custom_where}` 下无数据")
+                output.append(f"📭 查询返回 0 行" + (f"（WHERE: `{custom_where}`）" if custom_where else ""))
             else:
                 table_str = format_table(source_result['columns'], source_result['rows'])
                 output.append(f"返回 {source_result['total']} 行，显示前 {len(source_result['rows'])} 行：\n")
@@ -336,11 +393,34 @@ async def get_api_lineage(api_id: str) -> str:
         api_id: API 标识符
     """
     lineage_sql = f"""
-SELECT api_id, api_version, biz_sql, ds_id, publish_env
-FROM {LINEAGE_TABLE}
-WHERE api_id LIKE '%{api_id}%'
-  AND publish_env = 'live'
-ORDER BY CAST(api_version AS BIGINT) DESC
+SELECT
+    api_id,
+    api_version,
+    biz_sql,
+    ds_id,
+    array_join(
+        array_distinct(
+            regexp_extract_all(biz_sql, '\\{{mgmt_db2\\}}\\.([a-zA-Z0-9_{{}}\\-]+)', 1)
+        ), ', '
+    ) AS mgmt_tables,
+    array_join(
+        array_distinct(
+            regexp_extract_all(
+                lower(biz_sql),
+                '\\bfrom\\s+([a-zA-Z0-9_]+\\.[a-zA-Z0-9_{{}}\\-]+)',
+                1
+            )
+        ), ', '
+    ) AS all_tables
+FROM (
+    SELECT *,
+           row_number() OVER (PARTITION BY api_id ORDER BY api_version DESC) AS rn
+    FROM {LINEAGE_TABLE}
+    WHERE publish_env = 'live'
+      AND api_id LIKE '%{api_id}%'
+)
+WHERE rn = 1
+ORDER BY api_id ASC
 LIMIT 3
 """
     result = await run_presto(lineage_sql, max_rows=3)
@@ -355,14 +435,20 @@ LIMIT 3
     biz_sql = row.get('biz_sql', '')
     tables = extract_tables_from_sql(biz_sql)
     readable_sql = replace_sql_placeholders(biz_sql)
+    mgmt_tables = [t.strip() for t in row.get('mgmt_tables', '').split(',') if t.strip()]
+    has_dynamic = bool(re.search(r'\$\{|#\{|\{where\}|\{filter\}', biz_sql))
 
     out = [
         f"## API 血缘：{row.get('api_id')}",
         f"- 版本：{row.get('api_version')}",
         f"- ds_id：{row.get('ds_id')}",
-        f"\n**源表**：" + "、".join(f"`{t['full']}`" for t in tables),
-        f"\n**biz_sql**：\n```sql\n{readable_sql.strip()}\n```"
     ]
+    if has_dynamic:
+        out.append("- ⚠️ 含 **Dynamic WHERE**（动态条件 SQL）")
+    if mgmt_tables:
+        out.append(f"\n**{{mgmt_db2}} 源表**：" + "、".join(f"`spx_mart_manage_app.{t}`" for t in mgmt_tables))
+    out.append(f"\n**所有源表**：" + "、".join(f"`{t['full']}`" for t in tables))
+    out.append(f"\n**biz_sql**：\n```sql\n{readable_sql.strip()}\n```")
     return "\n".join(out)
 
 
