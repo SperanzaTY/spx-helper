@@ -54,7 +54,7 @@ fetch(STATION_API_URL, {
 ```javascript
 // 构造 UNION ALL 查询支持跨市场
 const sqlParts = targetMarkets.map(m => 
-  `SELECT '${m}' as market, station_id, station_name, ..., 1 as flag 
+  `SELECT '${m}' as market, station_id, station_name, ..., 1 as ck_flag_res 
    FROM spx_mart_manage_app.dim_spx_station_tab_${m}_all 
    WHERE station_id = ${stationId}`
 );
@@ -65,7 +65,7 @@ const sql = sqlParts.join(' UNION ALL ');
 ```javascript
 // 使用 LIKE 模糊匹配
 const sqlParts = targetMarkets.map(m => 
-  `SELECT '${m}' as market, station_id, station_name, ..., 1 as flag 
+  `SELECT '${m}' as market, station_id, station_name, ..., 1 as ck_flag_res 
    FROM spx_mart_manage_app.dim_spx_station_tab_${m}_all 
    WHERE station_name LIKE '%${stationName}%' 
    LIMIT 50`
@@ -95,19 +95,20 @@ async function generateApiMartJwtToken() {
 
 ## 📝 SQL 注意事项
 
-### 必须包含 `1 as flag`
+### `ck_flag_res` 由函数自动处理
 
-根据接口要求，SQL 查询**必须**包含 `1 as flag` 字段，否则请求会失败：
+接口要求 SQL 包含 `1 as ck_flag_res` 标记字段。`executeClickHouseSQL` 函数已在内部自动将 SQL 包装为子查询并追加此字段，调用方直接传入正常 SQL 即可，无需手动添加：
 
 ```sql
+-- 调用方只需传入正常 SQL（不含 ck_flag_res）
 SELECT 
   'sg' as market,
   station_id,
-  station_name,
-  ...,
-  1 as flag  -- ⚠️ 必需字段
+  station_name
 FROM spx_mart_manage_app.dim_spx_station_tab_sg_all
 WHERE station_id = 201
+-- 函数内部自动转换为：
+-- SELECT *, 1 as ck_flag_res FROM (上面的 SQL)
 ```
 
 ### 数据库与表名

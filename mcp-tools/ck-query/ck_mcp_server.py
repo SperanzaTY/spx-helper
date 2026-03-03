@@ -68,12 +68,17 @@ def generate_jwt_token() -> str:
 
 
 def ensure_flag_suffix(sql: str) -> str:
-    """LIVE API 要求 SQL 最后一列为 '1 as flag'，自动补充"""
+    """LIVE API 要求 SQL 包含标记字段，统一包装为子查询 SELECT *, 1 as ck_flag_res FROM (...)。
+
+    直接在原 SQL 末尾追加会破坏带子查询/WITH/复杂 WHERE 的语句结构，
+    因此统一将原 SQL 包一层子查询再追加，保证语法正确。
+    调用方传入正常 SQL 即可，不需要感知此细节。
+    """
     sql_stripped = sql.strip().rstrip(';')
-    if not sql_stripped.lower().endswith(', 1 as flag') and \
-       not sql_stripped.lower().endswith(',1 as flag'):
-        sql_stripped += ', 1 as flag'
-    return sql_stripped
+    normalized = sql_stripped.lower().replace(' ', '').replace('\n', '').replace('\t', '')
+    if normalized.endswith(',ck_flag_res') or normalized.endswith(',1asck_flag_res'):
+        return sql_stripped
+    return f"SELECT *, 1 as ck_flag_res FROM ({sql_stripped})"
 
 
 def execute_live(sql: str, cluster: str, max_rows: int) -> dict:
@@ -96,9 +101,9 @@ def execute_live(sql: str, cluster: str, max_rows: int) -> dict:
             return {'success': False, 'error': result.get('message', '未知业务错误')}
 
         rows_raw = result.get('data', {}).get('list', [])
-        columns = [c for c in (list(rows_raw[0].keys()) if rows_raw else []) if c != 'flag']
+        columns = [c for c in (list(rows_raw[0].keys()) if rows_raw else []) if c != 'ck_flag_res']
         total_rows = len(rows_raw)
-        rows = [{k: v for k, v in row.items() if k != 'flag'} for row in rows_raw[:max_rows]]
+        rows = [{k: v for k, v in row.items() if k != 'ck_flag_res'} for row in rows_raw[:max_rows]]
 
         return {'success': True, 'columns': columns, 'rows': rows,
                 'total_rows': total_rows, 'displayed_rows': len(rows),
@@ -205,7 +210,7 @@ async def query_ck(
     如果用户未明确说明以上信息，请在调用前先问清楚。
 
     环境说明：
-    - LIVE（env=live）：通过 API 网关查询，仅支持只读 SELECT，SQL 末尾会自动补充 ', 1 as flag'
+    - LIVE（env=live）：通过 API 网关查询，仅支持只读 SELECT，传入正常 SQL 即可，flag 参数由工具内部自动处理
     - TEST（env=test）：直连 TEST ClickHouse，支持读写操作，写入前需向用户确认，默认库：spx_mart_pub
 
     注意：

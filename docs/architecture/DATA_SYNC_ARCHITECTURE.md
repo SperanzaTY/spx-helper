@@ -226,7 +226,7 @@ async function verifySync() {
 async function queryStationFromLive(stationId) {
   // 查询 LIVE 环境的站点数据
   const sql = `
-    SELECT station_id, station_name, 1 as flag
+    SELECT station_id, station_name, 1 as ck_flag_res
     FROM spx_mart_manage_app.dim_spx_station_tab_sg_all
     WHERE station_id = ${stationId}
   `;
@@ -251,7 +251,7 @@ async function queryStationFromLive(stationId) {
       {
         "station_id": 123,
         "station_name": "Test Station",
-        "flag": 1
+        "ck_flag_res": 1
       }
     ]
   }
@@ -340,7 +340,7 @@ fullSyncWorkflow('dim_spx_driver_tab', 'br');
 | **连接方式** | 直连 TEST ClickHouse | 通过 API |
 | **认证方式** | Basic Auth | JWT Token |
 | **返回格式** | 文本 / JSON 字符串 | 格式化 JSON `{ list: [...] }` |
-| **支持 SQL** | 任何 SQL | 必须有 `1 as flag` |
+| **支持 SQL** | 任何 SQL | 任何 SQL（`ck_flag_res` 由函数自动追加） |
 | **网络要求** | TEST ClickHouse 无墙 | API 可访问 |
 
 ---

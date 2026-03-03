@@ -30,7 +30,7 @@ async function executeClickHouseSQL(sql) {
   /**
    * 执行 ClickHouse SQL（支持 SELECT 和 INSERT）
    * 
-   * @param {string} sql - SQL 语句（必须以 ", 1 as flag" 结尾）
+   * @param {string} sql - SQL 语句（必须以 ", 1 as ck_flag_res" 结尾）
    * @returns {Promise<Object>} - 返回格式：{ success: boolean, data?: any, error?: string }
    */
   try {
@@ -94,7 +94,7 @@ const sql = `
   SELECT 
     count() as row_count,
     'ready_to_sync' as status,
-    1 as flag
+    1 as ck_flag_res
   FROM remote(
     '10.180.129.96',
     'spx_mart_manage_app.dim_spx_driver_tab_br_all',
@@ -125,7 +125,7 @@ if (result.success) {
       {
         "row_count": 12345,
         "status": "ready_to_sync",
-        "flag": 1
+        "ck_flag_res": 1
       }
     ]
   }
@@ -177,7 +177,7 @@ if (result.success) {
     "list": [
       {
         "affected_rows": 12345,
-        "flag": 1
+        "ck_flag_res": 1
       }
     ]
   }
@@ -206,7 +206,7 @@ async function verifySyncSource(sourceHost, sourceTable) {
       min(station_id) as min_id,
       max(station_id) as max_id,
       'source_verified' as status,
-      1 as flag
+      1 as ck_flag_res
     FROM remote(
       '${sourceHost}',
       '${sourceTable}',
@@ -263,7 +263,7 @@ async function verifySync(targetTable) {
     SELECT 
       count() as row_count,
       'sync_verified' as status,
-      1 as flag
+      1 as ck_flag_res
     FROM ${targetTable}
   `;
   
@@ -448,7 +448,7 @@ document.getElementById('verifySyncResultBtn').addEventListener('click', async (
 
 **对于 SELECT 语句**：
 ```sql
-SELECT count() as cnt, 1 as flag FROM table
+SELECT count() as cnt, 1 as ck_flag_res FROM table
 ```
 ✅ 返回：`{ list: [{ cnt: 123, flag: 1 }] }` - 有 flag 字段
 

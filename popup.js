@@ -7516,7 +7516,7 @@ async function executeTestClickHouseSQL(sql) {
 }
 
 // 通用的 ClickHouse SQL 执行函数（通过 internal_search API，查询 LIVE 数据）
-// @param {string} sql - SQL 语句（必须以 ", 1 as flag" 结尾）
+// @param {string} sql - SQL 语句，会自动包装以满足 API 要求，调用方无需手动添加 flag
 // @param {string} cluster - CK 集群，'ck2' 或 'ck6'，默认 'ck2'
 async function executeClickHouseSQL(sql, cluster = 'ck2') {
   try {
@@ -7525,9 +7525,16 @@ async function executeClickHouseSQL(sql, cluster = 'ck2') {
       return { success: false, error: `不支持的集群: ${cluster}，可选值为 ck2、ck6` };
     }
 
+    // LIVE API 要求 SQL 包含标记字段，统一包装为子查询，调用方无需感知
+    const sqlStripped = sql.trim().replace(/;$/, '');
+    const normalized = sqlStripped.toLowerCase().replace(/\s+/g, '');
+    const finalSql = (normalized.endsWith(',ck_flag_res') || normalized.endsWith(',1asck_flag_res'))
+      ? sqlStripped
+      : `SELECT *, 1 as ck_flag_res FROM (${sqlStripped})`;
+
     console.log('🔵 [ClickHouse SQL 执行器 - API] 开始执行');
     console.log(`🖥️ 集群: ${cluster}`);
-    console.log('📝 SQL:', sql);
+    console.log('📝 SQL:', finalSql);
     
     // 生成 JWT Token
     const jwtToken = await generateApiMartJwtToken();
@@ -7540,7 +7547,7 @@ async function executeClickHouseSQL(sql, cluster = 'ck2') {
         'Content-Type': 'application/json',
         'jwt-token': jwtToken
       },
-      body: JSON.stringify({ sql })
+      body: JSON.stringify({ sql: finalSql })
     });
     
     console.log('📡 响应状态:', response.status);
@@ -7656,7 +7663,7 @@ async function queryStationById(stationId, market = '', cluster = 'ck2') {
     
     // 构造 UNION ALL 查询以支持跨市场查询
     const sqlParts = targetMarkets.map(m => 
-      `SELECT '${m}' as market, station_id, station_name, station_type, status, city_name, district_id, latitude, longitude, manager, manager_email, director, director_email, is_active_site_l7d, station_region, station_area, station_sub_area, xpt_flag, bi_station_type, 1 as flag FROM spx_mart_manage_app.dim_spx_station_tab_${m}_all WHERE station_id = ${stationId}`
+      `SELECT '${m}' as market, station_id, station_name, station_type, status, city_name, district_id, latitude, longitude, manager, manager_email, director, director_email, is_active_site_l7d, station_region, station_area, station_sub_area, xpt_flag, bi_station_type FROM spx_mart_manage_app.dim_spx_station_tab_${m}_all WHERE station_id = ${stationId}`
     );
     const sql = sqlParts.join(' UNION ALL ');
     
@@ -7703,7 +7710,7 @@ async function queryStationByName(stationName, market = '', cluster = 'ck2') {
     
     // 构造 UNION ALL 查询以支持跨市场查询
     const sqlParts = targetMarkets.map(m => 
-      `SELECT '${m}' as market, station_id, station_name, station_type, status, city_name, district_id, latitude, longitude, manager, manager_email, director, director_email, is_active_site_l7d, station_region, station_area, station_sub_area, xpt_flag, bi_station_type, 1 as flag FROM spx_mart_manage_app.dim_spx_station_tab_${m}_all WHERE station_name LIKE '%${stationName}%' LIMIT 50`
+      `SELECT '${m}' as market, station_id, station_name, station_type, status, city_name, district_id, latitude, longitude, manager, manager_email, director, director_email, is_active_site_l7d, station_region, station_area, station_sub_area, xpt_flag, bi_station_type FROM spx_mart_manage_app.dim_spx_station_tab_${m}_all WHERE station_name LIKE '%${stationName}%' LIMIT 50`
     );
     const sql = sqlParts.join(' UNION ALL ');
     
