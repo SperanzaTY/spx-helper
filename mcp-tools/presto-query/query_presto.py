@@ -285,12 +285,6 @@ def main():
   # 基本查询
   python query_presto.py "SELECT * FROM spx_mart.dim_spx_lm_station_user_configuration_tab_id LIMIT 10"
   
-  # 显示所有Catalog
-  python query_presto.py "SHOW CATALOGS"
-  
-  # 显示所有表
-  python query_presto.py "SHOW TABLES IN spx_mart"
-  
   # 查询并保存到JSON
   python query_presto.py "SELECT * FROM table LIMIT 100" --output result.json
   
