@@ -77,13 +77,6 @@ function initSettings() {
   const closeSettings = document.getElementById('closeSettings');
   const windowModeSwitch = document.getElementById('windowModeSwitch');
   
-  // 显示当前版本号
-  const manifest = chrome.runtime.getManifest();
-  const versionElement = document.getElementById('currentVersion');
-  if (versionElement) {
-    versionElement.textContent = 'v' + manifest.version;
-  }
-  
   // 检查是否显示独立窗口模式提示
   chrome.storage.local.get(['windowMode', 'windowModeHintDismissed'], function(result) {
     const windowModeHint = document.getElementById('windowModeHint');
