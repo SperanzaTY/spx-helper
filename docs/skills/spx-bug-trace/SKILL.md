@@ -190,9 +190,9 @@ WHERE <分区条件>
 
 **CK 表**（`spx_mart_manage_app`、含 `{region}` 占位符）：
 ```
-query_ck(env=live, cluster=ck6, sql="SELECT ...")
+query_ck(env=live, cluster=<ck2 或 ck6>, sql="SELECT ...")
 ```
-> `spx_mart_manage_app` / `spx_mart_pub` 在 **ck6**（online6/online7）；如不确定优先用 ck6
+> 接口查到的是读集群，我们直查写集群；cluster 由 ds_id 映射决定（107/110/112/119→ck2，114/115/122→ck6），`api_trace`/`get_api_lineage` 会自动建议；`spx_mart_pub` 为 TEST，用 env=test 直连
 
 **Presto 表**（`sls_mart`、`spx_mart`、`spx_smartsort_ddc` 等）：
 ```

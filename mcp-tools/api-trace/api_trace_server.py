@@ -52,6 +52,22 @@ LINEAGE_TABLE = os.environ.get(
     'sls_mart.shopee_ssc_data_api_mart_db__api_mart_api_tab__reg_continuous_s0_live'
 )
 
+# ds_id → query_ck cluster 映射（接口查读集群，我们直查写集群；来源 popup.js DS_ID_MAPPING）
+# online_2/5 → ck2，online_6/7 → ck6
+DS_ID_TO_CK_CLUSTER = {
+    107: 'ck2',   # online_2
+    110: 'ck2', 119: 'ck2',   # online_5
+    112: 'ck2',   # online_2 (wms)
+    114: 'ck6',   # online_6
+    115: 'ck6', 122: 'ck6',   # online_7
+}
+
+def ds_id_to_cluster(ds_id) -> Optional[str]:
+    """根据 ds_id 返回 query_ck 的 cluster（ck2/ck6），未命中则返回 None"""
+    if ds_id is None:
+        return None
+    return DS_ID_TO_CK_CLUSTER.get(int(ds_id)) if str(ds_id).isdigit() else None
+
 BASE_URL = "https://open-api.datasuite.shopee.io/dataservice/personal"
 
 mcp = FastMCP("api-trace")
@@ -276,13 +292,16 @@ LIMIT 5
     api_version = row.get('api_version', 'unknown')
     biz_sql = row.get('biz_sql', '')
     ds_id = row.get('ds_id', '')
+    cluster_hint = ds_id_to_cluster(ds_id) or 'ck6'  # 用于 Step 3/4 的 query_ck 建议
     mgmt_tables_str = row.get('mgmt_tables', '')
     all_tables_str = row.get('all_tables', '')
 
     output.append(f"✅ 找到血缘记录")
     output.append(f"- **api_id**: `{found_api_id}`")
     output.append(f"- **api_version**: `{api_version}`")
-    output.append(f"- **ds_id**: `{ds_id}`")
+    cluster_suggest = ds_id_to_cluster(ds_id)
+    ds_note = f"→ cluster={cluster_suggest}，请用 query_ck(env=live, cluster={cluster_suggest})" if cluster_suggest else "查 live 时据此选 cluster=ck2 或 ck6（见 table-mapping.md 映射表）"
+    output.append(f"- **ds_id**: `{ds_id}`（接口查读集群，我们直查写集群；{ds_note}）")
 
     # ===== Step 2：解析 biz_sql =====
     output.append("\n## Step 2：biz_sql 解析")
@@ -344,15 +363,9 @@ LIMIT 5
         if not query_tables:
             query_tables = all_tables[:2]
 
-        # CK 库前缀：这些库在 ClickHouse 里，不在 Presto 里
-        # 集群说明：ck2(online2/online5 互为读写)，ck6(online6/online7 互为读写)
-        # spx_mart_manage_app / spx_mart_pub 在 ck6 集群
-        CK_SCHEMAS = ('spx_mart_manage_app', 'spx_mart_pub', 'spx_mart_manage_app_pub')
-        CK_SCHEMA_CLUSTER = {
-            'spx_mart_manage_app': 'ck6',
-            'spx_mart_pub': 'ck6',
-            'spx_mart_manage_app_pub': 'ck6',
-        }
+        # CK 库：spx_mart_pub 为 TEST 集群（直连），其余为 LIVE；LIVE 集群由 ds_id 映射决定（接口查读集群，我们直查写集群）
+        TEST_CK_SCHEMAS = ('spx_mart_pub', 'spx_mart_manage_app_pub')  # 用 env=test 直连
+        LIVE_CK_SCHEMAS = ('spx_mart_manage_app',)
 
         for table_full in query_tables:
             output.append(f"\n### 源表：`{table_full}`")
@@ -365,16 +378,23 @@ LIMIT 5
                 example_table = re.sub(r'\{region\}', 'sg', table_full)
                 example_table = re.sub(r'\{market\}', 'sg', example_table)
                 schema = table_full.split('.')[0] if '.' in table_full else ''
-                cluster_hint = CK_SCHEMA_CLUSTER.get(schema, 'ck6')
-                output.append(f"  ```\n  query_ck(env=live, cluster={cluster_hint}, sql=\"SELECT * FROM {example_table} LIMIT 5\")\n  ```")
+                if schema in TEST_CK_SCHEMAS:
+                    output.append(f"  ```\n  query_ck(env=test, sql=\"SELECT * FROM {example_table} LIMIT 5\")\n  ```")
+                else:
+                    output.append(f"  ```\n  query_ck(env=live, cluster={cluster_hint}, sql=\"SELECT * FROM {example_table} LIMIT 5\")\n  ```")
+                    output.append(f"  （ds_id={ds_id} → cluster={cluster_hint}，接口查读集群，我们直查写集群）")
                 continue
 
             # 检查是否是 CK 库
             table_schema = table_full.split('.')[0] if '.' in table_full else ''
-            if table_schema in CK_SCHEMAS:
-                cluster_hint = CK_SCHEMA_CLUSTER.get(table_schema, 'ck6')
+            if table_schema in TEST_CK_SCHEMAS:
                 where_clause = f"WHERE {custom_where}" if custom_where else ""
-                output.append(f"ℹ️ `{table_schema}` 是 ClickHouse 库（集群：{cluster_hint}），无法通过 Presto 查询，请用 `query_ck` 工具：")
+                output.append(f"ℹ️ `{table_schema}` 是 TEST ClickHouse 库（直连配置），用 `query_ck(env=test)` 查询：")
+                output.append(f"  ```\n  query_ck(env=test, sql=\"SELECT * FROM {table_full} {where_clause} LIMIT {max_rows}\")\n  ```")
+                continue
+            if table_schema in LIVE_CK_SCHEMAS:
+                where_clause = f"WHERE {custom_where}" if custom_where else ""
+                output.append(f"ℹ️ `{table_schema}` 是 LIVE ClickHouse 库，ds_id={ds_id} → cluster={cluster_hint}（接口查读集群，我们直查写集群），请用 `query_ck` 工具：")
                 output.append(f"  ```\n  query_ck(env=live, cluster={cluster_hint}, sql=\"SELECT * FROM {table_full} {where_clause} LIMIT {max_rows}\")\n  ```")
                 continue
 
@@ -407,7 +427,7 @@ LIMIT 5
         if tables:
             output.append(f"1. 对比 API 响应与源表 `{tables[0]['full']}` 中的数据")
         output.append("2. 如有具体数据 ID，在 custom_where 中传入精准条件重新查询")
-        output.append("3. 可用 `query_ck(env=live, cluster=ck6)` 查询 CK 层数据（spx_mart_manage_app 在 ck6），对比 Presto 源表是否一致")
+        output.append(f"3. 可用 `query_ck(env=live, cluster={cluster_hint})` 查询 CK 层数据（ds_id={ds_id}，接口查读集群，我们直查写集群）")
         output.append("4. 检查 biz_sql 中的 JOIN 逻辑和过滤条件是否符合预期")
 
     output.append(f"\n---\n*溯源完成，如需深入排查可继续使用 query_presto / query_ck 工具*")
@@ -469,10 +489,13 @@ LIMIT 3
     mgmt_tables = [t.strip() for t in row.get('mgmt_tables', '').split(',') if t.strip()]
     has_dynamic = bool(re.search(r'\$\{|#\{|\{where\}|\{filter\}', biz_sql))
 
+    ds_id_val = row.get('ds_id')
+    cluster_suggest = ds_id_to_cluster(ds_id_val)
+    ds_note = f"→ cluster={cluster_suggest}，用 query_ck(env=live, cluster={cluster_suggest})" if cluster_suggest else "查 live 时据此选 cluster=ck2 或 ck6（见 table-mapping.md）"
     out = [
         f"## API 血缘：{row.get('api_id')}",
         f"- 版本：{row.get('api_version')}",
-        f"- ds_id：{row.get('ds_id')}",
+        f"- ds_id：{ds_id_val}（接口查读集群，我们直查写集群；{ds_note}）",
     ]
     if has_dynamic:
         out.append("- ⚠️ 含 **Dynamic WHERE**（动态条件 SQL）")

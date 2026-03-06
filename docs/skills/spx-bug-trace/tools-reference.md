@@ -31,11 +31,15 @@ query_ck(
 )
 ```
 
-**env=live 常用库：**
-- `spx_mart_manage_app`：管理系统维表、站点信息等 → **cluster=ck6**（online6/online7 互为读写）
-- `spx_mart_pub`：业务数据公开表 → **cluster=ck6**
+**env=live（线上）**：
+- 集群由接口 **ds_id** 决定，`get_api_lineage` 返回的 ds_id 即该接口连接的 CK
+- 接口查到的是读集群，query_ck 直接查写集群（internal_search_ck2/ck6）
+- ds_id 映射：107/110/112/119→ck2；114/115/122→ck6（详见 table-mapping.md）
 
-> 集群说明：ck2（online2/online5 互为读写），ck6（online6/online7 互为读写）。不确定时优先用 ck6。
+**env=test**：测试 CK，直连配置方式
+- `spx_mart_pub` 为 TEST 集群，用 `query_ck(env=test)` 直连，非线上数据
+
+**集群对照**：ck2 = online2/online5 互为读写；ck6 = online6/online7 互为读写
 
 **env=test 常用操作：**
 - SELECT 查询验证
