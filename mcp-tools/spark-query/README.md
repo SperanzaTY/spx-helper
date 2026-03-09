@@ -31,6 +31,7 @@
 | LIVY_URL | ❌ | - | Livy 地址，不设则按 region 选择 |
 | LIVY_QUEUE | ❌ | szsc-dev | YARN 队列（DEV 用 szsc-dev，PROD 用 szsc） |
 | LIVY_REGION | ❌ | SG | 区域：SG / US |
+| LIVY_STATEMENT_TIMEOUT | ❌ | 300 | Statement 执行超时（秒），长查询可设 1800 |
 
 ### 3. Livy 地址
 
@@ -57,6 +58,34 @@
 - 「查一下 spx_mart.xxx 表的数据」
 - 「用 query_spark 执行这个 Spark SQL」
 
+## 离线开发数据验证流程
+
+推荐两步验证：先语法校验，再数据抽样。
+
+| 步骤 | 参数 | 说明 |
+|------|------|------|
+| **1. 语法验证** | `validate_syntax=True` | 用 EXPLAIN 检查 SQL 语法、表/字段存在性，不取数据，耗时短 |
+| **2. 数据验证** | `validate_syntax=False` | 执行 SELECT 抽样，验证结果数据 |
+
+示例：
+```
+// Step 1: 语法验证
+query_spark(sql="SELECT * FROM dwd_xxx WHERE grass_date='2024-01-01'", validate_syntax=True)
+
+// Step 2: 数据抽样
+query_spark(sql="SELECT * FROM dwd_xxx WHERE grass_date='2024-01-01' LIMIT 100")
+```
+
+## 参数说明
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| validate_syntax | false | 为 true 时用 EXPLAIN 做语法验证，不取数据 |
+| statement_timeout | 300 | Statement 执行超时（秒），长查询可设 1800（30 分钟） |
+| max_rows | 200 | 最多返回行数（最大 1000） |
+
+环境变量 `LIVY_STATEMENT_TIMEOUT` 可配置默认超时（秒）。
+
 ## 注意事项
 
 1. **Session 启动耗时**：首次执行约 1–2 分钟（YARN 分配资源），之后执行会快很多
@@ -73,5 +102,6 @@ pip3 install requests mcp
 ## 故障排除
 
 - **Session 创建失败**：检查 LIVY_USERNAME/LIVY_PASSWORD 及网络
-- **超时**：Session 启动 180s、Statement 执行 300s
-- **SQL 报错**：检查 Spark SQL 语法及表名
+- **超时**：Session 启动 180s，Statement 默认 300s（可通过 statement_timeout 或 LIVY_STATEMENT_TIMEOUT 调整）
+- **长查询**：将 statement_timeout 设为 1800 可支持约 30 分钟
+- **SQL 报错**：先用 validate_syntax=True 做语法验证

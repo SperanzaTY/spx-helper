@@ -59,7 +59,7 @@ mcp = FastMCP("spark-query")
 SESSION_POLL_INTERVAL = 5
 SESSION_READY_TIMEOUT = 180  # Session 启动约 1-2 分钟
 STATEMENT_POLL_INTERVAL = 2
-STATEMENT_TIMEOUT = 300
+DEFAULT_STATEMENT_TIMEOUT = int(os.environ.get("LIVY_STATEMENT_TIMEOUT", "300"))
 
 
 def _get_auth_headers() -> dict:
@@ -164,12 +164,22 @@ def format_result_as_table(columns: list, rows: list) -> str:
     return "\n".join(lines)
 
 
+def _wrap_for_syntax_validation(sql: str) -> str:
+    """语法验证模式：用 EXPLAIN EXTENDED 包装，只解析不取数"""
+    s = sql.strip().rstrip(";")
+    if s.upper().startswith("EXPLAIN"):
+        return s
+    return f"EXPLAIN EXTENDED {s}"
+
+
 def _execute_spark_sql(
     base_url: str,
     sql: str,
     queue: str,
     spark_version: str,
     max_rows: int,
+    statement_timeout: int,
+    validate_syntax: bool = False,
 ) -> dict:
     """同步执行 Livy Session + Statement 流程，返回 {success, columns, rows, raw_text, error}"""
     session_id = None
@@ -201,8 +211,9 @@ def _execute_spark_sql(
         if s.get("state") != "idle":
             return {"success": False, "error": f"Session 启动超时 (>={SESSION_READY_TIMEOUT}s)"}
 
-        # 3. 执行 Statement
-        stmt_body = {"kind": "sql", "code": sql.strip().rstrip(";")}
+        # 3. 执行 Statement（若为语法验证模式则用 EXPLAIN 包装）
+        exec_sql = _wrap_for_syntax_validation(sql) if validate_syntax else sql.strip().rstrip(";")
+        stmt_body = {"kind": "sql", "code": exec_sql}
         stmt = _livy_post(base_url, f"/sessions/{session_id}/statements", stmt_body, timeout=30)
         stmt_id = stmt.get("id")
         if stmt_id is None:
@@ -210,7 +221,7 @@ def _execute_spark_sql(
 
         # 4. 轮询 Statement 直到 available
         start = time.time()
-        while time.time() - start < STATEMENT_TIMEOUT:
+        while time.time() - start < statement_timeout:
             st = _livy_get(base_url, f"/sessions/{session_id}/statements/{stmt_id}", timeout=30)
             state = st.get("state", "")
             if state == "available":
@@ -230,7 +241,7 @@ def _execute_spark_sql(
                 return {"success": False, "error": "Statement 已取消"}
             time.sleep(STATEMENT_POLL_INTERVAL)
 
-        return {"success": False, "error": f"Statement 执行超时 (>={STATEMENT_TIMEOUT}s)"}
+        return {"success": False, "error": f"Statement 执行超时 (>={statement_timeout}s)"}
 
     except requests.exceptions.RequestException as e:
         return {"success": False, "error": f"请求失败: {str(e)}"}
@@ -251,18 +262,19 @@ async def query_spark(
     region: str = DEFAULT_REGION,
     max_rows: int = 200,
     spark_version: str = "v3",
+    validate_syntax: bool = False,
+    statement_timeout: int = DEFAULT_STATEMENT_TIMEOUT,
 ) -> str:
     """查询 Spark（Hive）数据库，通过 Livy REST API 执行 Spark SQL。
 
-    使用场景：
-    - 查询 Hive 表: SELECT * FROM db.table LIMIT 100
-    - 统计、分组、JOIN 等 Spark SQL 操作
+    离线开发数据验证流程建议：
+    1. 语法验证：validate_syntax=True，用 EXPLAIN 检查 SQL 语法和表存在性，不取数据
+    2. 数据验证：validate_syntax=False，执行 SELECT 抽样验证结果
 
-    注意：
-    - 需通过 Livy 创建 Session，首次执行约 1-2 分钟（Session 启动）
-    - 只建议执行只读 SELECT 查询，避免 DDL/写入
-    - 每次最多返回 200 行（可通过 max_rows 调整，最大 1000）
-    - 查询超时约 5 分钟
+    使用场景：
+    - 语法验证: query_spark(sql="SELECT ...", validate_syntax=True)
+    - 数据验证: query_spark(sql="SELECT * FROM dwd_xxx LIMIT 100")
+    - 长查询: 通过 statement_timeout 调整（默认 300s，可设 1800 支持约 30 分钟）
 
     Args:
         sql: 要执行的 Spark SQL 语句
@@ -270,9 +282,12 @@ async def query_spark(
         region: 区域 SG 或 US（默认 SG）
         max_rows: 最多返回行数（默认 200，最大 1000）
         spark_version: Spark 版本 v3（默认）或 v2
+        validate_syntax:  True 时用 EXPLAIN 做语法验证，不取数据，适合先校验再跑数
+        statement_timeout: Statement 执行超时秒数（默认 300，长查询可设 1800）
     """
     base_url = _get_base_url(region)
     max_rows = min(max_rows, 1000)
+    statement_timeout = min(max(statement_timeout, 60), 3600)  # 限制 60~3600 秒
 
     result = await asyncio.to_thread(
         _execute_spark_sql,
@@ -281,13 +296,16 @@ async def query_spark(
         queue,
         spark_version,
         max_rows,
+        statement_timeout,
+        validate_syntax,
     )
 
     if not result["success"]:
         return f"❌ 执行失败（Spark / {region}）\n\n错误: {result['error']}"
 
     if result.get("raw_text") and not result.get("rows"):
-        return f"✅ 执行成功（Spark / {region}）\n\n{result['raw_text']}"
+        label = "语法验证通过" if validate_syntax else "执行成功"
+        return f"✅ {label}（Spark / {region}）\n\n{result['raw_text']}"
 
     table = format_result_as_table(result["columns"], result["rows"])
     total = len(result["rows"])
