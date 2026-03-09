@@ -267,14 +267,14 @@ async def query_spark(
 ) -> str:
     """查询 Spark（Hive）数据库，通过 Livy REST API 执行 Spark SQL。
 
-    离线开发数据验证流程建议：
-    1. 语法验证：validate_syntax=True，用 EXPLAIN 检查 SQL 语法和表存在性，不取数据
-    2. 数据验证：validate_syntax=False，执行 SELECT 抽样验证结果
+    【Agent 调用须知 - 调用前需向用户确认】
+    1. 验证目的：用户是「只做语法校验」还是「要查数据」？
+       - 语法校验 → validate_syntax=True（快速，不取数）
+       - 查数据抽样 → validate_syntax=False
+    2. 长查询：若 SQL 可能运行超过 5 分钟，需先问用户预期耗时，并设置 statement_timeout（如 1800）
+    3. 队列/区域：一般用默认 szsc-dev/SG；若用户明确说 PROD 或 US，再改 queue/region
 
-    使用场景：
-    - 语法验证: query_spark(sql="SELECT ...", validate_syntax=True)
-    - 数据验证: query_spark(sql="SELECT * FROM dwd_xxx LIMIT 100")
-    - 长查询: 通过 statement_timeout 调整（默认 300s，可设 1800 支持约 30 分钟）
+    离线开发建议流程：先 validate_syntax=True 校验语法，再查数据。
 
     Args:
         sql: 要执行的 Spark SQL 语句

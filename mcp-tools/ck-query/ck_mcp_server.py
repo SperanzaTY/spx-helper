@@ -199,15 +199,12 @@ async def query_ck(
 ) -> str:
     """查询 ClickHouse 数据库，通过 env 参数区分 LIVE / TEST 环境。
 
-    【调用前必须确认以下两点】
-    1. env（环境）：
-       - live：查询 LIVE 生产数据（只读）
-       - test：查询/写入 TEST 数据（支持 SELECT、INSERT、CREATE 等）
-    2. 若 env=live，还需确认 cluster（集群）：
-       - ck2：CK2 集群
-       - ck6：CK6 集群
+    【Agent 调用须知 - 调用前必须向用户确认】
+    1. env（环境）：live（生产只读）还是 test（测试，可读写）？
+    2. cluster（仅 env=live 时）：ck2 还是 ck6？若用户未说明，根据接口 ds_id 或表名推断，或直接询问。
+    3. 写入操作：若 SQL 为 INSERT/UPDATE/DELETE，必须先向用户确认后再执行。
 
-    如果用户未明确说明以上信息，请在调用前先问清楚。
+    若用户未明确 env 和 cluster，请在调用前先问清楚。
 
     环境说明：
     - LIVE（env=live）：通过 API 网关查询，仅支持只读 SELECT，传入正常 SQL 即可，flag 参数由工具内部自动处理

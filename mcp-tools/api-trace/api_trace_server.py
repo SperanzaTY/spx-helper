@@ -208,17 +208,12 @@ async def api_trace(
 ) -> str:
     """API 血缘溯源与 Bug 定位工具。
 
-    根据 api_id 查询 API 的数据血缘（biz_sql、源表），直接通过 Presto 查询源表原始数据，
-    帮助定位数据问题（字段错误、数据缺失、数值偏差等）。
+    【Agent 调用须知 - 调用前需向用户确认】
+    1. api_id：必须从用户提供的 API URL 或问题描述中提取；若用户只说「某个接口数据不对」，需引导其提供 URL 或 api_id
+    2. issue_description：尽可能让用户描述具体问题（如「站点数量少了」「某字段为 null」），便于对比分析
+    3. custom_where：若用户能提供排查条件（如 station_id、market），可填入以精准查源表
 
-    典型使用场景：
-    1. 通过 Cursor 浏览器抓取页面网络请求，找到问题数据对应的 API URL
-    2. 从 URL 提取 api_id，调用本工具溯源
-    3. 结合 issue_description 和 api_response_sample 进行对比分析
-
-    api_id 提取方式：
-    - API URL 通常包含 api_id，如 /api/xxx/get_station_info → api_id = "get_station_info"
-    - 或直接传完整路径如 "spx_mart.get_station_list"
+    典型流程：用户描述问题 → 获取 API 信息 → 调用本工具 → 用 query_presto/query_ck 进一步验证。
 
     Args:
         api_id: API 标识符，从网络请求 URL 中提取
@@ -438,7 +433,7 @@ LIMIT 5
 async def get_api_lineage(api_id: str) -> str:
     """快速查询 API 血缘信息，只返回 biz_sql 和源表，不查询源数据。
 
-    适合先快速了解 API 的数据来源，再决定如何进一步排查。
+    【Agent 调用须知】api_id 必须明确；若用户仅描述问题未提供 API，需先引导其从页面 URL 或网络请求中提取 api_id。
 
     Args:
         api_id: API 标识符

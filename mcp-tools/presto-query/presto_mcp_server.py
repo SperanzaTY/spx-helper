@@ -91,11 +91,10 @@ async def query_presto(
 ) -> str:
     """查询 Presto 数据库，执行只读 SELECT 查询。
 
-    使用场景:
-    - 查询表数据: SELECT * FROM table LIMIT 100
-    - 统计行数: SELECT COUNT(*) FROM table
-    - 条件查询: SELECT * FROM table WHERE condition
-    - 分组统计: SELECT col, COUNT(*) FROM table GROUP BY col
+    【Agent 调用须知 - 调用前需向用户确认】
+    1. 表/库：确保用户已明确要查的表名（含 schema，如 spx_mart.xxx）
+    2. 查询条件：若需按日期/市场等过滤，先问用户具体条件再拼 WHERE
+    3. 行数：默认返回 100 行，大数据量统计可适当提高 max_rows
 
     注意:
     - 只支持只读 SELECT 查询
