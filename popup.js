@@ -7426,21 +7426,25 @@ function showToast(message, duration = 3000) {
 // ===== 站点查询工具 =====
 // 站点查询 - 使用 ApiMart 接口
 const STATION_API_URL = 'https://mgmt-data.ssc.test.shopeemobile.com/api_mart/mgmt_app/data_api/internal_search';
-const CK_API_URLS = {
-  ck2: 'https://mgmt-data.ssc.test.shopeemobile.com/api_mart/mgmt_app/data_api/internal_search_ck2',
-  ck6: 'https://mgmt-data.ssc.test.shopeemobile.com/api_mart/mgmt_app/data_api/internal_search_ck6'
-};
 
 // ========================================
-// ClickHouse 直连配置（TEST 环境）
+// ClickHouse 直连配置（DBeaver 方式，与 ck-mcp 一致）
 // ========================================
-const TEST_CLICKHOUSE_CONFIG = {
-  host: 'clickhouse-k8s-sg-prod.data-infra.shopee.io',
-  port: '443',
-  user: 'spx_mart-cluster_szsc_data_shared_online',
-  password: 'RtL3jHWkDoHp',
-  database: 'spx_mart_pub'
+const CK_PASSWORD = 'RtL3jHWkDoHp';
+const CK_CLUSTERS = {
+  test: { host: 'clickhouse-k8s-sg-prod.data-infra.shopee.io', port: 443, database: 'spx_mart_pub', user: 'spx_mart-cluster_szsc_data_shared_online' },
+  online_2: { host: 'clickhouse-k8s-sg-prod.data-infra.shopee.io', port: 443, database: 'spx_mart_manage_app', user: 'spx_mart-cluster_szsc_spx_mart_online_2' },
+  online_4: { host: 'clickhouse-office-only-ytl.data-infra.shopee.io', port: 443, database: 'spx_mart_pub', user: 'spx_mart-cluster_szsc_spx_mart_online_4' },
+  online_5: { host: 'clickhouse-office-only-ytl.data-infra.shopee.io', port: 443, database: 'spx_mart_manage_app', user: 'spx_mart-cluster_szsc_spx_mart_online_5' },
+  online_6: { host: 'clickhouse-k8s-sg-prod.data-infra.shopee.io', port: 443, database: 'spx_mart_manage_app', user: 'spx_mart-cluster_szsc_spx_mart_online_6' },
+  online_7: { host: 'clickhouse-office-only-ytl.data-infra.shopee.io', port: 443, database: 'spx_mart_manage_app', user: 'spx_mart-cluster_szsc_spx_mart_online_7' }
 };
+CK_CLUSTERS.ck2 = CK_CLUSTERS.online_2;
+CK_CLUSTERS.ck6 = CK_CLUSTERS.online_6;
+CK_CLUSTERS.ck5 = CK_CLUSTERS.online_5;
+CK_CLUSTERS.ck7 = CK_CLUSTERS.online_7;
+
+const TEST_CLICKHOUSE_CONFIG = CK_CLUSTERS.test;
 
 /**
  * 直接连接 TEST 环境 ClickHouse 执行 SQL
@@ -7457,11 +7461,11 @@ async function executeTestClickHouseSQL(sql) {
     
     const config = TEST_CLICKHOUSE_CONFIG;
     
-    // 构建 ClickHouse HTTP 接口 URL
-    const url = `https://${config.host}:${config.port}/`;
+    // 构建 ClickHouse HTTP 接口 URL（带 database 参数）
+    const url = `https://${config.host}:${config.port}/?database=${encodeURIComponent(config.database)}`;
     
     // 创建 Basic Auth
-    const basicAuth = btoa(`${config.user}:${config.password}`);
+    const basicAuth = btoa(`${config.user}:${CK_PASSWORD}`);
     
     console.log('🌐 连接到:', url);
     console.log('🔑 认证方式: Basic Auth');
@@ -7508,79 +7512,69 @@ async function executeTestClickHouseSQL(sql) {
   }
 }
 
-// 通用的 ClickHouse SQL 执行函数（通过 internal_search API，查询 LIVE 数据）
-// @param {string} sql - SQL 语句，会自动包装以满足 API 要求，调用方无需手动添加 flag
-// @param {string} cluster - CK 集群，'ck2' 或 'ck6'，默认 'ck2'
+// 通用的 ClickHouse SQL 执行函数（DBeaver 直连方式，与 ck-mcp 一致）
+// @param {string} sql - SQL 语句
+// @param {string} cluster - CK 集群：ck2/ck5/ck6/ck7 或 online_2/4/5/6/7
 async function executeClickHouseSQL(sql, cluster = 'ck2') {
   try {
-    const apiUrl = CK_API_URLS[cluster];
-    if (!apiUrl) {
-      return { success: false, error: `不支持的集群: ${cluster}，可选值为 ck2、ck6` };
+    const cfg = CK_CLUSTERS[cluster];
+    if (!cfg) {
+      const valid = ['ck2', 'ck5', 'ck6', 'ck7', 'online_2', 'online_4', 'online_5', 'online_6', 'online_7'].join('、');
+      return { success: false, error: `不支持的集群: ${cluster}，可选: ${valid}` };
     }
 
-    // LIVE API 要求 SQL 包含标记字段，统一包装为子查询，调用方无需感知
     const sqlStripped = sql.trim().replace(/;$/, '');
-    const normalized = sqlStripped.toLowerCase().replace(/\s+/g, '');
-    const finalSql = (normalized.endsWith(',ck_flag_res') || normalized.endsWith(',1asck_flag_res'))
-      ? sqlStripped
-      : `SELECT *, 1 as ck_flag_res FROM (${sqlStripped})`;
+    const isSelect = sqlStripped.toUpperCase().trimStart().startsWith('SELECT');
+    const querySql = isSelect && !/format\s+/i.test(sqlStripped)
+      ? sqlStripped + ' FORMAT TabSeparatedWithNames'
+      : sqlStripped;
 
-    console.log('🔵 [ClickHouse SQL 执行器 - API] 开始执行');
+    const url = `https://${cfg.host}:${cfg.port}/?database=${encodeURIComponent(cfg.database)}`;
+    const basicAuth = btoa(`${cfg.user}:${CK_PASSWORD}`);
+
+    console.log('🔵 [ClickHouse 直连] 开始执行');
     console.log(`🖥️ 集群: ${cluster}`);
-    console.log('📝 SQL:', finalSql);
-    
-    // 生成 JWT Token
-    const jwtToken = await generateApiMartJwtToken();
-    console.log('🔑 JWT Token 已生成');
-    
-    // 发送请求
-    const response = await fetch(apiUrl, {
+    console.log('📝 SQL:', querySql.substring(0, 200) + (querySql.length > 200 ? '...' : ''));
+
+    const response = await fetch(url, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'jwt-token': jwtToken
-      },
-      body: JSON.stringify({ sql: finalSql })
+      headers: { 'Authorization': `Basic ${basicAuth}`, 'Content-Type': 'text/plain' },
+      body: querySql
     });
-    
+
+    const responseText = await response.text();
     console.log('📡 响应状态:', response.status);
-    
-    // 检查响应状态
+
     if (!response.ok) {
-      const errorText = await response.text();
-      console.error('❌ 请求失败:', errorText);
-      return {
-        success: false,
-        error: `HTTP ${response.status}: ${errorText}`
-      };
+      const errMsg = (responseText && (responseText.includes('DB::Exception') || responseText.includes('Code:')))
+        ? responseText.substring(0, 400)
+        : `HTTP ${response.status}: ${responseText.substring(0, 200)}`;
+      return { success: false, error: errMsg };
     }
-    
-    // 解析响应
-    const result = await response.json();
-    console.log('📊 响应数据:', result);
-    
-    // 检查业务状态码
-    if (result.retcode !== 0) {
-      console.error('❌ 业务错误:', result);
-      return {
-        success: false,
-        error: result.message || '未知错误'
-      };
+
+    if (!isSelect) {
+      return { success: true, data: { list: [] } };
     }
-    
-    // 成功返回数据
-    console.log('✅ SQL 执行成功');
-    return {
-      success: true,
-      data: result.data
-    };
-    
+
+    const lines = responseText.trim().split('\n').filter(l => l);
+    if (lines.length === 0) {
+      return { success: true, data: { list: [] } };
+    }
+
+    const columns = lines[0].split('\t');
+    const list = lines.slice(1).map(line => {
+      const vals = line.split('\t');
+      const row = {};
+      columns.forEach((col, i) => { row[col] = vals[i] !== undefined ? vals[i] : ''; });
+      return row;
+    });
+
+    console.log('✅ SQL 执行成功，返回', list.length, '行');
+    return { success: true, data: { list } };
+
   } catch (error) {
     console.error('❌ 执行异常:', error);
-    return {
-      success: false,
-      error: error.message || '执行失败'
-    };
+    return { success: false, error: error.message || '执行失败' };
   }
 }
 
