@@ -1,11 +1,12 @@
-<svg width="128" height="128" xmlns="http://www.w3.org/2000/svg">
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#667eea;stop-opacity:1" />
-      <stop offset="100%" style="stop-color:#764ba2;stop-opacity:1" />
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#667eea"/>
+      <stop offset="100%" style="stop-color:#764ba2"/>
     </linearGradient>
   </defs>
-  <rect width="128" height="128" rx="20" fill="url(#grad)"/>
-  <text x="64" y="80" font-size="60" text-anchor="middle" fill="white">🛡️</text>
+  <!-- 蓝色渐变背景 - 与扩展 UI 一致 -->
+  <rect width="128" height="128" rx="24" fill="url(#bg)"/>
+  <!-- 超大 S - 尽量撑满画布，减少留白 -->
+  <text x="64" y="108" font-size="118" font-weight="900" text-anchor="middle" fill="white" font-family="Arial Black, Arial, sans-serif">S</text>
 </svg>
-
