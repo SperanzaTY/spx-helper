@@ -25,25 +25,26 @@ get_api_lineage(api_id: str)  # 只返回血缘，不查源表，速度更快
 query_ck(
     sql: str,
     env: str,           # "live" 或 "test"
-    cluster: str,       # env=live 时必填："ck2" 或 "ck6"
-    database: str,      # env=test 时有效，默认 "spx_mart_pub"
+    cluster: str,       # env=live 时必填
+    database: str,      # 可选，覆盖默认库
     max_rows: int       # 默认 200
 )
 ```
 
-**env=live（线上）**：
-- 集群由接口 **ds_id** 决定，`get_api_lineage` 返回的 ds_id 即该接口连接的 CK
-- 接口查到的是读集群，query_ck 直接查写集群（internal_search_ck2/ck6）
-- ds_id 映射：107/110/112/119→ck2；114/115/122→ck6（详见 table-mapping.md）
+**连接方式**：DBeaver 直连（HTTP + Basic Auth），无 internal_search API
 
-**env=test**：测试 CK，直连配置方式
-- `spx_mart_pub` 为 TEST 集群，用 `query_ck(env=test)` 直连，非线上数据
+**env=live（线上）** cluster 可选：
+- `ck2` / `online_2`：ck2 写集群
+- `ck6` / `online_6`：ck6 写集群
+- `online_4`：test 读集群
+- `online_5`：ck2 读集群（需内网）
+- `online_7`：ck6 读集群（需内网）
 
-**集群对照**：ck2 = online2/online5 互为读写；ck6 = online6/online7 互为读写
+**env=test**：测试集群 `spx_mart_pub`，直连
 
-**env=test 常用操作：**
-- SELECT 查询验证
-- INSERT 写入测试数据
+**ds_id 映射**：107/110/112/119→ck2；114/115/122→ck6（详见 table-mapping.md）
+
+**常用操作**：SELECT 查询、INSERT 写入（test 环境）
 
 ## query_presto
 
