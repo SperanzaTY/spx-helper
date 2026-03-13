@@ -157,6 +157,10 @@ Skill 源文件在 `.cursor/skills/`，提交到 Git 供团队共享。
 - **禁止自动覆盖**：不在脚本中做任何 cp/覆盖，只通过 Cursor 比较后手动修改
 - **合并流程**：在 Cursor 中比较 `.cursor/skills/` 与 `~/.cursor/skills/`，手动复制更优内容到目标位置
 
+### 用户说「帮我安装 skill」时
+
+参考 `docs/SKILL_INSTALL.md`，执行 `./scripts/sync_skills.sh`：首次安装会自动复制到 `~/.cursor/skills/`；若已存在则不覆盖，提示在 Cursor 中比较合并。
+
 ## 🔧 调试建议
 
 ### 查看日志
