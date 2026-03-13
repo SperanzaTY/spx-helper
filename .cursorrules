@@ -45,9 +45,25 @@ Agent 必须：
 用户确认后才能执行：
 - git add（包含 .cursor/skills/ 若有变更）
 - git commit
-- git push gitlab release  ⚠️ 必须推送到 GitLab
-- git push origin release  ⚠️ 必须推送到 GitHub
+- git push gitlab <当前分支>  ⚠️ 必须推送到 GitLab
+- git push origin <当前分支>  ⚠️ 必须推送到 GitHub
+
+日常开发推送到 developer；发布时推送到 release。
 ```
+
+### 分支管理规则
+
+| 分支 | 用途 |
+|------|------|
+| **developer** | 开发者分支，日常开发、小步提交 |
+| **release** | 最新版本，从 developer 合并，测试通过后发布 |
+| **main** | 稳定版本，从 release 合并，生产环境 |
+
+流程：`developer` → `release` → `main`
+
+- 日常开发在 **developer** 提交，推送到双仓库的 developer
+- 发布时合并 developer → release，推送 release
+- 稳定后合并 release → main，推送 main
 
 ### 双仓库同步规则（重要！）
 
@@ -62,7 +78,9 @@ Agent 必须：
 3. ✅ 确保两个仓库保持同步
 
 命令示例：
-git push gitlab release && git push origin release
+git push gitlab developer && git push origin developer   # 日常开发
+git push gitlab release && git push origin release       # 发布
+git push gitlab main && git push origin main             # 稳定版
 ```
 
 ### 正确的工作流程
@@ -257,18 +275,16 @@ git log --oneline -5
 ✅ 批准提交
 ✅ 提供反馈
 
-## 📦 远程仓库信息
+## 📦 远程仓库与分支
 
 ```
-GitLab (主仓库):
-- Remote: gitlab
-- URL: https://git.garena.com/tianyi.liang/spx-helper.git
-- Branch: release
+GitLab: gitlab, https://git.garena.com/tianyi.liang/spx-helper.git
+GitHub: origin, https://github.com/SperanzaTY/spx-helper.git
 
-GitHub (备份仓库):
-- Remote: origin
-- URL: https://github.com/SperanzaTY/spx-helper.git
-- Branch: release
+分支：
+- developer: 开发者分支，日常开发
+- release:   最新版本
+- main:      稳定版本
 ```
 
 ---
