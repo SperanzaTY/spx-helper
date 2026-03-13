@@ -3,9 +3,11 @@ name: spx-bug-trace
 description: SPX Helper 业务问题定位工作流。用于从页面元素出发，定位数据异常的根因：通过浏览器捕获 API 请求 → 数据管道健康检查 → 查询 API 血缘（biz_sql、源表）→ 分层验证假设 → 用 Presto/CK 工具直查源表数据验证 → 输出用户可读的结论。当用户描述页面数据不对、某个字段异常、数据缺失、数值偏差等业务问题时使用，也适用于"帮我查一下这个 Bug"、"这个数据为什么不对"、"溯源一下这个接口"等场景。
 ---
 
-<!-- 本 Skill 位于 .cursor/skills/，版本随 SPX_Helper 仓库维护。
-     SPX_Helper 项目内自动加载；其他项目需在 Cursor 中比较 .cursor/skills/ 与 ~/.cursor/skills/ 后手动合并，不自动覆盖。
-     要求：user-api-trace、user-ck-query、user-presto-query、cursor-ide-browser 四个 MCP。-->
+<!-- 安装说明（用户说「帮我安装 skill」时参考 docs/SKILL_INSTALL.md）：
+     首次安装：cp -r .cursor/skills/spx-bug-trace ~/.cursor/skills/
+     已有本地版本：在 Cursor 中比较 .cursor/skills/ 与 ~/.cursor/skills/ 后手动合并。
+     SPX_Helper 项目内自动加载；复制到 ~/.cursor/skills/ 后可在所有项目使用。
+     依赖：user-api-trace、user-ck-query、user-presto-query、cursor-ide-browser 四个 MCP。-->
 
 # SPX Business Bug Trace
 

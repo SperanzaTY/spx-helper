@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# Skill 同步说明：不执行任何覆盖，仅提示用 Cursor 比较后手动合并
-# 避免较早或能力较弱的版本覆盖较优版本
+# Skill 同步：首次安装时复制；已有本地版本时不覆盖，仅提示在 Cursor 中比较合并
+# 详见 docs/SKILL_INSTALL.md
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SRC_DIR="${REPO_ROOT}/.cursor/skills"
@@ -12,14 +12,23 @@ if [ ! -d "$SRC_DIR" ]; then
     exit 1
 fi
 
-echo "📚 Skill 同步方式（仅通过 Cursor 比较合并，不自动覆盖）"
-echo ""
-echo "1. 在 Cursor 中打开两侧进行比较："
-echo "   仓库：$SRC_DIR"
-echo "   本地：$DEST_DIR"
-echo ""
-echo "2. 根据比较结果，在 Cursor 中手动修改更优的一方"
-echo "   - 若仓库更新：复制需要的内容到 ~/.cursor/skills/ 对应文件"
-echo "   - 若本地更新：复制需要的内容到 .cursor/skills/ 并提交"
-echo ""
-echo "3. 不做任何自动覆盖，由你决定保留哪些内容"
+for skill_dir in "$SRC_DIR"/*; do
+    if [ -d "$skill_dir" ]; then
+        name=$(basename "$skill_dir")
+        dest_path="${DEST_DIR}/${name}"
+
+        if [ ! -d "$dest_path" ]; then
+            echo "📚 首次安装 Skill: $name"
+            mkdir -p "$DEST_DIR"
+            cp -R "$skill_dir" "$DEST_DIR/"
+            echo "✅ 已复制到 ~/.cursor/skills/$name，重启 Cursor 或切换项目后生效"
+        else
+            echo ""
+            echo "📚 Skill: $name 已存在于 ~/.cursor/skills/"
+            echo "   不自动覆盖。若需更新，请在 Cursor 中比较："
+            echo "   仓库：$SRC_DIR/$name"
+            echo "   本地：$dest_path"
+            echo "   详见 docs/SKILL_INSTALL.md"
+        fi
+    fi
+done
