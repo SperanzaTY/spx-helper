@@ -161,6 +161,14 @@ Skill 源文件在 `.cursor/skills/`，提交到 Git 供团队共享。
 
 参考 `docs/SKILL_INSTALL.md`，执行 `./scripts/sync_skills.sh`：首次安装会自动复制到 `~/.cursor/skills/`；若已存在则不覆盖，提示在 Cursor 中比较合并。
 
+### 用户说「更新到最新版本」或「更新 release」时
+
+1. 执行 `git pull origin release`（或 `git pull gitlab release`）
+2. 检查本次拉取是否含 `mcp-tools/` 变更：`git diff ORIG_HEAD HEAD --name-only | grep mcp-tools`
+3. **若有 MCP 变更**，必须提醒用户：
+   > ⚠️ MCP 有更新，请到 Cursor 设置（Settings → MCP）中关闭再开启相应 MCP 服务以刷新，否则新版本不会生效。
+4. 若包含 `.cursor/skills/` 变更，可提示执行 `./scripts/sync_skills.sh`
+
 ## 🔧 调试建议
 
 ### 查看日志
