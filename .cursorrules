@@ -161,6 +161,10 @@ Skill 源文件在 `.cursor/skills/`，提交到 Git 供团队共享。
 
 参考 `docs/SKILL_INSTALL.md`，执行 `./scripts/sync_skills.sh`：首次安装会自动复制到 `~/.cursor/skills/`；若已存在则不覆盖，提示在 Cursor 中比较合并。
 
+### 用户问「Spark DMP 账号密码在哪里找」「某某 MCP 凭证如何获取」时
+
+参考 `mcp-tools/README.md` 凭证获取指引：Spark 在 Data Suite 个人中心 → Profile；Presto 在 Data Suite API 管理 → 获取 Personal Token。
+
 ### 用户说「更新到最新版本」或「更新 release」时
 
 1. 执行 `git pull origin release`（或 `git pull gitlab release`）
