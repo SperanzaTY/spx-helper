@@ -22,18 +22,28 @@
 }
 ```
 
-### 2. 配置说明
+### 2. 获取 DMP 账号密码
+
+**LIVY_USERNAME** 和 **LIVY_PASSWORD** 即 Data Suite 的 BigData 凭证，获取方式：
+
+1. 登录 [Data Suite](https://datasuite.shopee.io)（Resource & Access Management）
+2. 左侧菜单点击 **个人中心**（Personal Center）
+3. 在 **Profile** 页面查看：
+   - **BigData Account** → 填入 `LIVY_USERNAME`
+   - **BigData Account Password** → 点击 **View** 显示密码，填入 `LIVY_PASSWORD`
+
+### 3. 配置说明
 
 | 变量 | 必填 | 默认值 | 说明 |
 |------|------|--------|------|
-| LIVY_USERNAME | ✅ | - | DMP 个人或项目账号 |
-| LIVY_PASSWORD | ✅ | - | DMP 密码 |
+| LIVY_USERNAME | ✅ | - | Data Suite 个人中心 Profile 的 BigData Account |
+| LIVY_PASSWORD | ✅ | - | Data Suite 个人中心 Profile 的 BigData Account Password |
 | LIVY_URL | ❌ | - | Livy 地址，不设则按 region 选择 |
 | LIVY_QUEUE | ❌ | szsc-dev | YARN 队列（DEV 用 szsc-dev，PROD 用 szsc） |
 | LIVY_REGION | ❌ | SG | 区域：SG / US |
 | LIVY_STATEMENT_TIMEOUT | ❌ | 300 | Statement 执行超时（秒），长查询可设 1800 |
 
-### 3. Livy 地址
+### 4. Livy 地址
 
 | 环境 | LIVY_URL |
 |------|----------|
@@ -44,7 +54,7 @@
 
 不设置 `LIVY_URL` 时，将根据 `LIVY_REGION` 自动选择 SG 或 US Live 地址。
 
-### 4. YARN 队列（从 Data Suite RAM 获取）
+### 5. YARN 队列（从 Data Suite RAM 获取）
 
 | 环境 | 队列 | 说明 |
 |------|------|------|
