@@ -6,6 +6,7 @@ ClickHouse MCP Server - 为 Cursor 提供 ClickHouse 查询能力
 
 cluster 可选值：
 - test：测试集群 spx_mart_pub
+- ddc：DDC 集群 spx_mart_ddc
 - ck2 / online_2：ck2 写集群
 - ck6 / online_6：ck6 写集群
 - online_4：test 读集群
@@ -43,6 +44,12 @@ CK_CLUSTERS = {
         443,
         'spx_mart_pub',
         'spx_mart-cluster_szsc_data_shared_online',
+    ),
+    'ddc': (
+        'clickhouse-k8s-sg-prod.data-infra.shopee.io',
+        443,
+        'spx_mart_ddc',
+        'spx_mart-cluster_szsc_spx_mart_online',
     ),
     'online_2': (
         'clickhouse-k8s-sg-prod.data-infra.shopee.io',
@@ -134,11 +141,13 @@ def execute_direct(
         )
         # ClickHouse 对“表不存在”等错误可能返回 404，需解析 body 中的实际错误
         if not response.ok:
-            err_body = response.text or ''
-            if 'DB::Exception' in err_body or 'Code:' in err_body:
-                detail = _format_error_detail(url, sql_for_debug, response_body=err_body[:600])
-                return {'success': False, 'error': f"ClickHouse 错误 (HTTP {response.status_code}):\n{err_body[:500]}\n\n{detail}"}
-            response.raise_for_status()
+            err_body = (response.text or '').strip()
+            err_detail = err_body[:2000] + ('...' if len(err_body) > 2000 else '')
+            detail = _format_error_detail(url, sql_for_debug, status_code=response.status_code)
+            return {
+                'success': False,
+                'error': f"ClickHouse 错误 (HTTP {response.status_code}):\n\n{err_detail or '(响应体为空)'}\n\n{detail}"
+            }
 
         lines = [l for l in response.text.strip().splitlines() if l]
         if not lines:
@@ -158,13 +167,18 @@ def execute_direct(
         return {'success': False, 'error': f"请求超时\n\n{detail}"}
     except requests.exceptions.RequestException as e:
         resp = e.response if hasattr(e, 'response') and e.response is not None else None
-        body = resp.text[:800] if resp and resp.text else None
+        body = (resp.text or '').strip()[:2000] if resp else ''
         detail = _format_error_detail(
             url, sql_for_debug,
             status_code=resp.status_code if resp else None,
-            response_body=body
         )
-        return {'success': False, 'error': f"请求失败: {str(e)}\n\n{detail}"}
+        # 优先展示响应体中的 ClickHouse 错误详情（适用于 HTTPError 等有 response 的情况）
+        if body:
+            status = resp.status_code if resp else '?'
+            err_msg = f"ClickHouse 错误 (HTTP {status}):\n\n{body}\n\n{detail}\n\n原始异常: {str(e)}"
+        else:
+            err_msg = f"请求失败: {str(e)}\n\n{detail}"
+        return {'success': False, 'error': err_msg}
     except Exception as e:
         import traceback
         detail = _format_error_detail(url, sql_for_debug, exception=str(e), traceback=traceback.format_exc())
@@ -204,10 +218,11 @@ async def query_ck(
 
     【调用前确认】
     1. env：live（生产）或 test（测试）
-    2. cluster（env=live 时必填），支持：ck2/ck5/ck6/ck7、online_2/4/5/6/7
+    2. cluster（env=live 时必填），支持：ddc、ck2/ck5/ck6/ck7、online_2/4/5/6/7
 
     集群说明：
     - test：测试集群 spx_mart_pub
+    - ddc：DDC 集群 spx_mart_ddc
     - ck2 / online_2：ck2 写集群
     - ck6 / online_6：ck6 写集群
     - ck5 / online_5：ck2 读集群
@@ -217,7 +232,7 @@ async def query_ck(
     Args:
         sql: SQL 语句
         env: live 或 test
-        cluster: 集群名（env=live 时必填），可选 ck2/ck5/ck6/ck7、online_2/4/5/6/7
+        cluster: 集群名（env=live 时必填），可选 ddc、ck2/ck5/ck6/ck7、online_2/4/5/6/7
         database: 覆盖默认库（可选）
         max_rows: 最多返回行数（默认 200）
     """
@@ -226,7 +241,7 @@ async def query_ck(
         db = database or "spx_mart_pub"
     elif env == "live":
         if not cluster:
-            return "错误: env=live 时必须指定 cluster（ck2/ck5/ck6/ck7 或 online_2/4/5/6/7）"
+            return "错误: env=live 时必须指定 cluster（ddc、ck2/ck5/ck6/ck7 或 online_2/4/5/6/7）"
         cluster_key = cluster
         db = database
     else:

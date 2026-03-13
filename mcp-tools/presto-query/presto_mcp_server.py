@@ -56,6 +56,20 @@ def _http_get(url: str, headers: dict, timeout: int = 10) -> dict:
     return resp.json()
 
 
+def _format_progress(events: list) -> str:
+    """将进度事件格式化为可读字符串，如: QUEUED(4s) → RUNNING(41s) → FINISH"""
+    if not events:
+        return ""
+    parts = []
+    for i, (elapsed, status) in enumerate(events):
+        if i == 0:
+            duration = elapsed
+        else:
+            duration = elapsed - events[i - 1][0]
+        parts.append(f"{status}({duration}s)")
+    return " → ".join(parts)
+
+
 def format_result_as_table(columns: list, rows: list) -> str:
     if not rows:
         return "(0 rows)"
@@ -129,10 +143,15 @@ async def query_presto(
         if not job_id:
             return f"❌ 提交失败: {data.get('errorMsg', data.get('message', 'Unknown error'))}"
 
-        # 2. 异步轮询状态（asyncio.sleep 不阻塞事件循环）
+        # 2. 异步轮询状态，记录进度时间线
         start_time = time.time()
+        progress_events = []  # [(elapsed_sec, status), ...]，仅记录状态变化
+        last_status = None
+        last_elapsed = 0
+
         while True:
-            if time.time() - start_time > 300:
+            elapsed = int(time.time() - start_time)
+            if elapsed > 300:
                 return f"❌ 查询超时 (>300秒)\nJob ID: {job_id}"
 
             status_data = await asyncio.to_thread(
@@ -140,19 +159,26 @@ async def query_presto(
             )
             query_status = status_data.get('status')
 
+            # 记录状态变化（或首次记录）
+            if query_status != last_status:
+                progress_events.append((elapsed, query_status))
+                last_status = query_status
+                last_elapsed = elapsed
+
             if query_status == 'FINISH':
                 break
             elif query_status == 'FAILED':
-                # 尝试多个可能的错误字段名，并附上完整响应便于调试
+                progress_events.append((elapsed, 'FAILED'))
                 err_msg = (
                     status_data.get('errorMessage')
                     or status_data.get('errorMsg')
                     or status_data.get('error')
                     or status_data.get('message')
                     or status_data.get('msg')
-                    or str(status_data)  # fallback：输出完整响应
+                    or str(status_data)
                 )
-                return f"❌ 查询失败\n\nJob ID: {job_id}\n错误: {err_msg}"
+                progress_line = _format_progress(progress_events)
+                return f"❌ 查询失败\n\nJob ID: {job_id}\n\n查询进度: {progress_line}\n总耗时: {elapsed}s\n\n错误: {err_msg}"
             elif query_status in ['RUNNING', 'PENDING', 'QUEUED']:
                 await asyncio.sleep(2)  # 异步等待，不阻塞 MCP 心跳
             else:
@@ -170,9 +196,14 @@ async def query_presto(
         total_rows = len(rows_raw)
         rows = [row.get('values', {}) for row in rows_raw[:max_rows]]
 
+        total_elapsed = int(time.time() - start_time)
+        progress_line = _format_progress(progress_events)
+
         table = format_result_as_table(columns, rows)
         output = f"✅ 查询成功\n\n"
         output += f"Job ID: {job_id}\n"
+        output += f"查询进度: {progress_line}\n"
+        output += f"总耗时: {total_elapsed}s\n"
         output += f"总行数: {total_rows}，显示行数: {len(rows)}\n"
         if total_rows > max_rows:
             output += f"⚠️ 结果已截断（只显示前 {max_rows} 行）\n"

@@ -3,9 +3,9 @@ name: spx-bug-trace
 description: SPX Helper 业务问题定位工作流。用于从页面元素出发，定位数据异常的根因：通过浏览器捕获 API 请求 → 数据管道健康检查 → 查询 API 血缘（biz_sql、源表）→ 分层验证假设 → 用 Presto/CK 工具直查源表数据验证 → 输出用户可读的结论。当用户描述页面数据不对、某个字段异常、数据缺失、数值偏差等业务问题时使用，也适用于"帮我查一下这个 Bug"、"这个数据为什么不对"、"溯源一下这个接口"等场景。
 ---
 
-<!-- 安装说明：将本目录（spx-bug-trace/）整体复制到 ~/.cursor/skills/ 下即可。
-     要求：Cursor 已配置 user-api-trace、user-ck-query、user-presto-query、cursor-ide-browser 四个 MCP 工具。
-     详见 mcp-tools/ 目录。 -->
+<!-- 本 Skill 位于 .cursor/skills/，版本随 SPX_Helper 仓库维护。
+     SPX_Helper 项目内自动加载；其他项目需在 Cursor 中比较 .cursor/skills/ 与 ~/.cursor/skills/ 后手动合并，不自动覆盖。
+     要求：user-api-trace、user-ck-query、user-presto-query、cursor-ide-browser 四个 MCP。-->
 
 # SPX Business Bug Trace
 
@@ -52,15 +52,18 @@ git pull origin release
 SELECT * FROM spx_mart_manage_app.<表名>_<market>_all LIMIT 1
 ```
 
-常见写入时间字段：`process_time`（Unix 时间戳）、`_process_time`（元数据字段）、`update_time`
+常见写入时间字段：`process_time`（Unix 时间戳）、`_process_time`（元数据字段）、`_version`（ReplacingMergeTree 版本，部分 10m 表用此）、`update_time`
 
 **第二步：检查最近写入时间**：
 ```sql
--- 根据上一步确认的字段名，选择对应的查询
+-- 优先尝试 process_time；若报错 Missing columns，则改用 _version 或 _process_time
 SELECT 
-    toDateTime(max(process_time)) AS last_write_time,  -- 大部分表
-    max(data_timestamp)           AS last_data_ts
+    toDateTime(max(process_time)) AS last_write_time,
+    max(data_timestamp) AS last_data_ts,
+    toDateTime(max(data_timestamp)) AS last_data_time
 FROM spx_mart_manage_app.<表名>_<market>_all
+-- 若 process_time 不存在，改用：
+-- toDateTime(max(_version)) AS last_version_time, max(data_timestamp) AS last_data_ts ...
 ```
 
 **判断标准**：
@@ -97,19 +100,26 @@ Flink 恢复操作参考：
 
 1. **优先检查浏览器是否已在目标页面**：调用 `browser_tabs` 列出当前标签，若已在正确页面则**直接**调用 `browser_network_requests`，无需 `browser_navigate`
 2. 用 `browser_network_requests` 抓取页面 XHR 请求列表
-3. 从 URL 提取 `api_id`：如 `/operation__fm__facility_driver_overview_v2` → `api_id = operation__fm__facility_driver_overview_v2`
+3. 从 URL 提取 `api_id`：路径最后一段即为 api_id。例如：
+   - `/mgmt/api/pc/forward/data/api_mart/mgmt_app/data_api/operation__soc_facility__incoming_volume_split_by_eta__10m_v3` → `api_id = operation__soc_facility__incoming_volume_split_by_eta__10m_v3`
+   - `/operation__fm__facility_driver_overview_v2` → `api_id = operation__fm__facility_driver_overview_v2`
 4. 如需截图确认当前状态，用 `browser_take_screenshot`，但**不要因此跳转页面**
 
 **多接口并发时，如何定位目标 API**：
 
-同一页面通常同时发出 10+ 个接口请求，用以下方法缩小范围：
+同一页面通常同时发出 10+ 个接口请求，用以下方法缩小范围（按优先级排序）：
 
-| 定位线索 | 方法 |
-|---------|------|
-| DOM 位置 | 卡片在页面中的顺序通常与接口请求顺序一致（第 N 个卡片 ≈ 第 N 个业务接口） |
-| URL 关键词 | 接口 URL 路径通常包含业务描述关键词，如 `driver_overview`、`order_volume`、`pickup` |
-| 用户描述 | 用户描述"司机数量"→ 查 `driver` 相关接口；"订单量" → 查 `order_volume` 相关接口 |
-| 接口时效性 | `_10m` 结尾 = 10 分钟刷新；`_1d` 结尾 = 日级数据；与数据延迟现象匹配 |
+| 优先级 | 定位线索 | 方法 |
+|--------|---------|------|
+| 1 | **用户已指明** | 用户提供完整 URL 路径或 api_id → **直接采用，无需推断** |
+| 2 | **数值对比** | 用户已标明页面显示的具体数值（如 436.819）→ 在各接口的 **response body** 中搜索该数值，匹配到的即为目标 API（最可靠） |
+| 3 | **URL 关键词** | 在 `browser_network_requests` 的 URL 列表中，按业务含义搜索：`incoming_volume`、`order_volume`、`driver_overview`、`split_by_eta` 等 |
+| 4 | 用户描述 | 用户描述"司机数量"→ 查 `driver` 相关接口；"按 ETA 拆分的到港量" → 查 `incoming_volume_split_by_eta` |
+| 5 | 接口时效性 | `_10m` 结尾 = 10 分钟刷新；`_1d` 结尾 = 日级数据 |
+
+**数值对比操作**：获取各接口的 response body（`browser_network_requests` 若含 responseBody 则直接查；否则需刷新页面重新抓取或通过 DevTools 等方式），在 JSON 中搜索用户指明的数值（注意四舍五入、格式差异，如 `436.819` 可能与 `436.82` 或字符串形式存在）。
+
+**切勿依赖**：~~「第 N 个卡片 ≈ 第 N 个业务接口」~~ —— 接口加载有快有慢，network_requests 列表顺序不稳定，难以与卡片一一对应。
 
 **确认后，还需查 API 实际返回值**，方法见 Phase 2.1。
 
@@ -265,7 +275,7 @@ api_trace(api_id, issue_description, custom_where="station_id=166 AND grass_regi
 - 新增了可复用的 SQL 模板或表名
 - 对用户的解释方式有更好的模板
 
-**更新方式**：直接修改 `~/.cursor/skills/spx-bug-trace/SKILL.md`，在对应位置追加或修改内容。更新后在文档的 `## Skill 更新记录` 节（位于 [investigation-template.md](investigation-template.md)）记录本次改动。
+**更新方式**：直接修改 `.cursor/skills/spx-bug-trace/SKILL.md`（项目内路径），在对应位置追加或修改内容。更新后在文档的 `## Skill 更新记录` 节记录本次改动。
 
 **不要更新的内容**：与本次问题强相关的业务细节（具体表名、站点 ID 等），这些放进过程文档而不是 Skill。
 
@@ -279,14 +289,26 @@ api_trace(api_id, issue_description, custom_where="station_id=166 AND grass_regi
 | Presto 扫全表超时 | 无分区过滤查询失败 | 加 `grass_date = '...'` |
 | Presto/CK 字段名不同 | 同一业务字段两边名字不同 | 先 `SELECT * LIMIT 1` 看列名 |
 | Dynamic WHERE 直查源表 | biz_sql 有 `{xxx_filter}` 占位符 | 手动补充等价 WHERE 条件 |
-| 表写入时间字段名不统一 | `_process_time` 字段不存在报错 | 先 `SELECT * LIMIT 1` 确认字段名，常见为 `process_time` |
+| 表写入时间字段名不统一 | `process_time`/`_process_time` 不存在报错 | 先 `SELECT * LIMIT 1` 确认字段名；常见为 `process_time`、`_version`、`_process_time`，按此顺序尝试 |
+| API 定位依赖卡片顺序 | 多卡片看板（10+ 接口）时，按「第 N 卡片 = 第 N 接口」猜错 | 优先用 URL 关键词匹配；用户若已提供接口路径或 api_id，直接采用 |
 | 乱跳转页面丢失 XHR | 用户已在问题页面，跳转后原 XHR 记录消失 | 先 `browser_tabs` 确认当前 URL，若已在目标页面直接 `browser_network_requests`，禁止主动 `browser_navigate` |
 | 排查时擅自修改代码 | 定位阶段不应修改任何代码文件 | 定位阶段只读不写，修复需用户明确授权后再动手 |
 | 本地代码不是最新 | 排查代码时找不到预期逻辑，或误判已修复的问题为 Bug | 排查前对所有相关仓库执行 `git pull origin release`；找不到逻辑时先用 `git log --all --oneline` 查全分支历史，确认是否有未拉取的新 commit |
 | 不确定源表在哪个 CK 集群 | 手动试 ck2/ck6 导致字段缺失报错 | 优先用 `api_trace` 溯源，工具会自动标注该 API 源表属于 ck2 还是 ck6；或从 biz_sql 里看 `{mgmt_db2}` 占位符，`spx_mart_manage_app` 的 ID 市场表通常在 ck6，其他市场在 ck2 |
+| get_api_lineage 查询超时 | 血缘表查询 120 秒超时 | 若项目内有血缘文档（如 `app-analysis/知识沉淀` 下的 CSV），可查 `operation__xxx` 或表名关键词获取源表；或重试 `get_api_lineage`，或改 `api_trace(query_source_data=False)` 仅取血缘 |
 
 ## 更多参考
 
 - 工具参数详情见 [tools-reference.md](tools-reference.md)
 - 表库对照关系见 [table-mapping.md](table-mapping.md)
 - 过程文档模板见 [investigation-template.md](investigation-template.md)
+
+---
+
+## Skill 更新记录
+
+| 日期 | 更新内容 | 触发原因 |
+|------|----------|----------|
+| 2026-03-06 | Phase 1：新增「数值对比」法——用用户标明的页面数值在 response body 中搜索匹配，作为最可靠的接口定位方式；URL 关键词优先于 DOM 顺序；明确不依赖「第 N 卡片 = 第 N 接口」 | Facility-SOC 看板数据延迟排查时，依赖卡片顺序猜错接口；用户建议应用选取的数值去对比接口返回值来定位 |
+| 2026-03-06 | Phase 0：补充 `_version` 为写入时间字段，支持 process_time 不存在时的 fallback 查询 | dws_spx_soc_hub_order_volume_10m 等表无 process_time，用 _version 成功 |
+| 2026-03-06 | 常见坑：新增「API 定位依赖卡片顺序」「get_api_lineage 超时」的应对 | 同上排查经验 |

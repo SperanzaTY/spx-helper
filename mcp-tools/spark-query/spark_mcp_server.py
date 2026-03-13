@@ -164,6 +164,18 @@ def format_result_as_table(columns: list, rows: list) -> str:
     return "\n".join(lines)
 
 
+def _format_spark_progress(progress: dict) -> str:
+    """格式化 Spark 执行进度"""
+    if not progress:
+        return ""
+    se = progress.get("session_elapsed", 0)
+    st = progress.get("statement_elapsed", 0)
+    if se == 0 and st == 0:
+        return ""
+    parts = [f"Session 启动: {se}s", f"Statement 执行: {st}s", f"总耗时: {se + st}s"]
+    return " | ".join(parts)
+
+
 def _wrap_for_syntax_validation(sql: str) -> str:
     """语法验证模式：用 EXPLAIN EXTENDED 包装，只解析不取数"""
     s = sql.strip().rstrip(";")
@@ -181,8 +193,9 @@ def _execute_spark_sql(
     statement_timeout: int,
     validate_syntax: bool = False,
 ) -> dict:
-    """同步执行 Livy Session + Statement 流程，返回 {success, columns, rows, raw_text, error}"""
+    """同步执行 Livy Session + Statement 流程，返回 {success, columns, rows, raw_text, error, progress}"""
     session_id = None
+    progress = {"session_elapsed": 0, "statement_elapsed": 0}
     try:
         # 1. 创建 Session (kind: sql)
         create_body = {
@@ -195,7 +208,7 @@ def _execute_spark_sql(
         sess = _livy_post(base_url, "/sessions", create_body, timeout=60)
         session_id = sess.get("id")
         if session_id is None:
-            return {"success": False, "error": f"创建 Session 失败: {sess}"}
+            return {"success": False, "error": f"创建 Session 失败: {sess}", "progress": None}
 
         # 2. 轮询 Session 直到 idle
         start = time.time()
@@ -203,13 +216,14 @@ def _execute_spark_sql(
             s = _livy_get(base_url, f"/sessions/{session_id}", timeout=30)
             state = s.get("state", "")
             if state == "idle":
+                progress["session_elapsed"] = int(time.time() - start)
                 break
             if state in ("error", "dead", "killed"):
-                return {"success": False, "error": f"Session 失败: state={state}, 详情: {s}"}
+                return {"success": False, "error": f"Session 失败: state={state}, 详情: {s}", "progress": progress}
             time.sleep(SESSION_POLL_INTERVAL)
 
         if s.get("state") != "idle":
-            return {"success": False, "error": f"Session 启动超时 (>={SESSION_READY_TIMEOUT}s)"}
+            return {"success": False, "error": f"Session 启动超时 (>={SESSION_READY_TIMEOUT}s)", "progress": progress}
 
         # 3. 执行 Statement（若为语法验证模式则用 EXPLAIN 包装）
         exec_sql = _wrap_for_syntax_validation(sql) if validate_syntax else sql.strip().rstrip(";")
@@ -217,7 +231,7 @@ def _execute_spark_sql(
         stmt = _livy_post(base_url, f"/sessions/{session_id}/statements", stmt_body, timeout=30)
         stmt_id = stmt.get("id")
         if stmt_id is None:
-            return {"success": False, "error": f"提交 Statement 失败: {stmt}"}
+            return {"success": False, "error": f"提交 Statement 失败: {stmt}", "progress": progress}
 
         # 4. 轮询 Statement 直到 available
         start = time.time()
@@ -225,28 +239,31 @@ def _execute_spark_sql(
             st = _livy_get(base_url, f"/sessions/{session_id}/statements/{stmt_id}", timeout=30)
             state = st.get("state", "")
             if state == "available":
+                progress["statement_elapsed"] = int(time.time() - start)
                 out = st.get("output", {})
                 cols, rows, raw = _parse_statement_output(out, max_rows)
                 if raw and not cols and not rows:
-                    # 纯文本输出或错误
                     if out.get("status") == "error":
-                        return {"success": False, "error": raw or "执行出错"}
-                    return {"success": True, "columns": [], "rows": [], "raw_text": raw}
-                return {"success": True, "columns": cols, "rows": rows, "raw_text": raw}
+                        return {"success": False, "error": raw or "执行出错", "progress": progress}
+                    return {"success": True, "columns": [], "rows": [], "raw_text": raw, "progress": progress}
+                return {"success": True, "columns": cols, "rows": rows, "raw_text": raw, "progress": progress}
             if state == "error":
+                progress["statement_elapsed"] = int(time.time() - start)
                 out = st.get("output", {})
                 _, _, err = _parse_statement_output(out, max_rows)
-                return {"success": False, "error": err or "Statement 执行失败"}
+                return {"success": False, "error": err or "Statement 执行失败", "progress": progress}
             if state in ("cancelled", "cancelling"):
-                return {"success": False, "error": "Statement 已取消"}
+                progress["statement_elapsed"] = int(time.time() - start)
+                return {"success": False, "error": "Statement 已取消", "progress": progress}
             time.sleep(STATEMENT_POLL_INTERVAL)
 
-        return {"success": False, "error": f"Statement 执行超时 (>={statement_timeout}s)"}
+        progress["statement_elapsed"] = statement_timeout
+        return {"success": False, "error": f"Statement 执行超时 (>={statement_timeout}s)", "progress": progress}
 
     except requests.exceptions.RequestException as e:
-        return {"success": False, "error": f"请求失败: {str(e)}"}
+        return {"success": False, "error": f"请求失败: {str(e)}", "progress": progress}
     except Exception as e:
-        return {"success": False, "error": f"执行错误: {str(e)}"}
+        return {"success": False, "error": f"执行错误: {str(e)}", "progress": progress}
     finally:
         if session_id is not None:
             try:
@@ -300,17 +317,28 @@ async def query_spark(
         validate_syntax,
     )
 
+    progress_line = _format_spark_progress(result.get("progress") or {})
+
     if not result["success"]:
-        return f"❌ 执行失败（Spark / {region}）\n\n错误: {result['error']}"
+        err_out = f"❌ 执行失败（Spark / {region}）\n\n错误: {result['error']}"
+        if progress_line:
+            err_out += f"\n\n执行进度: {progress_line}"
+        return err_out
 
     if result.get("raw_text") and not result.get("rows"):
         label = "语法验证通过" if validate_syntax else "执行成功"
-        return f"✅ {label}（Spark / {region}）\n\n{result['raw_text']}"
+        out = f"✅ {label}（Spark / {region}）\n\n"
+        if progress_line:
+            out += f"执行进度: {progress_line}\n\n"
+        out += result["raw_text"]
+        return out
 
     table = format_result_as_table(result["columns"], result["rows"])
     total = len(result["rows"])
     truncated = total >= max_rows
     out = f"✅ 查询成功（Spark / {region}）\n\n"
+    if progress_line:
+        out += f"执行进度: {progress_line}\n"
     out += f"总行数: {total}，显示行数: {len(result['rows'])}\n"
     if truncated:
         out += f"⚠️ 结果已截断（只显示前 {max_rows} 行）\n"
