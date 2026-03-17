@@ -7852,6 +7852,57 @@ function showStationError(message) {
 // 数据同步工具 (LIVE → TEST)
 // ========================================
 
+// 获取表名模式：template | explicit
+function getSyncTableMode() {
+  const radio = document.querySelector('input[name="syncTableMode"]:checked');
+  return radio ? radio.value : 'template';
+}
+
+// 获取待同步表列表（根据模式返回 [{sourceTable, targetTable, targetTableLocal, label}]）
+function getTablesToSync() {
+  const database = document.getElementById('syncDatabase')?.value.trim() || '';
+  const testDatabase = 'spx_mart_pub';
+  
+  if (getSyncTableMode() === 'explicit') {
+    const text = document.getElementById('syncExplicitTables')?.value || '';
+    const lines = text.split('\n').map(s => s.trim()).filter(s => s && s.includes('.'));
+    return lines.map(fullTable => {
+      const parts = fullTable.split('.');
+      const tableName = parts[parts.length - 1];
+      return {
+        sourceTable: fullTable,
+        targetTable: `${testDatabase}.${tableName}`,
+        targetTableLocal: null,  // 指定表名模式不区分 all/local
+        label: tableName
+      };
+    });
+  }
+  
+  const template = document.getElementById('syncTableTemplate')?.value.trim() || '';
+  const markets = getSelectedMarkets();
+  if (!template || !database || markets.length === 0) return [];
+  return markets.map(m => ({
+    sourceTable: `${database}.${template}_${m}_all`,
+    targetTable: `${testDatabase}.${template}_${m}_all`,
+    targetTableLocal: `${testDatabase}.${template}_${m}_local`,
+    label: m.toUpperCase()
+  }));
+}
+
+// 切换表名模式时的 UI 显隐
+function toggleSyncTableModeUI() {
+  const isExplicit = getSyncTableMode() === 'explicit';
+  document.getElementById('syncTemplateSection').style.display = isExplicit ? 'none' : 'block';
+  document.getElementById('syncExplicitSection').style.display = isExplicit ? 'block' : 'none';
+  document.getElementById('syncMarketSection').style.display = isExplicit ? 'none' : 'block';
+  document.getElementById('syncDatabaseSection').style.display = isExplicit ? 'none' : 'block';
+  updateSyncTablePreview();
+}
+document.querySelectorAll('input[name="syncTableMode"]').forEach(radio => {
+  radio.addEventListener('change', toggleSyncTableModeUI);
+});
+toggleSyncTableModeUI();  // 初始化 UI 状态
+
 // 获取选中的市场列表
 function getSelectedMarkets() {
   const checkboxes = document.querySelectorAll('.market-checkbox:checked');
@@ -7902,21 +7953,13 @@ updateSelectedMarketsHint();
 
 // 更新表名预览
 function updateSyncTablePreview() {
-  const template = document.getElementById('syncTableTemplate')?.value || '';
-  const markets = getSelectedMarkets();
-  const database = document.getElementById('syncDatabase')?.value || '';
-  
+  const tables = getTablesToSync();
   const previewDiv = document.getElementById('syncTablePreview');
   if (!previewDiv) return;
   
-  if (template && markets.length > 0 && database) {
-    if (markets.length === 1) {
-      const fullTableName = `${database}.${template}_${markets[0]}_all`;
-      previewDiv.textContent = fullTableName;
-    } else {
-      const tableNames = markets.map(m => `${database}.${template}_${m}_all`).join('\n');
-      previewDiv.innerHTML = tableNames.replace(/\n/g, '<br>');
-    }
+  if (tables.length > 0) {
+    const lines = tables.map(t => `${t.sourceTable} → ${t.targetTable}`);
+    previewDiv.innerHTML = lines.join('<br>');
   } else {
     previewDiv.textContent = '-';
   }
@@ -7925,6 +7968,7 @@ function updateSyncTablePreview() {
 // 监听输入变化
 document.getElementById('syncTableTemplate')?.addEventListener('input', updateSyncTablePreview);
 document.getElementById('syncDatabase')?.addEventListener('input', updateSyncTablePreview);
+document.getElementById('syncExplicitTables')?.addEventListener('input', updateSyncTablePreview);
 
 // 初始化预览
 updateSyncTablePreview();
@@ -7935,56 +7979,34 @@ document.getElementById('verifySyncSourceBtn')?.addEventListener('click', async 
   const statusDiv = document.getElementById('syncStatus');
   const executeSyncBtn = document.getElementById('executeSyncBtn');
   
-  // 获取配置
   const sourceHost = document.getElementById('syncSourceHost').value;
-  const template = document.getElementById('syncTableTemplate').value.trim();
-  const markets = getSelectedMarkets();
-  const database = document.getElementById('syncDatabase').value.trim();
+  const tables = getTablesToSync();
   
-  // 验证输入
-  if (!template) {
+  if (tables.length === 0) {
     statusDiv.className = 'sync-status error';
-    statusDiv.innerHTML = '<div class="sync-status-title">❌ 输入错误</div><div>请输入表名模板</div>';
+    statusDiv.innerHTML = '<div class="sync-status-title">❌ 输入错误</div><div>' +
+      (getSyncTableMode() === 'explicit' ? '请输入完整表名（格式 database.table，每行一个）' : '请选择表名模板+市场，或使用指定表名模式') + '</div>';
     return;
   }
   
-  if (markets.length === 0) {
-    statusDiv.className = 'sync-status error';
-    statusDiv.innerHTML = '<div class="sync-status-title">❌ 输入错误</div><div>请至少选择一个市场</div>';
-    return;
-  }
-  
-  if (!database) {
-    statusDiv.className = 'sync-status error';
-    statusDiv.innerHTML = '<div class="sync-status-title">❌ 输入错误</div><div>请输入数据库名</div>';
-    return;
-  }
-  
-  // 禁用按钮
   btn.disabled = true;
   btn.textContent = '🔍 验证中...';
   executeSyncBtn.disabled = true;
   
-  // 显示加载状态
   statusDiv.className = 'sync-status loading';
-  statusDiv.innerHTML = `<div class="sync-status-title">🔍 正在验证 ${markets.length} 个市场的源数据...</div>`;
+  statusDiv.innerHTML = `<div class="sync-status-title">🔍 正在验证 ${tables.length} 个表的源数据...</div>`;
   
   try {
     const results = [];
     
-    // 验证每个市场
-    for (const market of markets) {
-      const sourceTable = `${database}.${template}_${market}_all`;
+    for (const { sourceTable, label } of tables) {
       
-      console.log(`=== 验证源数据: ${market.toUpperCase()} ===`);
+      console.log(`=== 验证源数据: ${label} ===`);
       console.log('源表:', sourceTable);
       
       try {
-        // 查询源表数据量
         const sql = `
-          SELECT 
-            count() as row_count,
-            '${market}' as market
+          SELECT count() as row_count
           FROM remote(
             '${sourceHost}',
             '${sourceTable}',
@@ -8000,29 +8022,16 @@ document.getElementById('verifySyncSourceBtn')?.addEventListener('click', async 
           const data = JSON.parse(result.data);
           const rowCount = data.data[0].row_count;
           results.push({
-            market: market.toUpperCase(),
-            table: sourceTable,
-            rowCount: rowCount,
-            success: true
+            label, table: sourceTable, rowCount, success: true
           });
-          console.log(`✅ ${market.toUpperCase()}: ${rowCount} 行`);
+          console.log(`✅ ${label}: ${rowCount} 行`);
         } else {
-          results.push({
-            market: market.toUpperCase(),
-            table: sourceTable,
-            error: result.error,
-            success: false
-          });
-          console.error(`❌ ${market.toUpperCase()}: ${result.error}`);
+          results.push({ label, table: sourceTable, error: result.error, success: false });
+          console.error(`❌ ${label}: ${result.error}`);
         }
       } catch (error) {
-        results.push({
-          market: market.toUpperCase(),
-          table: sourceTable,
-          error: error.message,
-          success: false
-        });
-        console.error(`❌ ${market.toUpperCase()}: ${error.message}`);
+        results.push({ label, table: sourceTable, error: error.message, success: false });
+        console.error(`❌ ${label}: ${error.message}`);
       }
     }
     
@@ -8032,17 +8041,16 @@ document.getElementById('verifySyncSourceBtn')?.addEventListener('click', async 
     
     // 显示结果
     if (failCount === 0) {
-      // 全部成功
       statusDiv.className = 'sync-status success';
       let html = `
-        <div class="sync-status-title">✅ 源数据验证成功 (${successCount}/${markets.length})</div>
+        <div class="sync-status-title">✅ 源数据验证成功 (${successCount}/${tables.length})</div>
         <div style="margin-top: 10px;">
       `;
       
       results.forEach(r => {
         html += `
           <div style="padding: 6px 0; border-bottom: 1px solid #e0e0e0;">
-            <strong>${r.market}</strong>: ${r.rowCount.toLocaleString()} 行
+            <strong>${r.label}</strong>: ${r.rowCount.toLocaleString()} 行
             <div style="font-size: 11px; color: #666;">${r.table}</div>
           </div>
         `;
@@ -8068,28 +8076,14 @@ document.getElementById('verifySyncSourceBtn')?.addEventListener('click', async 
       
       results.forEach(r => {
         if (r.success) {
-          html += `
-            <div style="padding: 6px 0; border-bottom: 1px solid #e0e0e0; color: #2e7d32;">
-              ✅ <strong>${r.market}</strong>: ${r.rowCount.toLocaleString()} 行
-            </div>
-          `;
+          html += `<div style="padding: 6px 0; border-bottom: 1px solid #e0e0e0; color: #2e7d32;">✅ <strong>${r.label}</strong>: ${r.rowCount.toLocaleString()} 行</div>`;
         } else {
-          html += `
-            <div style="padding: 6px 0; border-bottom: 1px solid #e0e0e0; color: #c62828;">
-              ❌ <strong>${r.market}</strong>: ${r.error}
-            </div>
-          `;
+          html += `<div style="padding: 6px 0; border-bottom: 1px solid #e0e0e0; color: #c62828;">❌ <strong>${r.label}</strong>: ${r.error}</div>`;
         }
       });
-      
       html += `</div>`;
-      
-      if (successCount > 0) {
-        html += `
-          <div style="margin-top: 15px; padding: 10px; background: #fff3e1; border-radius: 4px; color: #f57c00;">
-            💡 你可以只同步验证成功的市场，取消失败市场的勾选后重新验证
-          </div>
-        `;
+      if (successCount > 0 && getSyncTableMode() === 'template') {
+        html += `<div style="margin-top: 15px; padding: 10px; background: #fff3e1; border-radius: 4px; color: #f57c00;">💡 可取消失败市场的勾选后重新验证</div>`;
       }
       
       statusDiv.innerHTML = html;
@@ -8120,47 +8114,31 @@ document.getElementById('executeSyncBtn')?.addEventListener('click', async funct
   const statusDiv = document.getElementById('syncStatus');
   const verifyResultBtn = document.getElementById('verifySyncResultBtn');
   
-  // 获取配置
   const sourceHost = document.getElementById('syncSourceHost').value;
-  const template = document.getElementById('syncTableTemplate').value.trim();
-  const markets = getSelectedMarkets();
-  const database = document.getElementById('syncDatabase').value.trim();
   const syncMode = document.getElementById('syncMode').value;
+  const tables = getTablesToSync();
   
-  if (markets.length === 0) {
+  if (tables.length === 0) {
     statusDiv.className = 'sync-status error';
-    statusDiv.innerHTML = '<div class="sync-status-title">❌ 请至少选择一个市场</div>';
+    statusDiv.innerHTML = '<div class="sync-status-title">❌ 没有可同步的表，请先验证源数据</div>';
     return;
   }
   
-  // 确认操作
-  const confirmMsg = `确认要${syncMode === 'full_ddl' ? '清空并重新导入' : '追加'} ${markets.length} 个市场的数据吗？\n\n市场: ${markets.map(m => m.toUpperCase()).join(', ')}`;
-  if (!confirm(confirmMsg)) {
-    return;
-  }
+  const confirmMsg = `确认要${syncMode === 'full_ddl' ? '清空并重新导入' : '追加'} ${tables.length} 个表的数据吗？`;
+  if (!confirm(confirmMsg)) return;
   
-  // 禁用按钮
   btn.disabled = true;
   btn.textContent = '⏳ 同步中...';
   verifyResultBtn.disabled = true;
-  
-  // 显示加载状态
   statusDiv.className = 'sync-status loading';
-  statusDiv.innerHTML = `<div class="sync-status-title">🔄 正在同步 ${markets.length} 个市场...</div>`;
+  statusDiv.innerHTML = `<div class="sync-status-title">🔄 正在同步 ${tables.length} 个表...</div>`;
   
   try {
     const results = [];
     
-    // 同步每个市场
-    for (let i = 0; i < markets.length; i++) {
-      const market = markets[i];
-      // LIVE环境使用用户输入的数据库名，TEST环境固定使用spx_mart_pub
-      const sourceTable = `${database}.${template}_${market}_all`;
-      const testDatabase = 'spx_mart_pub';  // TEST环境固定数据库名
-      const targetTableAll = `${testDatabase}.${template}_${market}_all`;
-      const targetTableLocal = `${testDatabase}.${template}_${market}_local`;
-      
-      statusDiv.innerHTML = `<div class="sync-status-title">🔄 正在同步 ${market.toUpperCase()} (${i+1}/${markets.length})...</div>`;
+    for (let i = 0; i < tables.length; i++) {
+      const { sourceTable, targetTable, targetTableLocal, label } = tables[i];
+      statusDiv.innerHTML = `<div class="sync-status-title">🔄 正在同步 ${label} (${i+1}/${tables.length})...</div>`;
       
       console.log(`=== 开始同步: ${market.toUpperCase()} ===`);
       console.log(`源: ${sourceTable} (LIVE)`);
@@ -8168,34 +8146,22 @@ document.getElementById('executeSyncBtn')?.addEventListener('click', async funct
       
       try {
         if (syncMode === 'full_ddl') {
-          // 完整同步模式：清空local表 + 写入all表
-          console.log('步骤 1: 清空TEST的local表数据...');
-          
-          // 清空local表（实际存储数据的表）
-          const truncateSQL = `TRUNCATE TABLE IF EXISTS ${targetTableLocal}`;
+          const tableToTruncate = targetTableLocal || targetTable;
+          console.log('步骤 1: 清空TEST表数据...');
+          const truncateSQL = `TRUNCATE TABLE IF EXISTS ${tableToTruncate}`;
           const truncateResult = await executeTestClickHouseSQL(truncateSQL);
-          
           if (!truncateResult.success) {
-            // 检测表不存在的情况
             if (truncateResult.error && truncateResult.error.includes('does not exist')) {
-              throw new Error(
-                `表不存在: ${targetTableLocal}\n\n` +
-                `⚠️ 完整同步模式要求local表已提前创建\n` +
-                `请联系DBA创建表结构，或使用追加模式`
-              );
+              throw new Error(`表不存在: ${tableToTruncate}\n\n⚠️ 完整同步模式要求目标表已创建，或使用追加模式`);
             }
-            throw new Error(`清空local表失败: ${truncateResult.error}`);
+            throw new Error(`清空表失败: ${truncateResult.error}`);
           }
-          
           console.log('✅ 表已清空');
-          
         }
         
-        // 导入数据（写入all表，自动路由到local表）
-        console.log('步骤 2: 通过all表导入数据...');
-        
+        console.log('步骤 2: 导入数据...');
         const insertSQL = `
-          INSERT INTO ${targetTableAll}
+          INSERT INTO ${targetTable}
           SELECT * FROM remote(
             '${sourceHost}',
             '${sourceTable}',
@@ -8207,15 +8173,13 @@ document.getElementById('executeSyncBtn')?.addEventListener('click', async funct
         const insertResult = await executeTestClickHouseSQL(insertSQL);
         
         if (!insertResult.success) {
-          // 分析错误类型
           const errorMsg = insertResult.error;
-          
           if (errorMsg.includes('does not exist') || errorMsg.includes('Table') && errorMsg.includes('not found')) {
             throw new Error(
-              `表不存在: ${targetTableAll}\n\n` +
+              `表不存在: ${targetTable}\n\n` +
               `💡 解决方案:\n` +
               `1. 联系DBA创建TEST环境的表结构\n` +
-              `2. 或检查表名、数据库名是否正确`
+              `2. 检查表名、数据库名是否正确`
             );
           } else if (errorMsg.includes('Column') || errorMsg.includes('type mismatch') || errorMsg.includes('Structure')) {
             throw new Error(
@@ -8231,21 +8195,11 @@ document.getElementById('executeSyncBtn')?.addEventListener('click', async funct
           }
         }
         
-        console.log(`✅ ${market.toUpperCase()} 同步成功`);
-        
-        results.push({
-          market: market.toUpperCase(),
-          success: true
-        });
-        
+        console.log(`✅ ${label} 同步成功`);
+        results.push({ label, success: true });
       } catch (error) {
-        console.error(`❌ ${market.toUpperCase()} 同步失败:`, error);
-        
-        results.push({
-          market: market.toUpperCase(),
-          success: false,
-          error: error.message
-        });
+        console.error(`❌ ${label} 同步失败:`, error);
+        results.push({ label, success: false, error: error.message });
       }
     }
     
@@ -8258,12 +8212,12 @@ document.getElementById('executeSyncBtn')?.addEventListener('click', async funct
       // 全部成功
       statusDiv.className = 'sync-status success';
       let html = `
-        <div class="sync-status-title">✅ 同步完成 (${successCount}/${markets.length})</div>
+        <div class="sync-status-title">✅ 同步完成 (${successCount}/${tables.length})</div>
         <div style="margin-top: 10px;">
       `;
       
       results.forEach(r => {
-        html += `<div style="padding: 4px 0; color: #2e7d32;">✅ ${r.market}</div>`;
+        html += `<div style="padding: 4px 0; color: #2e7d32;">✅ ${r.label}</div>`;
       });
       
       html += `
@@ -8286,11 +8240,11 @@ document.getElementById('executeSyncBtn')?.addEventListener('click', async funct
       
       results.forEach(r => {
         if (r.success) {
-          html += `<div style="padding: 4px 0; color: #2e7d32;">✅ ${r.market}</div>`;
+          html += `<div style="padding: 4px 0; color: #2e7d32;">✅ ${r.label}</div>`;
         } else {
           html += `
             <div style="padding: 8px 0; border-bottom: 1px solid #e0e0e0;">
-              <div style="color: #c62828; font-weight: bold;">❌ ${r.market}</div>
+              <div style="color: #c62828; font-weight: bold;">❌ ${r.label}</div>
               <div style="font-size: 11px; color: #666; margin-top: 4px; white-space: pre-wrap;">${r.error}</div>
             </div>
           `;
@@ -8323,15 +8277,11 @@ document.getElementById('executeSyncBtn')?.addEventListener('click', async funct
 document.getElementById('verifySyncResultBtn')?.addEventListener('click', async function() {
   const btn = this;
   const statusDiv = document.getElementById('syncStatus');
+  const tables = getTablesToSync();
   
-  // 获取配置
-  const template = document.getElementById('syncTableTemplate').value.trim();
-  const markets = getSelectedMarkets();
-  const database = document.getElementById('syncDatabase').value.trim();
-  
-  if (markets.length === 0) {
+  if (tables.length === 0) {
     statusDiv.className = 'sync-status error';
-    statusDiv.innerHTML = '<div class="sync-status-title">❌ 请至少选择一个市场</div>';
+    statusDiv.innerHTML = '<div class="sync-status-title">❌ 没有可验证的表</div>';
     return;
   }
   
@@ -8341,56 +8291,28 @@ document.getElementById('verifySyncResultBtn')?.addEventListener('click', async 
   
   // 显示加载状态
   statusDiv.className = 'sync-status loading';
-  statusDiv.innerHTML = `<div class="sync-status-title">🔍 正在验证 ${markets.length} 个市场的 TEST 环境数据...</div>`;
+  statusDiv.innerHTML = `<div class="sync-status-title">🔍 正在验证 ${tables.length} 个表的 TEST 环境数据...</div>`;
   
   try {
     const results = [];
     
-    // 验证每个市场
-    for (const market of markets) {
-      const testDatabase = 'spx_mart_pub';  // TEST环境固定数据库名
-      const targetTable = `${testDatabase}.${template}_${market}_all`;
-      
-      console.log(`=== 验证结果: ${market.toUpperCase()} ===`);
-      console.log('表:', targetTable);
-      
+    for (const { targetTable, label } of tables) {
+      console.log(`=== 验证结果: ${label} ===`, targetTable);
       try {
-        // 查询 TEST 环境的表数据
-        const sql = `
-          SELECT count() as row_count
-          FROM ${targetTable}
-          FORMAT JSON
-        `;
-        
+        const sql = `SELECT count() as row_count FROM ${targetTable} FORMAT JSON`;
         const result = await executeTestClickHouseSQL(sql);
-        
         if (result.success) {
           const data = JSON.parse(result.data);
           const rowCount = data.data[0].row_count;
-          results.push({
-            market: market.toUpperCase(),
-            table: targetTable,
-            rowCount: rowCount,
-            success: true
-          });
-          console.log(`✅ ${market.toUpperCase()}: ${rowCount} 行`);
+          results.push({ label, table: targetTable, rowCount, success: true });
+          console.log(`✅ ${label}: ${rowCount} 行`);
         } else {
-          results.push({
-            market: market.toUpperCase(),
-            table: targetTable,
-            error: result.error,
-            success: false
-          });
-          console.error(`❌ ${market.toUpperCase()}: ${result.error}`);
+          results.push({ label, table: targetTable, error: result.error, success: false });
+          console.error(`❌ ${label}: ${result.error}`);
         }
       } catch (error) {
-        results.push({
-          market: market.toUpperCase(),
-          table: targetTable,
-          error: error.message,
-          success: false
-        });
-        console.error(`❌ ${market.toUpperCase()}: ${error.message}`);
+        results.push({ label, table: targetTable, error: error.message, success: false });
+        console.error(`❌ ${label}: ${error.message}`);
       }
     }
     
@@ -8403,14 +8325,14 @@ document.getElementById('verifySyncResultBtn')?.addEventListener('click', async 
       // 全部成功
       statusDiv.className = 'sync-status success';
       let html = `
-        <div class="sync-status-title">✅ 验证完成 (${successCount}/${markets.length})</div>
+        <div class="sync-status-title">✅ 验证完成 (${successCount}/${tables.length})</div>
         <div style="margin-top: 10px;">
       `;
       
       results.forEach(r => {
         html += `
           <div style="padding: 6px 0; border-bottom: 1px solid #e0e0e0;">
-            <strong>${r.market}</strong>: ${r.rowCount.toLocaleString()} 行
+            <strong>${r.label}</strong>: ${r.rowCount.toLocaleString()} 行
             <div style="font-size: 11px; color: #666;">${r.table}</div>
           </div>
         `;
@@ -8435,17 +8357,9 @@ document.getElementById('verifySyncResultBtn')?.addEventListener('click', async 
       
       results.forEach(r => {
         if (r.success) {
-          html += `
-            <div style="padding: 6px 0; border-bottom: 1px solid #e0e0e0; color: #2e7d32;">
-              ✅ <strong>${r.market}</strong>: ${r.rowCount.toLocaleString()} 行
-            </div>
-          `;
+          html += `<div style="padding: 6px 0; border-bottom: 1px solid #e0e0e0; color: #2e7d32;">✅ <strong>${r.label}</strong>: ${r.rowCount.toLocaleString()} 行</div>`;
         } else {
-          html += `
-            <div style="padding: 6px 0; border-bottom: 1px solid #e0e0e0; color: #c62828;">
-              ❌ <strong>${r.market}</strong>: ${r.error}
-            </div>
-          `;
+          html += `<div style="padding: 6px 0; border-bottom: 1px solid #e0e0e0; color: #c62828;">❌ <strong>${r.label}</strong>: ${r.error}</div>`;
         }
       });
       

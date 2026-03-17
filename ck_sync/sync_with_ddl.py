@@ -266,4 +266,41 @@ def main():
 
 
 if __name__ == '__main__':
+    import argparse
+    parser = argparse.ArgumentParser(
+        description='ClickHouse 完整DDL同步脚本。支持通过参数指定表名（适用于命名不规范的表）'
+    )
+    parser.add_argument('--table', '-t', type=str, help='指定单个表（格式 database.table）')
+    parser.add_argument('--tables', type=str, help='指定多个表，逗号分隔（如 db.t1,db.t2）')
+    parser.add_argument('--target', type=str, help='目标表名（可选，默认与源表相同）')
+    args = parser.parse_args()
+
+    if args.table or args.tables:
+        tables_input = args.table or args.tables
+        table_list = [t.strip() for t in tables_input.split(',') if t.strip() and '.' in t]
+        if not table_list:
+            logger.error('❌ 未提供有效的表名（格式: database.table）')
+            sys.exit(1)
+        logger.info(f'📋 指定表名模式: {len(table_list)} 个表')
+        syncer = TableSyncWithDDL(
+            {'host': '10.180.129.96', 'port': 443, 'user': 'spx_mart', 'password': 'RtL3jHWkDoHp',
+             'database': 'spx_mart_manage_app', 'show_sql': False, 'use_https': True},
+            {'host': 'clickhouse-k8s-sg-prod.data-infra.shopee.io', 'port': 443,
+             'user': 'spx_mart-cluster_szsc_data_shared_online', 'password': 'RtL3jHWkDoHp',
+             'database': 'spx_mart_manage_app', 'show_sql': False, 'use_https': True}
+        )
+        remote = {
+            'source_remote_ip': '10.180.129.96',
+            'source_remote_user': 'spx_mart',
+            'source_remote_password': 'RtL3jHWkDoHp',
+        }
+        for i, src in enumerate(table_list):
+            logger.info(f'\n[{i+1}/{len(table_list)}] {src}')
+            ok = syncer.sync_table(src, target_table=args.target if args.target else None, **remote)
+            if not ok:
+                logger.error(f'❌ {src} 同步失败')
+                sys.exit(1)
+        logger.info('\n✅ 全部同步完成')
+        sys.exit(0)
+
     sys.exit(main())
