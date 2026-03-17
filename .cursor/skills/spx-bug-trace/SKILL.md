@@ -297,6 +297,7 @@ api_trace(api_id, issue_description, custom_where="station_id=166 AND grass_regi
 | 排查时擅自修改代码 | 定位阶段不应修改任何代码文件 | 定位阶段只读不写，修复需用户明确授权后再动手 |
 | 本地代码不是最新 | 排查代码时找不到预期逻辑，或误判已修复的问题为 Bug | 排查前对所有相关仓库执行 `git pull origin release`；找不到逻辑时先用 `git log --all --oneline` 查全分支历史，确认是否有未拉取的新 commit |
 | 不确定源表在哪个 CK 集群 | 手动试 ck2/ck6 导致字段缺失报错 | 优先用 `api_trace` 溯源，工具会自动标注该 API 源表属于 ck2 还是 ck6；或从 biz_sql 里看 `{mgmt_db2}` 占位符，`spx_mart_manage_app` 的 ID 市场表通常在 ck6，其他市场在 ck2 |
+| ck5/ck7 查表报 UNKNOWN_TABLE | 读集群表为子集，部分表不存在 | 改用 ck2 或 ck6（写集群表更全）；api_trace 已自动建议 ck2/ck6 |
 | get_api_lineage 查询超时 | 血缘表查询 120 秒超时 | 若项目内有血缘文档（如 `app-analysis/知识沉淀` 下的 CSV），可查 `operation__xxx` 或表名关键词获取源表；或重试 `get_api_lineage`，或改 `api_trace(query_source_data=False)` 仅取血缘 |
 
 ## 更多参考

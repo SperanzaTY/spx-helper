@@ -37,8 +37,8 @@ query_ck(
 - `ck2` / `online_2`：ck2 写集群
 - `ck6` / `online_6`：ck6 写集群
 - `online_4`：test 读集群
-- `online_5`：ck2 读集群（需内网）
-- `online_7`：ck6 读集群（需内网）
+- `online_5`：ck2 读集群，表为子集，部分表不存在
+- `online_7`：ck6 读集群，表为子集，部分表不存在
 
 **env=test**：测试集群 `spx_mart_pub`，直连
 

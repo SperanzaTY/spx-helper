@@ -9,7 +9,7 @@
 
 **线上 CK 集群**：由 `get_api_lineage` / `api_trace` 返回的 **ds_id** 决定。接口查到的是读集群，我们（query_ck/internal_search）直接查写集群。
 
-**集群对照**：ck2 = online2/online5 互为读写；ck6 = online6/online7 互为读写
+**集群对照**：ck2 = online2/online5 互为读写；ck6 = online6/online7 互为读写。ck5/ck7 为读集群，**表为子集**（约 1769 vs 2885），部分表如 dwd_spx_order_tracking_ri_* 仅在 ck2/ck6 存在，查不到时改用 ck2/ck6。
 
 **ds_id → cluster 映射**（来源：popup.js DS_ID_MAPPING，按 datasource 集群名 online_N 推导）：
 
