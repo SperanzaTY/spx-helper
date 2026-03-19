@@ -2,6 +2,8 @@
 
 SPX Helper 配套的 Cursor MCP 工具，用于 API 溯源、Presto/Spark/CK 查询等。
 
+📋 **推荐与安装**：参见 [MCP_RECOMMENDATIONS.md](MCP_RECOMMENDATIONS.md) — 含自研 MCP、推荐外部 MCP（如 MCP Atlassian）及完整安装示例。
+
 ## 安装方式
 
 ### 方式一：GitLab 链接安装（推荐，免克隆）
@@ -86,7 +88,6 @@ SPX Helper 配套的 Cursor MCP 工具，用于 API 溯源、Presto/Spark/CK 查
 | spark-query | Spark SQL 查询（Livy） | [README](spark-query/README.md) |
 | ck-query | ClickHouse 查询 | 见 `ck_mcp_server.py` 注释 |
 | api-trace | API 血缘溯源 | 见 `api_trace_server.py` 注释 |
-| worklens | 问题上下文采集 | [README](worklens/README.md) |
 
 ## 配置位置
 
