@@ -20,7 +20,7 @@
 | 坑点沉淀 | 同上 | **坑点** | 排雷要点，便于日后检索 |
 | 上下游校验 | 同上 | **任务上下游信息梳理** | 任务血缘与上下游信息 |
 
-两个目标均在同一 spreadsheet 内，需已共享给 `cursor@spx-helper.iam.gserviceaccount.com`。
+两个目标均在同一 spreadsheet 内，需已共享给 `cursor@spx-helper.iam.gserviceaccount.com`（团队统一服务账号，成本最低）。
 
 ---
 
@@ -188,7 +188,7 @@
 
 ## 四、注意事项
 
-1. **权限**：该 spreadsheet 需已共享给 `cursor@spx-helper.iam.gserviceaccount.com`；
+1. **权限**：该 spreadsheet 需已共享给 `cursor@spx-helper.iam.gserviceaccount.com`（团队统一账号，成本最低）；
 2. **行号**：每次写前重新读取以确定 next_row，避免并发或手动编辑导致错行；
 3. **内容**：避免写 token、密码等敏感信息；
 4. **上下游**：校验结果仅供人工复核，不自动修改「任务上下游信息梳理」。

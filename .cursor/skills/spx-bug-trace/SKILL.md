@@ -427,7 +427,7 @@ confluence_create_page(
 
 **内容分工**：Confluence 存详情与过程；GSheet 存一行摘要与坑点，便于快速浏览与排雷。
 
-**目标表格**：spreadsheet_id=`1WRDykqhPTsG4t1P1M2A5fNVqWxrpj1jurQ8DBXNSkNw`，需已共享给 `cursor@spx-helper.iam.gserviceaccount.com`。
+**目标表格**：spreadsheet_id=`1WRDykqhPTsG4t1P1M2A5fNVqWxrpj1jurQ8DBXNSkNw`。**权限**：表格需已共享给 `cursor@spx-helper.iam.gserviceaccount.com`（团队统一服务账号，成本最低；每人独立 GCP 时改共享给各自的 client_email）。**GSheet 403 时**：提示用户将 spreadsheet 共享给 `cursor@spx-helper.iam.gserviceaccount.com`（至少「查看者」）。
 
 **6.3.1 app问题整理 — 一行摘要**：先 `get_sheet_data`(spreadsheet_id, sheet="app问题整理") 取当前行数，再 `update_cells` 追加一行。列映射：A 时间、B 线上问题、C 根本原因、D 耗时、E 问题原因、F 是否有效问题、G 是否有监控告警、H 类别。写前可询问用户是否写入。
 
@@ -496,6 +496,7 @@ confluence_create_page(
 
 | 日期 | 更新内容 | 触发原因 |
 |------|----------|----------|
+| 2026-03 | **GSheet 团队统一账号**：推荐团队统一使用 `cursor@spx-helper.iam.gserviceaccount.com`，表格共享一次即可，成本最低 | 每人独立 GCP 接入成本高 |
 | 2026-03 | 新增 Phase 6.3 Google Sheets 沉淀：app问题整理（一行摘要）、坑点（排雷要点）；Phase 2.2 上下游校验；Phase -1 Confluence 辅助；依赖增加 user-mcp-atlassian、user-google-sheets | GSheet MCP 配置完成，用户要求 Confluence 存详情、GSheet 存摘要与坑点；历史问题排查目录 parent_id=3105880558 |
 | 2026-03-06 | Phase 1：新增「数值对比」法——用用户标明的页面数值在 response body 中搜索匹配，作为最可靠的接口定位方式；URL 关键词优先于 DOM 顺序；明确不依赖「第 N 卡片 = 第 N 接口」 | Facility-SOC 看板数据延迟排查时，依赖卡片顺序猜错接口；用户建议应用选取的数值去对比接口返回值来定位 |
 | 2026-03-06 | Phase 0：补充 `_version` 为写入时间字段，支持 process_time 不存在时的 fallback 查询 | dws_spx_soc_hub_order_volume_10m 等表无 process_time，用 _version 成功 |
