@@ -501,5 +501,9 @@ LIMIT 3
     return "\n".join(out)
 
 
-if __name__ == "__main__":
+def main():
     mcp.run()
+
+
+if __name__ == "__main__":
+    main()

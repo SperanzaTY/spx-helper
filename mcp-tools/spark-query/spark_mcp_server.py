@@ -346,5 +346,9 @@ async def query_spark(
     return out
 
 
-if __name__ == "__main__":
+def main():
     mcp.run()
+
+
+if __name__ == "__main__":
+    main()

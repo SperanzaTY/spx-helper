@@ -2,6 +2,73 @@
 
 SPX Helper 配套的 Cursor MCP 工具，用于 API 溯源、Presto/Spark/CK 查询等。
 
+## 安装方式
+
+### 方式一：GitLab 链接安装（推荐，免克隆）
+
+使用 [uv](https://docs.astral.sh/uv/) 通过 GitLab 链接直接运行，无需 `git clone`。在 `~/.cursor/mcp.json` 中配置：
+
+```json
+{
+  "mcpServers": {
+    "ck-query": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://git.garena.com/tianyi.liang/spx-helper@release#subdirectory=mcp-tools/ck-query",
+        "ck-query-mcp"
+      ]
+    },
+    "presto-query": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://git.garena.com/tianyi.liang/spx-helper@release#subdirectory=mcp-tools/presto-query",
+        "presto-query-mcp"
+      ],
+      "env": {
+        "PRESTO_PERSONAL_TOKEN": "你的Token",
+        "PRESTO_USERNAME": "你的用户名"
+      }
+    },
+    "api-trace": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://git.garena.com/tianyi.liang/spx-helper@release#subdirectory=mcp-tools/api-trace",
+        "api-trace-mcp"
+      ],
+      "env": {
+        "PRESTO_PERSONAL_TOKEN": "你的Token",
+        "PRESTO_USERNAME": "你的用户名"
+      }
+    },
+    "spark-query": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://git.garena.com/tianyi.liang/spx-helper@release#subdirectory=mcp-tools/spark-query",
+        "spark-query-mcp"
+      ],
+      "env": {
+        "LIVY_USERNAME": "DMP用户名",
+        "LIVY_PASSWORD": "DMP密码"
+      }
+    }
+  }
+}
+```
+
+**前置条件**：需安装 [uv](https://docs.astral.sh/uv/install/)（`curl -LsSf https://astral.sh/uv/install.sh | sh`）
+
+**版本说明**：示例中已固定使用 `@release` 分支，确保团队统一使用稳定版。若需开发版可去掉 `@release` 使用默认分支。
+
+**GitLab 说明**：团队推荐使用 GitLab 链接（需内网/VPN 访问 git.garena.com）。若无法访问 GitLab，可改用 GitHub：`git+https://github.com/SperanzaTY/spx-helper@release#subdirectory=mcp-tools/ck-query`
+
+### 方式二：本地路径安装（克隆后）
+
+克隆仓库后，在 `mcp.json` 中配置本地脚本路径，见各 MCP 目录下的 `mcp_config_template.json`。
+
 ## 凭证获取指引
 
 | MCP | 凭证来源 | 获取路径 |

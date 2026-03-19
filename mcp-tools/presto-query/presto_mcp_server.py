@@ -216,5 +216,9 @@ async def query_presto(
         return f"❌ 执行错误: {str(e)}"
 
 
-if __name__ == "__main__":
+def main():
     mcp.run()
+
+
+if __name__ == "__main__":
+    main()

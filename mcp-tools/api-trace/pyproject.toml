@@ -1,0 +1,19 @@
+[project]
+name = "spx-api-trace-mcp"
+version = "0.1.0"
+description = "API Trace MCP Server - API 血缘溯源与 Bug 定位工具"
+requires-python = ">=3.9"
+dependencies = [
+    "mcp",
+    "requests",
+]
+
+[project.scripts]
+api-trace-mcp = "api_trace_server:main"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["api_trace_server"]
