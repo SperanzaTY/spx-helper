@@ -48,22 +48,24 @@ Agent 必须：
 - git push gitlab <当前分支>  ⚠️ 必须推送到 GitLab
 - git push origin <当前分支>  ⚠️ 必须推送到 GitHub
 
-日常开发推送到 developer；发布时推送到 release。
+**禁止直接提交到 release**。必须在 feature/bugfix 分支开发，通过 MR 合并到 release。
 ```
 
-### 分支管理规则
+### 分支管理规则（重要！）
 
 | 分支 | 用途 |
 |------|------|
-| **developer** | 开发者分支，日常开发、小步提交 |
-| **release** | 最新版本，从 developer 合并，测试通过后发布 |
+| **feature/*** | 新功能开发，从 release 拉出 |
+| **bugfix/*** | Bug 修复，从 release 拉出 |
+| **release** | 开发主分支，**只接受 MR 合并**，禁止直接 push |
 | **main** | 稳定版本，从 release 合并，生产环境 |
 
-流程：`developer` → `release` → `main`
+流程：`feature/bugfix` → **MR** → `release` → `main`
 
-- 日常开发在 **developer** 提交，推送到双仓库的 developer
-- 发布时合并 developer → release，推送 release
-- 稳定后合并 release → main，推送 main
+- ❌ **禁止**：直接在 release 分支上 commit 并 push
+- ✅ **必须**：在 feature/xxx 或 bugfix/xxx 分支开发 → 推送分支 → 创建 MR 合并到 release
+- MR 地址（GitLab）：https://git.garena.com/tianyi.liang/spx-helper/-/merge_requests/new
+- 完整流程见 [docs/GIT_WORKFLOW.md](docs/GIT_WORKFLOW.md)
 
 ### 双仓库同步规则（重要！）
 
@@ -78,9 +80,9 @@ Agent 必须：
 3. ✅ 确保两个仓库保持同步
 
 命令示例：
-git push gitlab developer && git push origin developer   # 日常开发
-git push gitlab release && git push origin release       # 发布
-git push gitlab main && git push origin main             # 稳定版
+git push gitlab feature/xxx && git push origin feature/xxx   # 推送开发分支，再创建 MR
+git push gitlab release && git push origin release          # 仅 MR 合并后由合并者推送 release
+git push gitlab main && git push origin main                # 稳定版发布
 ```
 
 ### 正确的工作流程
@@ -101,9 +103,11 @@ git push gitlab main && git push origin main             # 稳定版
 │    ↓                                     │
 │ 7. 执行提交 (git add/commit)            │
 │    ↓                                     │
-│ 8. 推送到 GitLab + GitHub               │
+│ 8. 推送到 GitLab + GitHub（开发分支）   │
 │    ↓                                     │
-│ 9. （可选）执行 sync_skills.sh 同步到本地 │
+│ 9. 创建 MR 合并到 release               │
+│    ↓                                     │
+│ 10. （可选）执行 sync_skills.sh 同步到本地 │
 └─────────────────────────────────────────┘
 ```
 
@@ -268,6 +272,7 @@ git log --oneline -5
 ❌ 在不确定的情况下推送
 ❌ 修改后不通知用户
 ❌ 只推送到单个仓库
+❌ 直接推送到 release 分支（必须先 feature/bugfix → MR）
 
 ### 用户的职责
 ✅ 测试功能
@@ -282,8 +287,8 @@ GitLab: gitlab, https://git.garena.com/tianyi.liang/spx-helper.git
 GitHub: origin, https://github.com/SperanzaTY/spx-helper.git
 
 分支：
-- developer: 开发者分支，日常开发
-- release:   最新版本
+- feature/*, bugfix/*: 开发分支，通过 MR 合并到 release
+- release:   开发主分支，仅接受 MR 合并
 - main:      稳定版本
 ```
 
