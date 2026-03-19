@@ -1,13 +1,12 @@
 ---
 name: spx-bug-trace
-description: SPX Helper 业务问题定位工作流。用于从页面元素出发，定位数据异常的根因：通过浏览器捕获 API 请求 → 数据管道健康检查 → 查询 API 血缘（biz_sql、源表）→ 分层验证假设 → 用 Presto/CK 工具直查源表数据验证 → 输出用户可读的结论。当用户描述页面数据不对、某个字段异常、数据缺失、数值偏差等业务问题时使用，也适用于"帮我查一下这个 Bug"、"这个数据为什么不对"、"溯源一下这个接口"等场景。
+description: SPX Helper 业务问题定位工作流。用于从页面元素出发，定位数据异常的根因：通过浏览器捕获 API 请求 → 数据管道健康检查 → 查询 API 血缘（biz_sql、源表）→ 分层验证假设 → 用 Presto/CK 工具直查源表数据验证 → 输出用户可读的结论。支持从 Confluence 查找 PRD 与历史排查经验；排查完成后将详情沉淀到 Confluence，将问题摘要与坑点沉淀到 Google Sheets。当用户描述页面数据不对、某个字段异常、数据缺失、数值偏差等业务问题时使用，也适用于"帮我查一下这个 Bug"、"这个数据为什么不对"、"溯源一下这个接口"等场景。
 ---
 
-<!-- 安装说明（用户说「帮我安装 skill」时参考 docs/SKILL_INSTALL.md）：
-     首次安装：cp -r .cursor/skills/spx-bug-trace ~/.cursor/skills/
-     已有本地版本：在 Cursor 中比较 .cursor/skills/ 与 ~/.cursor/skills/ 后手动合并。
-     SPX_Helper 项目内自动加载；复制到 ~/.cursor/skills/ 后可在所有项目使用。
-     依赖：user-api-trace、user-ck-query、user-presto-query、cursor-ide-browser 四个 MCP。-->
+<!-- 本 Skill 位于 .cursor/skills/，版本随 SPX_Helper 仓库维护。
+     SPX_Helper 项目内自动加载；其他项目需 sync_skills.sh 同步到 ~/.cursor/skills/。
+     若本地有修改，sync 会拒绝覆盖，需先在 Cursor 中比较合并后再同步。
+     依赖：user-api-trace、user-ck-query、user-presto-query、cursor-ide-browser、user-mcp-atlassian、user-google-sheets 六个 MCP。-->
 
 # SPX Business Bug Trace
 
@@ -38,11 +37,27 @@ git pull origin release
 | `api_trace` (api-trace MCP) | 完整溯源 + 直查源表，可传 `custom_where` 和 `api_response_sample` |
 | `query_ck` (ck-query MCP) | 查 ClickHouse：`env=live`(ck2/ck6) 或 `env=test` |
 | `query_presto` (presto-query MCP) | 查 Presto：离线宽表、维表、源表验证 |
+| `confluence_search` / `confluence_get_page` / `confluence_get_page_children` (mcp-atlassian) | 查 Confluence：PRD 背景、历史排查经验、沉淀知识 |
+| `confluence_create_page` (mcp-atlassian) | 在历史问题排查目录下创建知识文档 |
+| `get_sheet_data` / `update_cells` / `create_sheet` (google-sheets MCP) | 读写 GSheet：app问题整理、坑点、任务上下游信息梳理 |
 | 代码库文件读取 | 查看 `background.js`/`content.js`/`popup.js` 等源码逻辑 |
 
 ---
 
 ## 完整排查流程
+
+### Phase -1：Confluence 辅助（可选）
+
+在排查前或排查中，可借助 Confluence 获取背景与历史经验，缩短定位时间。
+
+| 用途 | 方法 | 说明 |
+|------|------|------|
+| **了解板块 PRD、设计口径** | `confluence_search` 搜索对应板块关键词（如「Hub Overview」「Driver Overview」「Facility」） | 在 SPSC 等 space 中查找 PRD 文档，了解业务背景、统计口径、字段定义 |
+| **查找历史排查经验** | `confluence_get_page_children`(parent_id=3105880558) 或 `confluence_search` 搜索相关 api_id/表名/现象关键词 | 历史问题排查文档目录下已有案例，可参考类似问题的根因与验证路径 |
+
+**历史问题排查目录**：https://confluence.shopee.io/pages/viewpage.action?pageId=3105880558 （pageId=3105880558，space_key=SPSC）
+
+---
 
 ### Phase 0：前置检查 — 数据管道健康
 
@@ -87,6 +102,124 @@ CK 表无新数据
           - exitCode=127 → 容器启动失败（镜像拉取失败/JAR路径不存在）
           - TimeoutException: heartbeat timed out → TM 节点被驱逐/OOM，后续重启失败
         → 任务正常 → 检查上游 CDC/Kafka source topic 是否有消息
+```
+
+**[重要] 优先检查运维事件**：
+
+在深入排查代码和配置之前，**如果数据突然停止但之前一直正常**，优先询问/确认：
+
+1. **最近是否有集群迁移/升级**（K8S 迁移、Flink 集群升级、ClickHouse 升级）
+2. **依赖包是否有更换**（Paimon、Flink 版本、Hadoop 依赖等）
+3. **任务是否有重启/重新部署**（可能导致配置回退或 Checkpoint 丢失）
+4. **是否有 DDL 变更**（表结构修改、分区策略调整）
+
+这些运维事件往往是数据突然停滞的直接原因，比代码 bug 更常见。
+
+**检查 ClickHouse 表的实际物理结构**：
+
+对于分布式表（Distributed Engine），使用 `SHOW CREATE TABLE` 查看实际指向的 local 表：
+
+```sql
+SHOW CREATE TABLE spx_mart_ddc.<表名>;
+-- 查看 ENGINE = Distributed(..., '<local_table_name>', ...) 
+-- 确认实际写入的是哪个 local 表
+```
+
+**常见场景**：
+- 分布式表名为 `dwd_spx_fm_pickup_task_tab`，但可能指向 `dwd_spx_fm_pickup_task_tab_v2_local`
+- 表结构升级时，分布式表指向可能变更，但 Flink 任务配置未同步
+- 不同市场的表可能指向不同版本的 local 表
+
+**横向对比其他市场**：
+
+当某个市场数据异常时，快速对比其他市场的状态：
+
+```sql
+SELECT 
+    'BR' AS market,
+    toDateTime(max(_process_time)) AS last_write,
+    CAST((now() - max(_process_time)) / 3600 AS Int32) AS hours_ago
+FROM spx_mart_ddc.dwd_spx_fm_pickup_task_tab_v2_local
+UNION ALL
+SELECT 
+    'ID' AS market,
+    toDateTime(max(_process_time)) AS last_write,
+    CAST((now() - max(_process_time)) / 3600 AS Int32) AS hours_ago
+FROM spx_mart_ddc.dwd_spx_fm_pickup_task_tab_id_local;
+```
+
+若其他市场正常，问题通常出在：
+- 该市场的 Flink 任务配置差异
+- 该市场的表结构特殊性（如 BR 不带 region 后缀）
+- 迁移/升级时该市场被遗漏
+
+**Flink 任务名称生成规则**（用于从表名反推 DataSuite 中的任务名）：
+
+FM/LM/MM Realtime 项目的 Flink 任务名由以下规则拼接：
+
+```
+{job_name_prefix} + convert({job_origin_name}) + _{region} + _{sink}
+```
+
+各部分含义：
+- `job_name_prefix`：根据环境确定
+  - live → `spx_mart__`
+  - uat → `staging_spx_mart__uat_`
+  - staging → `staging_spx_mart__staging_`
+  - test → `dev_spx_mart__test_`
+  - dev → `dev_spx_mart__dev_`
+- `convert(job_origin_name)`：将配置文件中的任务名 CamelCase 转为 snake_case
+  - 转换规则：`replaceAll("([a-z])([A-Z])", "$1_$2").toLowerCase()`
+  - 示例：`DwdSpxFmPickupTaskTabSink` → `dwd_spx_fm_pickup_task_tab_sink`
+- `region`：市场代码（`br`/`id`/`sg`/`my`/`ph`/`th`/`vn`/`tw` 等）
+- `sink`：数据写入目标类型
+  - `clickhouse`：写入主 CK 集群（根据 `app_type` 参数决定用 `clickhouse_jdbc_url` 还是 `clickhouse_mgmt6_jdbc_url`，默认后者对应 DDC/mgmt6）
+  - `gray_clickhouse`：灰度发布 CK 集群（通常对应 `clickhouse_pub2_jdbc_url`，如 ck2/pub2）
+  - `ck_kafka`：写入 Kafka 用于下游消费
+  - `kafka`/`g_kafka_ver`：其他 Kafka sink 变体
+
+**示例**：
+```
+任务配置名：DwdSpxFmPickupTaskTabSink
+环境：live
+市场：br
+Sink：clickhouse
+→ 生成的任务名：spx_mart__dwd_spx_fm_pickup_task_tab_sink_br_clickhouse
+```
+
+**表名到任务名的反推流程**：
+1. 从 CK 表名提取核心名称（如 `dwd_spx_fm_pickup_task_tab`）
+2. 在代码仓库中搜索对应的 Metadata 文件（如 `DwdSpxPickupTaskMetadata.scala`）
+3. 查看 `dwd_live_flink.conf` 或 `ads_live_flink.conf` 中该 Metadata 对应的任务配置名（如 `DwdSpxFmPickupTaskTabSink`）
+4. 查看 `regions` 和 `sinks` 配置项，确认支持哪些市场和 sink 类型
+5. 应用上述命名规则拼接出完整任务名
+
+**判断 `clickhouse` sink 的实际写入集群**：
+- 查看 Metadata 文件中的 JDBC URL 选择逻辑
+- `app_type="pc"` → 使用 `clickhouse_jdbc_url`（通常是业务特定集群）
+- 其他/默认 → 使用 `clickhouse_mgmt6_jdbc_url`（通常是 DDC/mgmt6）
+- BR 市场的表名规则：
+  - 若 `region=="br"`，表名通常不带 region 后缀（如 `dwd_spx_fm_pickup_task_tab`）
+  - 其他市场表名带后缀（如 `dwd_spx_fm_pickup_task_tab_id_all`）
+
+**任务配置版本管理**：
+
+同一个表可能存在多个版本的 Flink 任务（V1/V2/RiVersion 等），它们的 sink 配置可能不同：
+
+- **V1 (Sink)**：直接写 ClickHouse + Kafka（`sinks = ["clickhouse", "gray_clickhouse"]`）
+- **V2 (RiVersion)**：只写 Kafka，由独立 Consumer 写 ClickHouse（`sinks = ["ck_kafka"]`）
+
+**查找任务时注意**：
+1. 任务名可能包含版本后缀（如 `_ri_version`）
+2. 不同版本的任务 sink 配置差异很大
+3. 依赖包更换可能导致任务配置意外回退（V1 → V2）
+4. 需确认当前运行的是哪个版本，以及该版本是否包含所需的 sink
+
+**验证任务实际 sink 配置**：
+```bash
+# 在 DataSuite 查看任务详情
+Configuration → 搜索 "sink" 关键词
+确认包含哪些 sink：clickhouse / gray_clickhouse / ck_kafka
 ```
 
 Flink 恢复操作参考：
@@ -161,6 +294,13 @@ biz_sql 通常返回多个字段，需要确认页面显示的数值对应哪个
 | 最外层过滤 | WHERE 里的新增条件 | `driver_status_filter` 默认值非空 |
 | JOIN 过滤 | INNER JOIN 可能过滤掉数据 | 改 GLOBAL LEFT JOIN 可保留 |
 | State TTL | ClickHouse FINAL 性能问题 | 大表加 FINAL 可能超时返回空 |
+
+#### Phase 2.2：上下游校验（可选，用户说「校验上下游」「核对血缘」时）
+
+1. `get_sheet_data` 读取「任务上下游信息梳理」；
+2. 从「依赖的接口(仅活跃)」取 api_id，或从「app 任务」取任务名；
+3. 对每个 api_id 调用 `get_api_lineage` 获取血缘；
+4. 与表中血缘列（G～M：来源 kafka/hbase/hive/clickhouse，sink kafka/clickhouse/hbase）比对，输出差异（缺失、多余、需人工确认）。结果仅供参考，不自动改表。spreadsheet_id=`1WRDykqhPTsG4t1P1M2A5fNVqWxrpj1jurQ8DBXNSkNw`。
 
 ---
 
@@ -252,17 +392,56 @@ api_trace(api_id, issue_description, custom_where="station_id=166 AND grass_regi
 
 ---
 
-### Phase 6：输出过程文档
+### Phase 6：输出过程文档与知识沉淀
 
-每次排查完成后，按以下模板生成过程文档，保存到 `docs/investigations/` 目录，文件名格式为 `YYYYMMDD-<简短描述>.md`。
+每次排查完成后，按以下规范输出文档。
 
-文档内容见 [investigation-template.md](investigation-template.md)。
+#### 6.1 本地过程文档（必选）
 
-规范要求：
+保存到 `docs/investigations/` 目录，文件名格式为 `YYYYMMDD-<简短描述>.md`。文档内容见 [investigation-template.md](investigation-template.md)。
+
+#### 6.2 Confluence 知识沉淀（推荐）
+
+将排查结论整理为知识文档，创建到**历史问题排查文档**目录下：
+
+```
+confluence_create_page(
+  space_key="SPSC",
+  parent_id="3105880558",
+  title="[FM|MM|LM]-<简短描述>",
+  content="...",
+  content_format="markdown"
+)
+```
+
+**命名规范**：标题必须以域名前缀开头，格式为 `[FM|MM|LM]-<简短描述>`：
+- **FM**：First Mile / 取件侧相关（facility、pickup、driver 等）
+- **MM**：Middle Mile / 中间链路
+- **LM**：Last Mile / 派送侧相关
+
+示例：`FM-司机看板无数据之 trip_zero_filter 口径`、`LM-派送量统计延迟根因`
+
+**内容建议**：精简版排查结论，包含现象、根因、验证证据、建议；技术细节可放在「技术背景」小节。便于后续类似问题时通过 `confluence_search` 快速检索。
+
+#### 6.3 Google Sheets 问题沉淀（推荐）
+
+**内容分工**：Confluence 存详情与过程；GSheet 存一行摘要与坑点，便于快速浏览与排雷。
+
+**目标表格**：spreadsheet_id=`1WRDykqhPTsG4t1P1M2A5fNVqWxrpj1jurQ8DBXNSkNw`，需已共享给 `cursor@spx-helper.iam.gserviceaccount.com`。
+
+**6.3.1 app问题整理 — 一行摘要**：先 `get_sheet_data`(spreadsheet_id, sheet="app问题整理") 取当前行数，再 `update_cells` 追加一行。列映射：A 时间、B 线上问题、C 根本原因、D 耗时、E 问题原因、F 是否有效问题、G 是否有监控告警、H 类别。写前可询问用户是否写入。
+
+**文字格式要求**：
+- **A 列时间**：只到日期（YYYY-MM-DD），不到小时；若 Confluence 中为月份级（如 2026-02），需补全为具体日期（可从问题报告创建日期或文档内容推断）
+- **C 列根本原因**：需追加 Confluence 详情页链接，便于溯源
+
+**6.3.2 坑点 — 排雷要点**：排查中发现 Skill 未覆盖的坑时，写入「坑点」表。若工作表不存在，先 `create_sheet`(spreadsheet_id, title="坑点")，再写表头与数据。表头：坑点描述、现象、解决/规避方式、关联场景、来源问题、日期。
+
+**规范要求**（本地与 Confluence 通用）：
 - 不使用 emoji
 - SQL 别名全部使用英文
 - 所有查询结果以表格或代码块形式附上实际数值
-- 根因说明使用业务语言，技术细节放在"技术背景"小节
+- 根因说明使用业务语言，技术细节放在「技术背景」小节
 
 ---
 
@@ -285,7 +464,7 @@ api_trace(api_id, issue_description, custom_where="station_id=166 AND grass_regi
 
 ## 常见坑
 
-| 坑 | 现象 | 解决 |
+|| 坑 | 现象 | 解决 |
 |----|------|------|
 | CK FINAL 超时 | 大表加 FINAL 返回空 | 先去掉 FINAL 调试 |
 | Presto 扫全表超时 | 无分区过滤查询失败 | 加 `grass_date = '...'` |
@@ -297,14 +476,19 @@ api_trace(api_id, issue_description, custom_where="station_id=166 AND grass_regi
 | 排查时擅自修改代码 | 定位阶段不应修改任何代码文件 | 定位阶段只读不写，修复需用户明确授权后再动手 |
 | 本地代码不是最新 | 排查代码时找不到预期逻辑，或误判已修复的问题为 Bug | 排查前对所有相关仓库执行 `git pull origin release`；找不到逻辑时先用 `git log --all --oneline` 查全分支历史，确认是否有未拉取的新 commit |
 | 不确定源表在哪个 CK 集群 | 手动试 ck2/ck6 导致字段缺失报错 | 优先用 `api_trace` 溯源，工具会自动标注该 API 源表属于 ck2 还是 ck6；或从 biz_sql 里看 `{mgmt_db2}` 占位符，`spx_mart_manage_app` 的 ID 市场表通常在 ck6，其他市场在 ck2 |
-| ck5/ck7 查表报 UNKNOWN_TABLE | 读集群表为子集，部分表不存在 | 改用 ck2 或 ck6（写集群表更全）；api_trace 已自动建议 ck2/ck6 |
 | get_api_lineage 查询超时 | 血缘表查询 120 秒超时 | 若项目内有血缘文档（如 `app-analysis/知识沉淀` 下的 CSV），可查 `operation__xxx` 或表名关键词获取源表；或重试 `get_api_lineage`，或改 `api_trace(query_source_data=False)` 仅取血缘 |
+| **过度关注代码/配置变更** | 数据突然停止，但过度分析 git 历史、DDL 变更，忽略运维事件 | **数据之前正常、突然停止 → 优先检查集群迁移、依赖更换、任务重启等运维事件**；这些比代码 bug 更常见 |
+| **找不到 Flink 任务** | 按预期任务名搜索，但找不到或任务配置与预期不符 | 1) 任务可能有版本后缀（如 `_ri_version`）；2) 依赖包更换可能导致配置回退（V1→V2）；3) 用 `SHOW CREATE TABLE` 查分布式表实际指向的 local 表；4) 横向对比其他市场任务配置 |
+| **分布式表指向变更** | Flink 写入表名正确，但数据未更新 | 分布式表可能在 DDL 层重定向到新表（如 v2_local），但 Flink 配置未同步；用 `SHOW CREATE TABLE` 验证实际 local 表 |
+| **CK 忘记加 FINAL** | ReplacingMergeTree 表查询到重复记录 | 查询 `dwd_spx_fo_order_ri` 等表时必须加 FINAL，否则会看到同一订单的多个版本 |
+| **看板数据与业务系统不一致** | 看板显示异常数据，但业务系统查询正常 | 可能是数据源不同导致：看板用 order_tracking 轨迹，业务系统用 FO 订单终态；需交叉验证两个数据源，确认是否存在状态同步问题 |
 
 ## 更多参考
 
 - 工具参数详情见 [tools-reference.md](tools-reference.md)
 - 表库对照关系见 [table-mapping.md](table-mapping.md)
 - 过程文档模板见 [investigation-template.md](investigation-template.md)
+- GSheet 集成设计见 [GOOGLE_SHEETS_INTEGRATION_DESIGN.md](GOOGLE_SHEETS_INTEGRATION_DESIGN.md)
 
 ---
 
@@ -312,6 +496,12 @@ api_trace(api_id, issue_description, custom_where="station_id=166 AND grass_regi
 
 | 日期 | 更新内容 | 触发原因 |
 |------|----------|----------|
+| 2026-03 | 新增 Phase 6.3 Google Sheets 沉淀：app问题整理（一行摘要）、坑点（排雷要点）；Phase 2.2 上下游校验；Phase -1 Confluence 辅助；依赖增加 user-mcp-atlassian、user-google-sheets | GSheet MCP 配置完成，用户要求 Confluence 存详情、GSheet 存摘要与坑点；历史问题排查目录 parent_id=3105880558 |
 | 2026-03-06 | Phase 1：新增「数值对比」法——用用户标明的页面数值在 response body 中搜索匹配，作为最可靠的接口定位方式；URL 关键词优先于 DOM 顺序；明确不依赖「第 N 卡片 = 第 N 接口」 | Facility-SOC 看板数据延迟排查时，依赖卡片顺序猜错接口；用户建议应用选取的数值去对比接口返回值来定位 |
 | 2026-03-06 | Phase 0：补充 `_version` 为写入时间字段，支持 process_time 不存在时的 fallback 查询 | dws_spx_soc_hub_order_volume_10m 等表无 process_time，用 _version 成功 |
 | 2026-03-06 | 常见坑：新增「API 定位依赖卡片顺序」「get_api_lineage 超时」的应对 | 同上排查经验 |
+| 2026-03-13 | **透明化排查流程**：每个推理步骤必须展示查询过程和中间结果，不能直接给出结论；追溯数据链路时应逐层展示；代码分析必须先展示代码片段再解释；表名确定、因果关系验证都需要可见的证据链 | BR Dashboard Sequence Bar 排查：用户反馈"希望把溯源过程也展示出来，这样我能更加相信你的论据"；排查中直接给出了上游表结论但没有充分展示推理过程（代码→表名→验证→因果），导致用户需要追问依据 |
+| 2026-03-13 | **Phase 0.1：Flink 任务名称生成规则**：新增从表名反推 DataSuite 任务名的完整逻辑，包括环境前缀、CamelCase→snake_case 转换、sink 类型判断、BR 市场表名规则、JDBC URL 选择机制 | BR Dashboard Sequence Bar 排查：需要定位 `dwd_spx_fm_pickup_task_tab` 对应的 Flink 任务，通过分析 `ParseDeployConfigUtil.scala`、`DwdSpxPickupTaskMetadata.scala`、`dwd_live_flink.conf` 总结出命名规则；用户发现代码中存在 `_v2` 表但未被使用，需验证实际依赖关系 |
+| 2026-03-13 | **Phase 0.1：运维事件优先排查原则**：数据突然停止时，优先检查集群迁移、依赖更换、任务重启等运维事件，避免过度关注代码变更；新增 ClickHouse 分布式表 DDL 检查方法（`SHOW CREATE TABLE`）、任务版本管理说明（V1/V2/RiVersion sink 差异）、横向对比其他市场的验证方法 | BR Dashboard Sequence Bar 排查：数据在 3.10 集群迁移后停止，但初期过度分析 git 历史和 DDL 变更；实际根因是 Paimon 依赖冲突导致任务配置回退（V1→V2），去掉了 ClickHouse sink；通过 `SHOW CREATE TABLE` 发现分布式表指向 v2_local，横向对比发现只有 BR 市场异常 |
+| 2026-03-18 | **常见坑：CK 忘记加 FINAL & 数据源不一致**：ReplacingMergeTree 表查询必须加 FINAL；看板数据与业务系统不一致时需交叉验证数据源差异（order_tracking 轨迹 vs FO 订单终态） | ID LM Driver Performance 看板排查：初期查询 `dwd_spx_fo_order_ri_id_all` 未加 FINAL 导致看到重复记录；用户反馈订单在 FO 系统已 delivered 但看板仍显示 Backlog，发现 order_tracking 轨迹状态未同步到终态，需 Order 域同学修复数据一致性问题 |
+| 2026-03-19 | **app问题整理 文字格式要求**：A 列时间只到日期（YYYY-MM-DD），不到小时；月份级时间需补全为具体日期；C 列根本原因需追加 Confluence 链接 | 从 Confluence 历史问题目录整理到 GSheet 时，时间格式与根本原因链接的规范化要求 |
