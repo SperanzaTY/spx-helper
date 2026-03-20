@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+from __future__ import annotations
+
 """
 Presto MCP Server - 为 Cursor 提供 Presto 查询能力
 
@@ -140,6 +142,8 @@ def _write_full_result_json(
         json.dump(payload, f, ensure_ascii=False, indent=2)
 
 
+# 返回类型使用 Any：FastMCP + Pydantic 2.10 对裸注解 -> str 会触发
+# create_model(..., result=str) 的 PydanticUserError（见 issue：非 Annotated 的 result 字段）
 @mcp.tool()
 async def query_presto(
     sql: str,
@@ -149,7 +153,7 @@ async def query_presto(
     max_rows: int = 100,
     cell_max_len: int = 0,
     write_full_result_to: Optional[str] = None,
-) -> str:
+) -> Any:
     """查询 Presto 数据库，执行只读 SELECT 查询。
 
     【Agent 调用须知 - 调用前需向用户确认】

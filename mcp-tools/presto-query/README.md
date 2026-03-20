@@ -206,6 +206,10 @@ pip3 install mcp
 - 检查 `~/.cursor/mcp.json` 配置
 - 查看Cursor的MCP日志
 
+### MCP 启动失败：`PydanticUserError: result = <class 'str'>`
+- 已在本仓库将 `query_presto` 的返回注解改为 `Any`，以兼容 **FastMCP + Pydantic 2.10**（裸 `-> str` 会触发该错误）。
+- 若你本地仍用旧版 `presto_mcp_server.py`，请 `git pull` 后重启 Cursor。
+
 ## 📝 更新日志
 
 ### v1.1 (2026-03-05)
