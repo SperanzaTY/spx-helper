@@ -16,9 +16,12 @@ Presto MCP Server - 为 Cursor 提供 Presto 查询能力
 """
 
 import asyncio
+import json
 import os
 import sys
 import time
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 import requests
 from mcp.server.fastmcp import FastMCP
@@ -70,14 +73,29 @@ def _format_progress(events: list) -> str:
     return " → ".join(parts)
 
 
-def format_result_as_table(columns: list, rows: list) -> str:
+def _cell_display(raw: str, cell_max_len: int) -> str:
+    """cell_max_len <= 0 表示不截断。"""
+    if cell_max_len <= 0:
+        return raw
+    if len(raw) > cell_max_len:
+        return raw[: max(0, cell_max_len - 3)] + '...'
+    return raw
+
+
+def format_result_as_table(
+    columns: List[str],
+    rows: List[Dict[str, Any]],
+    cell_max_len: int = 50,
+) -> str:
+    """将查询结果格式化为 Markdown 友好表格文本。"""
     if not rows:
         return "(0 rows)"
 
-    col_widths = {col: len(col) for col in columns}
+    col_widths: Dict[str, int] = {col: len(col) for col in columns}
     for row in rows:
         for col in columns:
-            col_widths[col] = max(col_widths[col], min(len(str(row.get(col, ''))), 50))
+            disp = _cell_display(str(row.get(col, '')), cell_max_len)
+            col_widths[col] = max(col_widths[col], len(disp))
 
     header = " | ".join(col.ljust(col_widths[col]) for col in columns)
     separator = "-|-".join("-" * col_widths[col] for col in columns)
@@ -86,13 +104,40 @@ def format_result_as_table(columns: list, rows: list) -> str:
     for row in rows:
         values = []
         for col in columns:
-            val = str(row.get(col, ''))
-            if len(val) > 50:
-                val = val[:47] + '...'
+            raw = str(row.get(col, ''))
+            val = _cell_display(raw, cell_max_len)
             values.append(val.ljust(col_widths[col]))
         lines.append(" | ".join(values))
 
     return "\n".join(lines)
+
+
+def _resolve_write_path(path_str: str) -> Path:
+    """相对路径相对 PRESTO_MCP_OUTPUT_DIR（未设则为进程 cwd，一般为 Cursor 工作区根）。"""
+    p = Path(path_str).expanduser()
+    if p.is_absolute():
+        return p
+    base = os.environ.get('PRESTO_MCP_OUTPUT_DIR', os.getcwd())
+    return Path(base) / p
+
+
+def _write_full_result_json(
+    path: Path,
+    job_id: str,
+    columns: List[str],
+    rows: List[Dict[str, Any]],
+    total_rows: int,
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        'jobId': job_id,
+        'columns': columns,
+        'rows': rows,
+        'totalRows': total_rows,
+        'writtenRows': len(rows),
+    }
+    with open(path, 'w', encoding='utf-8') as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
 
 
 @mcp.tool()
@@ -101,7 +146,9 @@ async def query_presto(
     username: str = DEFAULT_USERNAME,
     queue: str = DEFAULT_QUEUE,
     region: str = DEFAULT_REGION,
-    max_rows: int = 100
+    max_rows: int = 100,
+    cell_max_len: int = 0,
+    write_full_result_to: Optional[str] = None,
 ) -> str:
     """查询 Presto 数据库，执行只读 SELECT 查询。
 
@@ -109,12 +156,15 @@ async def query_presto(
     1. 表/库：确保用户已明确要查的表名（含 schema，如 spx_mart.xxx）
     2. 查询条件：若需按日期/市场等过滤，先问用户具体条件再拼 WHERE
     3. 行数：默认返回 100 行，大数据量统计可适当提高 max_rows
+    4. **长单元格 / 血缘大字段**：默认 cell_max_len=0（不在表格中截断列宽）。
+       若对话仍被宿主截断，请使用 write_full_result_to 将完整 JSON 写入仓库路径再读文件。
 
     注意:
     - 只支持只读 SELECT 查询
     - SHOW 命令可能不被允许
     - 每次最多返回 2000 行（可通过 max_rows 参数限制）
     - 查询超时时间为 5 分钟
+    - 环境变量 PRESTO_MCP_OUTPUT_DIR：write_full_result_to 为相对路径时的基准目录（默认进程 cwd）
 
     Args:
         sql: 要执行的 SQL 查询语句（必须是只读的 SELECT 语句）
@@ -122,6 +172,11 @@ async def query_presto(
         queue: Presto 队列名称，szsc-adhoc 或 szsc-scheduled（默认 szsc-adhoc）
         region: IDC 集群，SG 或 US（默认 SG）
         max_rows: 最多返回行数（默认 100，最大 2000）
+        cell_max_len: 表格展示时每个单元格最大字符数；**0 表示不截断**（适合 sink/source 长 JSON）；
+            设为 50–120 可缩短 MCP 文本体积。默认 0。
+        write_full_result_to: 若提供相对/绝对路径，将 **完整** 查询结果写入 UTF-8 JSON
+           （columns + rows + jobId），便于后续脚本合并或写 Sheet；相对路径基于 PRESTO_MCP_OUTPUT_DIR 或 cwd。
+            写入后回复中附带 **短预览表**（前若干行、单元格最多 96 字符），完整数据以文件为准。
     """
     end_user = username if '@' in username else f"{username}@shopee.com"
     headers = {
@@ -130,6 +185,7 @@ async def query_presto(
         'Content-Type': 'application/json'
     }
     max_rows = min(max_rows, 2000)
+    effective_cell = cell_max_len if cell_max_len >= 0 else 0
 
     try:
         # 1. 提交查询（在线程池中执行，不阻塞事件循环）
@@ -199,14 +255,32 @@ async def query_presto(
         total_elapsed = int(time.time() - start_time)
         progress_line = _format_progress(progress_events)
 
-        table = format_result_as_table(columns, rows)
+        file_note = ""
+        if write_full_result_to and write_full_result_to.strip():
+            out_path = _resolve_write_path(write_full_result_to.strip())
+            await asyncio.to_thread(
+                _write_full_result_json, out_path, job_id, columns, rows, total_rows
+            )
+            file_note = (
+                f"\n\n📁 **完整结果已写入（JSON，未截断单元格）:**\n`{out_path}`\n"
+                f"（writtenRows={len(rows)}, totalRows={total_rows}）\n"
+                "下方为短预览；血缘长字段请以该文件为准。\n"
+            )
+            preview_rows = rows[: min(20, len(rows))]
+            table = format_result_as_table(columns, preview_rows, cell_max_len=96)
+            if len(rows) > len(preview_rows):
+                table += f"\n\n… 预览仅含前 {len(preview_rows)} 行，共 {len(rows)} 行写入文件。"
+        else:
+            table = format_result_as_table(columns, rows, cell_max_len=effective_cell)
+
         output = f"✅ 查询成功\n\n"
         output += f"Job ID: {job_id}\n"
         output += f"查询进度: {progress_line}\n"
         output += f"总耗时: {total_elapsed}s\n"
         output += f"总行数: {total_rows}，显示行数: {len(rows)}\n"
         if total_rows > max_rows:
-            output += f"⚠️ 结果已截断（只显示前 {max_rows} 行）\n"
+            output += f"⚠️ 结果已截断（只拉取前 {max_rows} 行；若需更多可提高 max_rows，最大 2000）\n"
+        output += file_note
         output += f"\n{table}\n\n列名: {', '.join(columns)}"
         return output
 

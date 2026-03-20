@@ -53,9 +53,13 @@ query_presto(
     sql: str,
     queue: str,    # "szsc-adhoc"（默认）或 "szsc-scheduled"
     region: str,   # "SG"（默认）或 "US"
-    max_rows: int  # 默认 100，最大 2000
+    max_rows: int,              # 默认 100，最大 2000
+    cell_max_len: int = 0,       # 0 = 表格展示不截断单元格（旧版 MCP 曾固定 50 字截断）
+    write_full_result_to: str | None = None,  # 可选：相对/绝对路径，完整结果写 UTF-8 JSON（大字段、写 Sheet）
 )
 ```
+
+**长字段 / GSheet 回填**：MCP 对话仍可能被宿主截断。请对「多行大单元格」查询传 `write_full_result_to="docs/investigations/xxx.json"`（路径相对工作区），再在仓库内用脚本读 JSON 合并或更新 Sheet；**以落盘文件为准**。
 
 **常用 Presto 库：**
 - `sls_mart`：API 元数据血缘表所在库
