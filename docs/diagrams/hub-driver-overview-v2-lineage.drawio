@@ -1,0 +1,116 @@
+<mxfile host="app.diagrams.net" modified="2026-03-05T12:00:00.000Z" agent="SPX_Helper" version="22.1.0" type="device">
+  <diagram name="DriverOverview-v2-Lineage" id="lineage-v2">
+    <mxGraphModel>
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="title" value="Driver Overview v2 — 完整血缘（get_api_lineage + spx-bug-trace）" style="text;html=1;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="10" width="800" height="22" as="geometry"/>
+        </mxCell>
+        <mxCell id="t_read" value="【读链路】浏览器 → Data API → API Mart / biz_sql → 读 CK（接口读侧 ds_id=122；排查 query_ck cluster=ck6）" style="text;html=1;fontSize=10;fontStyle=1;fontColor=#1a5276;" vertex="1" parent="1">
+          <mxGeometry x="40" y="38" width="800" height="22" as="geometry"/>
+        </mxCell>
+        <mxCell id="n1" value="浏览器 Hub / Driver Overview v2" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="40" y="64" width="320" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="n2" value="Data API — operation__fm__facility_driver_overview_v2" style="rounded=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="102" width="320" height="32" as="geometry"/>
+        </mxCell>
+        <mxCell id="n3" value="DataSuite API Mart（v_250917）" style="rounded=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="142" width="320" height="28" as="geometry"/>
+        </mxCell>
+        <mxCell id="n4" value="biz_sql：{trip_zero_filter} {station_region_filter} …&#xa;FROM dws FINAL + GLOBAL LEFT JOIN dim FINAL" style="rounded=1;fillColor=#f5eef8;strokeColor=#9673a6;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="40" y="178" width="320" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="n5a" value="CK 事实表 dws_spx_fm_pickup_task_process_ri_{region}_all" style="rounded=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="226" width="320" height="36" as="geometry"/>
+        </mxCell>
+        <mxCell id="n5b" value="CK 维表 dim_spx_station_tab_{region}_all" style="rounded=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="270" width="320" height="32" as="geometry"/>
+        </mxCell>
+        <mxCell id="t_write" value="【写链路】页面下方→上方汇入 dws：MySQL → Kafka → Flink →（可选 kafka_to_ck）→ CK" style="text;html=1;fontSize=10;fontStyle=1;fontColor=#943126;" vertex="1" parent="1">
+          <mxGeometry x="40" y="312" width="800" height="20" as="geometry"/>
+        </mxCell>
+        <mxCell id="n6" value="③ Flink spx_mart__dws_spx_fm_pickup_task_process_ri2_{region}_kafka_*" style="rounded=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="40" y="338" width="320" height="36" as="geometry"/>
+        </mxCell>
+        <mxCell id="n6b" value="④ 可选 kafka_to_ck_*（写 CK）" style="rounded=1;fillColor=#fce5cd;strokeColor=#e69138;fontSize=9;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="384" width="320" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="n7" value="② Kafka di.shopee_fms_pickup_* …" style="rounded=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="426" width="320" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="n8" value="① MySQL 业务库 CDC — 最底层" style="rounded=1;fillColor=#eeeeee;strokeColor=#666666;fontSize=10;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="468" width="320" height="34" as="geometry"/>
+        </mxCell>
+        <mxCell id="side_t" value="【排查侧】虚线" style="text;html=1;fontSize=10;fontStyle=1;fontColor=#117864;" vertex="1" parent="1">
+          <mxGeometry x="420" y="64" width="120" height="18" as="geometry"/>
+        </mxCell>
+        <mxCell id="n9" value="Presto dwd_spx_fm_pickup_task_ri_{region}（grass_date）" style="rounded=1;fillColor=#e6f3ff;strokeColor=#1ba1e2;fontSize=9;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="420" y="88" width="240" height="36" as="geometry"/>
+        </mxCell>
+        <mxCell id="n10" value="Hive ods_flink_platform_connector_metadata_df" style="rounded=1;fillColor=#fff4e6;strokeColor=#cc6600;fontSize=9;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="420" y="134" width="240" height="32" as="geometry"/>
+        </mxCell>
+        <mxCell id="n11" value="GSheet 任务上下游（可选）" style="rounded=1;fillColor=#fce4ec;strokeColor=#ad1457;fontSize=9;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="420" y="176" width="240" height="28" as="geometry"/>
+        </mxCell>
+        <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=classic;strokeColor=#333333;" edge="1" parent="1" source="n1" target="n2">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e2" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=classic;strokeColor=#333333;" edge="1" parent="1" source="n2" target="n3">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e3" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=classic;strokeColor=#333333;" edge="1" parent="1" source="n3" target="n4">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e4a" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=classic;strokeColor=#82b366;" edge="1" parent="1" source="n4" target="n5a">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e4b" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=classic;strokeColor=#82b366;" edge="1" parent="1" source="n4" target="n5b">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="ew1" value="CDC" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=classic;strokeColor=#d79b00;" edge="1" parent="1" source="n8" target="n7">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="ew2" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=classic;strokeColor=#b85450;" edge="1" parent="1" source="n7" target="n6">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="ew3" value="可选分支" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=classic;strokeColor=#e69138;dashed=1;" edge="1" parent="1" source="n6" target="n6b">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="ew_up1" value="写入 CK（可选）" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=classic;strokeColor=#27ae60;exitX=0.5;exitY=0;entryX=0.75;entryY=1;" edge="1" parent="1" source="n6b" target="n5a">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="280" y="450"/>
+              <mxPoint x="280" y="210"/>
+              <mxPoint x="280" y="262"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="ew_up2" value="或 Flink 直写 CK" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=classic;strokeColor=#27ae60;dashed=1;exitX=0.5;exitY=0;entryX=0.25;entryY=1;" edge="1" parent="1" source="n6" target="n5a">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="120" y="400"/>
+              <mxPoint x="20" y="400"/>
+              <mxPoint x="20" y="210"/>
+              <mxPoint x="120" y="262"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="ep" value="互证" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=open;dashed=1;strokeColor=#1ba1e2;" edge="1" parent="1" source="n5a" target="n9">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="eh" value="connector" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=open;dashed=1;strokeColor=#cc6600;" edge="1" parent="1" source="n6" target="n10">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="eg" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=open;dashed=1;strokeColor=#ad1457;" edge="1" parent="1" source="n6" target="n11">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="warn" value="【重要】Cursor drawio MCP 浏览器里可能仍是「三节点测试图」。完整图请打开仓库文件：docs/diagrams/hub-driver-overview-v2-lineage.drawio — 或 diagrams.net「打开」该文件。" style="text;html=1;fontSize=10;fontColor=#c0392b;fontStyle=2;align=left;" vertex="1" parent="1">
+          <mxGeometry x="40" y="520" width="800" height="40" as="geometry"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

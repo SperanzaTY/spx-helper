@@ -1,7 +1,9 @@
 #!/bin/bash
 
-# Skill 同步：首次安装时复制；已有本地版本时不覆盖，仅提示在 Cursor 中比较合并
-# 详见 docs/SKILL_INSTALL.md
+# 【已不推荐日常使用】团队约定：Skill 一律手动编辑、手动 cp 同步，勿依赖本脚本。
+# 保留本文件仅为历史兼容；新流程见 docs/SKILL_INSTALL.md「维护原则」。
+#
+# 原行为：首次安装时复制；已有本地版本时不覆盖，仅提示在 Cursor 中比较合并
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SRC_DIR="${REPO_ROOT}/.cursor/skills"

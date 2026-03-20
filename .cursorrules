@@ -107,7 +107,7 @@ git push gitlab main && git push origin main                # 稳定版发布
 │    ↓                                     │
 │ 9. 创建 MR 合并到 release               │
 │    ↓                                     │
-│ 10. （可选）执行 sync_skills.sh 同步到本地 │
+│ 10. （可选）按 docs/SKILL_INSTALL.md 手动同步 Skill 到 ~/.cursor/skills/ │
 └─────────────────────────────────────────┘
 ```
 
@@ -169,19 +169,20 @@ feat: 添加API请求参数展示功能
 - [ ] GitLab 仓库已更新
 - [ ] GitHub 仓库已更新
 - [ ] 两个仓库的提交历史一致
-- [ ] （可选）Skill 同步：执行 `./scripts/sync_skills.sh` 查看说明，在 Cursor 中比较后手动合并
-## 📚 Skill 规则（团队同步，仅手动合并）
+- [ ] （可选）Skill：按 `docs/SKILL_INSTALL.md` 手动 `cp` 或编辑器合并，**不使用** `sync_skills.sh` 作日常同步
+## 📚 Skill 规则（团队约定：手动维护）
 
 Skill 源文件在 `.cursor/skills/`，提交到 Git 供团队共享。
 
 - **SPX_Helper 项目内**：Cursor 自动从 `.cursor/skills/` 加载
-- **其他项目内**：需同步到 `~/.cursor/skills/` 才能加载
-- **禁止自动覆盖**：不在脚本中做任何 cp/覆盖，只通过 Cursor 比较后手动修改
-- **合并流程**：在 Cursor 中比较 `.cursor/skills/` 与 `~/.cursor/skills/`，手动复制更优内容到目标位置
+- **其他项目内**：需将内容同步到 `~/.cursor/skills/` 才能加载
+- **禁止依赖脚本做日常同步**：不使用 `sync_skills.sh` 等自动化；一律 **手动编辑**、**手动 cp** 或 **diff 后合并**；版本差异由人与 Agent 按语义优化（见 `docs/SKILL_INSTALL.md` 维护原则）
+- **合并流程**：在 Cursor 中比较 `.cursor/skills/` 与 `~/.cursor/skills/`，手动保留更优内容到目标侧
+- **全局→工程且他人已提交 Skill**：先 `git pull`，再 diff 全局与工程（勿整目录覆盖）；见 `docs/SKILL_INSTALL.md`「协作补充」
 
 ### 用户说「帮我安装 skill」时
 
-参考 `docs/SKILL_INSTALL.md`，执行 `./scripts/sync_skills.sh`：首次安装会自动复制到 `~/.cursor/skills/`；若已存在则不覆盖，提示在 Cursor 中比较合并。
+参考 `docs/SKILL_INSTALL.md`：**手动** `mkdir -p ~/.cursor/skills` 后 `cp -r .cursor/skills/spx-bug-trace ~/.cursor/skills/`（路径按用户仓库为准）。
 
 ### 用户问「Spark DMP 账号密码在哪里找」「某某 MCP 凭证如何获取」时
 
@@ -193,7 +194,7 @@ Skill 源文件在 `.cursor/skills/`，提交到 Git 供团队共享。
 2. 检查本次拉取是否含 `mcp-tools/` 变更：`git diff ORIG_HEAD HEAD --name-only | grep mcp-tools`
 3. **若有 MCP 变更**，必须提醒用户：
    > ⚠️ MCP 有更新，请到 Cursor 设置（Settings → MCP）中关闭再开启相应 MCP 服务以刷新，否则新版本不会生效。
-4. 若包含 `.cursor/skills/` 变更，可提示执行 `./scripts/sync_skills.sh`
+4. 若包含 `.cursor/skills/` 变更，可提示用户按 `docs/SKILL_INSTALL.md` **手动**同步到 `~/.cursor/skills/`（勿推荐脚本）
 
 ## 🔧 调试建议
 

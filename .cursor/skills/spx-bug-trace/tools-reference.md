@@ -61,6 +61,33 @@ query_presto(
 - `sls_mart`：API 元数据血缘表所在库
 - `spx_mart`：SPX 业务宽表、汇总表
 - `spx_smartsort_ddc`：路网规划相关表（需要对应权限）
+- `data_metamart`：元数据 ODS；**Flink 平台 connector 血缘**见下表
+
+---
+
+## Flink 平台 connector 元数据（Hive）
+
+**表名**：`data_metamart.ods_flink_platform_connector_metadata_df`
+
+**用途**：从 **Flink 平台** 侧查询 connector 相关元数据，用于与代码推出的任务名对齐、确认上下游（Kafka/CK/Hive 等以实际列为准）。**Agent 检索平台血缘时优先查本表**，Google Sheet「任务上下游信息梳理」为人工维护补充。
+
+**注意**：
+- **必须**带分区条件（常见为 `grass_date`，以 `DESCRIBE` / DDL 为准）。
+- 列名可能随数仓变更，**先 `DESCRIBE` 或 `SELECT * ... LIMIT 5`** 再写业务过滤。
+
+```sql
+-- 1) 确认分区列与字段
+DESCRIBE data_metamart.ods_flink_platform_connector_metadata_df;
+
+-- 2) 样例：限定分区后探查（Presto 上 grass_date 多为 varchar，用 'YYYY-MM-DD'）
+SELECT *
+FROM data_metamart.ods_flink_platform_connector_metadata_df
+WHERE grass_date = '2026-03-04'
+LIMIT 20;
+
+-- 3) 在确认列名后，按任务名/表名/connector 等追加过滤
+-- AND lower(cast(<column> AS varchar)) LIKE '%<keyword>%'
+```
 
 ---
 
