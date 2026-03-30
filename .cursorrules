@@ -1,302 +1,183 @@
 # SPX Helper 项目开发规则
 
-## 🚫 代码提交规则（重要！）
+## 常用命令
+
+```bash
+# Chrome 扩展
+chrome://extensions/               # 加载/刷新扩展
+# MCP 工具
+python3 mcp-tools/presto-query/presto_mcp_server.py   # 启动 Presto MCP
+python3 mcp-tools/spark-query/spark_mcp_server.py      # 启动 Spark MCP
+python3 mcp-tools/ck-query/ck_mcp_server.py            # 启动 CK MCP
+python3 mcp-tools/api-trace/api_trace_server.py        # 启动 API Trace MCP
+python3 mcp-tools/seatalk-reader/seatalk_reader_server.py  # 启动 SeaTalk Reader MCP
+# Git
+git remote -v                      # 查看远程仓库
+git log --oneline -5               # 最近提交
+git diff                           # 查看未提交变更
+```
+
+## 架构概览
+
+SPX Helper = Chrome 扩展 + MCP 工具集，用于 Shopee SPX 数据开发与问题排查。
+
+```
+Chrome 扩展 (manifest v3)
+  ├── background.js        → Service Worker, 消息中枢, 数据存储
+  ├── content.js           → 页面注入, DOM 操作, UI 渲染
+  ├── injected.js          → API 拦截 (XHR/Fetch hook)
+  ├── popup.html/js        → 扩展弹出页, 配置管理, JWT 生成
+  └── styles.css           → 全局样式
+
+MCP 工具集 (mcp-tools/)
+  ├── presto-query/        → Presto SQL 查询 (DataSuite API)
+  ├── spark-query/         → Spark SQL 查询 (Livy REST API)
+  ├── ck-query/            → ClickHouse 查询 (CK2/CK6)
+  ├── api-trace/           → API 血缘溯源 (spx_mart.api_lineage)
+  └── seatalk-reader/      → SeaTalk 消息读取 (CDP 直连)
+
+Skill (.cursor/skills/)
+  └── spx-bug-trace/       → 数据问题定位技能
+```
+
+**数据流**: 页面请求 → injected.js 拦截 → content.js 处理 → background.js 存储/转发 → popup.js 展示
+
+## 技术栈
+
+- Chrome Extension Manifest V3 (JavaScript, 无构建步骤)
+- Python 3.9+ MCP Server (FastMCP, asyncio)
+- 依赖: requests, websockets, mcp
+- 无测试框架，依赖手动测试验证
+
+## 安全约束
+
+- AI 可以执行**只读操作**: 读取文件、查询数据库(Presto/CK/Spark)、分析代码、读取 SeaTalk 消息
+- **危险操作**需用户确认:
+  - 任何 Git 提交/推送操作
+  - 通过 SeaTalk MCP 发送消息
+  - 修改生产环境配置
+  - 删除或覆盖用户数据
+- AI **禁止**:
+  - 自动执行 `git commit` / `git push`
+  - 在代码中硬编码密码/token（应使用环境变量）
+  - 跳过测试环节直接提交
+
+## 高风险文件
+
+修改以下文件后必须完整测试，可能影响全局功能:
+
+| 文件 | 影响范围 | 修改后必须 |
+|------|----------|-----------|
+| `background.js` | 全局消息中枢、存储 | 重新加载扩展 + 全功能测试 |
+| `content.js` | 页面注入、UI 渲染 | 刷新页面 + UI 测试 |
+| `injected.js` | API 拦截 | 刷新页面 + API 拦截测试 |
+| `manifest.json` | 扩展权限、配置 | 重新加载扩展 + 权限验证 |
+| `popup.js` | 弹出页逻辑、JWT | 打开 popup + 配置功能测试 |
+
+MCP 工具修改后: Cursor Settings → MCP 中关闭再开启对应服务以刷新。
+
+## 新功能开发原则
+
+- **Chrome 扩展侧**:
+  - 页面 DOM 操作 / UI → `content.js`
+  - API 拦截 → `injected.js`
+  - 后台逻辑 / 存储 / 消息转发 → `background.js`
+  - 配置页面 / JWT → `popup.js`
+  - **禁止**在 background.js 中直接操作 DOM
+- **MCP 工具侧**:
+  - 每个工具独立目录: `mcp-tools/<tool-name>/`
+  - 必须有 `pyproject.toml` + 主程序 `*_server.py`
+  - 使用 `FastMCP` 框架，`transport="stdio"`
+  - 凭证通过环境变量传入，不硬编码
+- **通用**:
+  - 小步迭代，每次只改一个功能点
+  - 所有异步操作必须 try-catch
+  - 提供默认值和回退方案，保持向后兼容
+
+## 提交前检查清单
+
+- [ ] 扩展加载成功，控制台无错误
+- [ ] 修改的功能正常工作
+- [ ] 已有功能未被破坏
+- [ ] MCP 工具（如有变更）: `python3 -c "import asyncio; from xxx import mcp; asyncio.run(mcp.list_tools())"` 验证注册
+- [ ] `.cursor/skills/` 若有变更，必须一并 `git add` 进本次提交
+- [ ] commit message 符合规范（见下方）
+
+## 代码提交规则
 
 ### 禁止行为
-- ❌ **禁止 Agent 自动提交代码到 Git**
-- ❌ 禁止在未经测试的情况下执行 `git commit`
-- ❌ 禁止在未经确认的情况下执行 `git push`
-- ❌ 禁止批量修改多个文件后一次性提交
-- ❌ 禁止只推送到单个远程仓库
+- 禁止 Agent 自动提交代码到 Git
+- 禁止在未经测试的情况下执行 `git commit`
+- 禁止在未经确认的情况下执行 `git push`
+- 禁止只推送到单个远程仓库
+- 禁止直接推送到 release 分支
 
 ### 必须遵守的流程
 
-#### 1. 代码修改阶段
 ```
-✅ 允许：
-- 修改代码文件
-- 创建新文件
-- 删除文件
-- 重构代码
-
-❌ 禁止：
-- 直接提交到 Git
+接收需求 → 分析问题 → 修改代码 → 展示修改内容
+  → [等待用户测试] → [等待用户确认"可以提交"]
+  → git add / git commit → 推送到 GitLab + GitHub（开发分支）
+  → 创建 MR 合并到 release
 ```
-
-#### 2. 测试阶段（必须！）
-```
-在提交前必须：
-1. 在浏览器中加载扩展
-2. 测试修改的功能
-3. 验证没有破坏现有功能
-4. 检查控制台是否有错误
-5. 确认用户体验正常
-```
-
-#### 3. 提交阶段（需人工确认）
-```
-Agent 必须：
-1. 向用户展示所有修改内容（git diff）
-2. 说明修改的目的和影响范围
-3. 等待用户确认测试完成
-4. 等待用户明确指令后才能提交
-5. 【Skill】若 .cursor/skills/ 有变更，必须一并 add 进本次提交
-
-用户确认后才能执行：
-- git add（包含 .cursor/skills/ 若有变更）
-- git commit
-- git push gitlab <当前分支>  ⚠️ 必须推送到 GitLab
-- git push origin <当前分支>  ⚠️ 必须推送到 GitHub
-
-**禁止直接提交到 release**。必须在 feature/bugfix 分支开发，通过 MR 合并到 release。
-```
-
-### 分支管理规则（重要！）
-
-| 分支 | 用途 |
-|------|------|
-| **feature/*** | 新功能开发，从 release 拉出 |
-| **bugfix/*** | Bug 修复，从 release 拉出 |
-| **release** | 开发主分支，**只接受 MR 合并**，禁止直接 push |
-| **main** | 稳定版本，从 release 合并，生产环境 |
-
-流程：`feature/bugfix` → **MR** → `release` → `main`
-
-- ❌ **禁止**：直接在 release 分支上 commit 并 push
-- ✅ **必须**：在 feature/xxx 或 bugfix/xxx 分支开发 → 推送分支 → 创建 MR 合并到 release
-- MR 地址（GitLab）：https://git.garena.com/tianyi.liang/spx-helper/-/merge_requests/new
-- 完整流程见 [docs/GIT_WORKFLOW.md](docs/GIT_WORKFLOW.md)
-
-### 双仓库同步规则（重要！）
-
-```
-本项目维护两个远程仓库：
-- gitlab: https://git.garena.com/tianyi.liang/spx-helper.git
-- origin: https://github.com/SperanzaTY/spx-helper.git
-
-提交时必须：
-1. ✅ 同时推送到两个仓库
-2. ✅ 使用相同的 commit
-3. ✅ 确保两个仓库保持同步
-
-命令示例：
-git push gitlab feature/xxx && git push origin feature/xxx   # 推送开发分支，再创建 MR
-git push gitlab release && git push origin release          # 仅 MR 合并后由合并者推送 release
-git push gitlab main && git push origin main                # 稳定版发布
-```
-
-### 正确的工作流程
-
-```
-┌─────────────────────────────────────────┐
-│ 1. 接收需求                              │
-│    ↓                                     │
-│ 2. 分析问题                              │
-│    ↓                                     │
-│ 3. 修改代码                              │
-│    ↓                                     │
-│ 4. 展示修改内容                          │
-│    ↓                                     │
-│ 5. 🛑 等待用户测试                       │
-│    ↓                                     │
-│ 6. 🛑 等待用户确认："可以提交"           │
-│    ↓                                     │
-│ 7. 执行提交 (git add/commit)            │
-│    ↓                                     │
-│ 8. 推送到 GitLab + GitHub（开发分支）   │
-│    ↓                                     │
-│ 9. 创建 MR 合并到 release               │
-│    ↓                                     │
-│ 10. （可选）按 docs/SKILL_INSTALL.md 手动同步 Skill 到 ~/.cursor/skills/ │
-└─────────────────────────────────────────┘
-```
-
-## 📋 提交消息规范
 
 ### Commit Message 格式
+
 ```
 <type>: <subject>
 
 <body>
-
-<footer>
 ```
 
-### Type 类型
-- `feat`: 新功能
-- `fix`: 修复bug
-- `docs`: 文档更新
-- `style`: 代码格式调整（不影响功能）
-- `refactor`: 重构（既不是新功能也不是修复）
-- `perf`: 性能优化
-- `test`: 测试相关
-- `chore`: 构建/工具相关
+Type: `feat` | `fix` | `docs` | `style` | `refactor` | `perf` | `test` | `chore`
 
-### 示例
-```bash
-feat: 添加API请求参数展示功能
+### 分支管理
 
-在API详情页面新增可折叠的请求参数区域。
+| 分支 | 用途 |
+|------|------|
+| `feature/*` | 新功能开发，从 release 拉出 |
+| `bugfix/*` | Bug 修复，从 release 拉出 |
+| `release` | 开发主分支，只接受 MR 合并，禁止直接 push |
+| `main` | 稳定版本，从 release 合并 |
 
-- 使用details标签实现折叠
-- JSON格式化展示
-- 深色主题统一风格
-```
+流程: `feature/bugfix` → **MR** → `release` → `main`
 
-## 🧪 测试清单
-
-### Chrome 扩展测试
-- [ ] 扩展加载成功
-- [ ] 功能正常工作
-- [ ] 控制台无错误
-- [ ] 已有功能未被破坏
-- [ ] UI显示正常
-- [ ] 性能无明显下降
-
-### API 相关功能测试
-- [ ] API拦截正常
-- [ ] 数据溯源功能正常
-- [ ] AI分析功能正常
-- [ ] 接口血缘查询正常
-
-### 配置相关测试
-- [ ] 配置保存成功
-- [ ] 配置读取正常
-- [ ] 默认值生效
-- [ ] 导入导出功能正常
-
-### 提交后验证
-- [ ] GitLab 仓库已更新
-- [ ] GitHub 仓库已更新
-- [ ] 两个仓库的提交历史一致
-- [ ] （可选）Skill：按 `docs/SKILL_INSTALL.md` 手动 `cp` 或编辑器合并，**不使用** `sync_skills.sh` 作日常同步
-## 📚 Skill 规则（团队约定：手动维护）
-
-Skill 源文件在 `.cursor/skills/`，提交到 Git 供团队共享。
-
-- **SPX_Helper 项目内**：Cursor 自动从 `.cursor/skills/` 加载
-- **其他项目内**：需将内容同步到 `~/.cursor/skills/` 才能加载
-- **禁止依赖脚本做日常同步**：不使用 `sync_skills.sh` 等自动化；一律 **手动编辑**、**手动 cp** 或 **diff 后合并**；版本差异由人与 Agent 按语义优化（见 `docs/SKILL_INSTALL.md` 维护原则）
-- **合并流程**：在 Cursor 中比较 `.cursor/skills/` 与 `~/.cursor/skills/`，手动保留更优内容到目标侧
-- **全局→工程且他人已提交 Skill**：先 `git pull`，再 diff 全局与工程（勿整目录覆盖）；见 `docs/SKILL_INSTALL.md`「协作补充」
-
-### 用户说「帮我安装 skill」时
-
-参考 `docs/SKILL_INSTALL.md`：**手动** `mkdir -p ~/.cursor/skills` 后 `cp -r .cursor/skills/spx-bug-trace ~/.cursor/skills/`（路径按用户仓库为准）。
-
-### 用户问「Spark DMP 账号密码在哪里找」「某某 MCP 凭证如何获取」时
-
-参考 `mcp-tools/README.md` 凭证获取指引：Spark 在 Data Suite 个人中心 → Profile；Presto 在 Data Suite API 管理 → 获取 Personal Token。
-
-### 用户说「更新到最新版本」或「更新 release」时
-
-1. 执行 `git pull origin release`（或 `git pull gitlab release`）
-2. 检查本次拉取是否含 `mcp-tools/` 变更：`git diff ORIG_HEAD HEAD --name-only | grep mcp-tools`
-3. **若有 MCP 变更**，必须提醒用户：
-   > ⚠️ MCP 有更新，请到 Cursor 设置（Settings → MCP）中关闭再开启相应 MCP 服务以刷新，否则新版本不会生效。
-4. 若包含 `.cursor/skills/` 变更，可提示用户按 `docs/SKILL_INSTALL.md` **手动**同步到 `~/.cursor/skills/`（勿推荐脚本）
-
-## 🔧 调试建议
-
-### 查看日志
-```javascript
-// 在控制台查看 SPX Helper 的日志
-// 使用过滤器：[SPX Helper]
-```
-
-### 重新加载扩展
-```
-1. 打开 chrome://extensions/
-2. 点击"刷新"按钮
-3. 刷新测试页面
-```
-
-### 检查远程仓库状态
-```bash
-# 查看远程仓库
-git remote -v
-
-# 查看分支状态
-git status
-
-# 查看提交历史
-git log --oneline -5
-```
-
-## ⚠️ 风险操作
-
-### 高风险修改（需要特别小心）
-- background.js：影响全局功能
-- content.js：影响页面注入
-- manifest.json：影响扩展权限
-- injected.js：影响API拦截
-
-### 修改这些文件后必须：
-1. 完整测试所有功能
-2. 检查是否破坏现有功能
-3. 验证性能影响
-4. 确认无安全问题
-
-## 📝 开发最佳实践
-
-### 代码修改
-1. **小步迭代**：每次只修改一个功能点
-2. **保持向后兼容**：提供默认值和回退方案
-3. **错误处理**：所有异步操作都要有 try-catch
-4. **日志输出**：关键步骤输出日志便于调试
-
-### 提交策略
-1. **原子提交**：每次提交只包含一个逻辑修改
-2. **清晰描述**：说明修改原因、方案和影响
-3. **测试验证**：提交前必须测试
-4. **双仓库同步**：确保 GitLab 和 GitHub 同步
-
-### 回滚准备
-1. 保持 Git 历史清晰
-2. 记录每次修改的原因
-3. 重要修改前创建分支
-4. 两个仓库保持一致
-
-## 🎯 总结
-
-### Agent 的职责
-✅ 理解需求
-✅ 分析问题
-✅ 编写代码
-✅ 展示修改
-✅ 解释方案
-✅ 同时推送到两个仓库
-
-### Agent 不应该做的
-❌ 自动提交代码
-❌ 跳过测试环节
-❌ 在不确定的情况下推送
-❌ 修改后不通知用户
-❌ 只推送到单个仓库
-❌ 直接推送到 release 分支（必须先 feature/bugfix → MR）
-
-### 用户的职责
-✅ 测试功能
-✅ 确认修改正确
-✅ 批准提交
-✅ 提供反馈
-
-## 📦 远程仓库与分支
+### 双仓库同步
 
 ```
 GitLab: gitlab, https://git.garena.com/tianyi.liang/spx-helper.git
 GitHub: origin, https://github.com/SperanzaTY/spx-helper.git
 
-分支：
-- feature/*, bugfix/*: 开发分支，通过 MR 合并到 release
-- release:   开发主分支，仅接受 MR 合并
-- main:      稳定版本
+推送时必须同时推送到两个仓库:
+git push gitlab <branch> && git push origin <branch>
 ```
 
----
+## Skill 规则
 
-**记住：代码提交是不可逆的操作，必须慎重！**
+Skill 源文件在 `.cursor/skills/`，提交到 Git 供团队共享。
 
-**在用户明确说"可以提交"或"提交代码"之前，不要执行任何 Git 提交操作！**
+- SPX_Helper 项目内: Cursor 自动从 `.cursor/skills/` 加载
+- 其他项目内: 需手动同步到 `~/.cursor/skills/`
+- 禁止依赖脚本做日常同步，一律手动编辑/cp/diff 合并
+- 详见 `docs/SKILL_INSTALL.md`
 
-**提交时必须同时推送到 GitLab 和 GitHub！**
+### 常见问答
+
+- **用户说"帮我安装 skill"**: 参考 `docs/SKILL_INSTALL.md`，手动 `cp -r .cursor/skills/spx-bug-trace ~/.cursor/skills/`
+- **用户问"MCP 凭证如何获取"**: 参考 `mcp-tools/README.md`
+- **用户说"更新到最新版本"**: `git pull`，若含 `mcp-tools/` 变更则提醒用户在 Cursor MCP 设置中刷新服务
+
+## Agent 职责边界
+
+### 可以做
+- 理解需求、分析问题、编写代码
+- 展示修改内容、解释方案
+- 执行只读查询（Presto/CK/Spark/SeaTalk）
+- 读取文件、搜索代码
+
+### 不能做
+- 自动提交代码（必须等用户确认）
+- 跳过测试环节
+- 在不确定的情况下推送
+- 只推送到单个仓库
+- 直接推送到 release 分支

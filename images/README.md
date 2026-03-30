@@ -1,12 +1,22 @@
 # 图标说明
 
-由于Chrome扩展需要PNG格式的图标，请将 `icon.svg` 转换为以下三个尺寸的PNG文件：
+SPX Helper 图标采用蓝色渐变 (#667eea → #764ba2) 背景 + 白色大号 "S"，与扩展 UI 主色一致，S 代表 SPX。
 
-1. `icon16.png` - 16x16像素
-2. `icon48.png` - 48x48像素  
-3. `icon128.png` - 128x128像素
+Chrome 扩展需要 PNG 格式，请将 `icon.svg` 转换为：
+- `icon16.png` - 16x16
+- `icon48.png` - 48x48
+- `icon128.png` - 128x128
 
 ## 转换方法
+
+### macOS 快速转换（无需安装）
+```bash
+qlmanage -t -s 128 -o . icon.svg
+cp icon.svg.png icon128.png
+sips -z 48 48 icon128.png --out icon48.png
+sips -z 16 16 icon128.png --out icon16.png
+rm icon.svg.png
+```
 
 ### 方式一：使用在线工具
 访问 https://www.svgtopng.com/ 或其他SVG转PNG工具

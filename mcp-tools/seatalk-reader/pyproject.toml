@@ -1,0 +1,20 @@
+[project]
+name = "spx-seatalk-reader-mcp"
+version = "0.1.0"
+description = "SeaTalk Reader MCP Server - 通过 seatalk-enhance 本地 HTTP API 读取 SeaTalk 消息"
+requires-python = ">=3.9"
+dependencies = [
+    "mcp",
+    "requests",
+    "websockets",
+]
+
+[project.scripts]
+seatalk-reader-mcp = "seatalk_reader_server:main"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["seatalk_reader_server"]
