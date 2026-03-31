@@ -147,10 +147,11 @@ def _list_cdp_pages() -> List[dict]:
 
 
 def _find_main_page() -> Optional[dict]:
-    """找到 SeaTalk 主页面"""
+    """找到 SeaTalk 主页面（排除 mediaViewer 等子页面）"""
     pages = _list_cdp_pages()
     for p in pages:
-        if MAIN_PAGE_URL in p.get("url", ""):
+        url = p.get("url", "")
+        if MAIN_PAGE_URL in url and "mediaViewer" not in url and "spark" not in url:
             return p
     return None
 
@@ -177,6 +178,15 @@ async def _get_client() -> CdpClient:
     await client.connect()
     _cdp_client = client
     return client
+
+
+def _fmt_size(n: int) -> str:
+    """格式化文件大小"""
+    if n < 1024:
+        return f"{n}B"
+    if n < 1024 * 1024:
+        return f"{n / 1024:.1f}KB"
+    return f"{n / (1024 * 1024):.1f}MB"
 
 
 def _check_cdp_available() -> str:
@@ -597,6 +607,181 @@ async def search_seatalk_messages(
 
 
 @mcp.tool()
+async def navigate_to_chat(
+    session_name: str = "",
+    session_id: int = 0,
+    session_type: str = "group",
+) -> str:
+    """在 SeaTalk 中切换到指定会话并等待消息加载。
+
+    通过 CDP 模拟点击左侧会话列表来切换聊天。切换后会自动等待消息加载，
+    然后返回该会话的最新消息摘要。
+
+    这是读取未加载会话消息的推荐方式：先 navigate，再 read_seatalk_messages。
+
+    Args:
+        session_name: 会话名称（群名/人名，模糊匹配）
+        session_id: 会话 ID（精确匹配，优先于 session_name 的模糊搜索）
+        session_type: 会话类型 - "group"(群聊) 或 "buddy"(私聊)
+    """
+    err = _check_cdp_available()
+    if err:
+        return err
+
+    if not session_name and not session_id:
+        return "请提供 session_name 或 session_id"
+
+    try:
+        if session_id:
+            click_js = f"""(function(){{
+                var item = document.querySelector(
+                    '.messages-chat-session-list-item[data-id="{session_id}"]'
+                );
+                if (!item) return JSON.stringify({{error: 'not_in_list', id: {session_id}}});
+                item.click();
+                var nameEl = item.querySelector('[class*=text]');
+                return JSON.stringify({{
+                    clicked: true,
+                    dataId: '{session_id}',
+                    name: nameEl ? nameEl.textContent.substring(0, 80) : ''
+                }});
+            }})()"""
+        else:
+            safe_name = json.dumps(session_name)
+            click_js = f"""(function(){{
+                var keyword = {safe_name}.toLowerCase();
+                var items = document.querySelectorAll('.messages-chat-session-list-item');
+                var best = null;
+                var bestName = '';
+                for (var i = 0; i < items.length; i++) {{
+                    var nameEl = items[i].querySelector('[class*=text]');
+                    var name = nameEl ? nameEl.textContent : '';
+                    if (name.toLowerCase().indexOf(keyword) >= 0) {{
+                        best = items[i];
+                        bestName = name.substring(0, 80);
+                        break;
+                    }}
+                }}
+                if (!best) return JSON.stringify({{error: 'no_match', keyword: keyword}});
+                best.click();
+                return JSON.stringify({{
+                    clicked: true,
+                    dataId: best.getAttribute('data-id'),
+                    name: bestName
+                }});
+            }})()"""
+
+        raw = await _eval_js(click_js)
+        result = json.loads(raw) if isinstance(raw, str) else raw
+
+        if result.get("error") == "not_in_list":
+            return (
+                f"会话 ID {session_id} 不在当前左侧列表中。\n"
+                "该会话可能未置顶或排名靠后，请尝试用 session_name 搜索，\n"
+                "或者先让用户在 SeaTalk 中手动打开该会话。"
+            )
+        if result.get("error") == "no_match":
+            return f"在左侧会话列表中未找到匹配 '{session_name}' 的会话。"
+
+        # 等待消息加载
+        import asyncio as _asyncio
+        await _asyncio.sleep(1.5)
+
+        chat_name = result.get("name", "")
+        data_id = result.get("dataId", "")
+
+        count_js = f"""(function(){{
+            var s = window.store.getState();
+            var msgMap = (s.messages && s.messages.messages) || {{}};
+            var count = 0;
+            for (var key in msgMap) {{
+                if (key.indexOf('-{data_id}-') >= 0) count++;
+            }}
+            return JSON.stringify({{messagesLoaded: count}});
+        }})()"""
+        count_raw = await _eval_js(count_js)
+        count_data = json.loads(count_raw) if isinstance(count_raw, str) else count_raw
+        loaded = count_data.get("messagesLoaded", 0)
+
+        return (
+            f"已切换到会话: {chat_name} (id={data_id})\n"
+            f"内存中已加载 {loaded} 条消息。\n"
+            f"现在可以使用 read_seatalk_messages 读取消息内容。"
+        )
+
+    except Exception as e:
+        return f"切换会话失败: {e}"
+
+
+@mcp.tool()
+async def read_current_chat(
+    limit: int = 50,
+) -> str:
+    """读取 SeaTalk 当前正在查看的会话的消息。
+
+    自动检测当前打开的会话（左侧列表中高亮的），无需手动指定 session_id。
+    适用于用户已经在 SeaTalk 中打开了某个会话的场景。
+
+    当用户说"看看这个群的消息"或提供了 SeaTalk 链接后手动打开了对应会话时使用。
+
+    Args:
+        limit: 返回消息数量上限，默认50
+    """
+    err = _check_cdp_available()
+    if err:
+        return err
+
+    try:
+        detect_js = """(function(){
+            var items = document.querySelectorAll('.messages-chat-session-list-item');
+            for (var i = 0; i < items.length; i++) {
+                if (items[i].className.indexOf('selected') >= 0) {
+                    var dataId = items[i].getAttribute('data-id');
+                    var nameEl = items[i].querySelector('[class*=text]');
+                    var name = nameEl ? nameEl.textContent.substring(0, 80) : '';
+                    return JSON.stringify({dataId: dataId, name: name});
+                }
+            }
+            return JSON.stringify({error: 'no_selected'});
+        })()"""
+
+        raw = await _eval_js(detect_js)
+        result = json.loads(raw) if isinstance(raw, str) else raw
+
+        if result.get("error"):
+            return "当前没有选中任何会话，请先在 SeaTalk 中打开一个聊天。"
+
+        data_id = result["dataId"]
+        chat_name = result.get("name", "")
+
+        # 在 Redux store 中找出这个 session 的类型
+        type_js = f"""(function(){{
+            var s = window.store.getState();
+            var msgMap = (s.messages && s.messages.messages) || {{}};
+            for (var key in msgMap) {{
+                if (key.indexOf('-{data_id}-') >= 0) {{
+                    var parts = key.match(/^(group|buddy)-/);
+                    return parts ? parts[1] : 'unknown';
+                }}
+            }}
+            var lists = (s.messages && s.messages.lists) || {{}};
+            if (lists['group-{data_id}']) return 'group';
+            if (lists['buddy-{data_id}']) return 'buddy';
+            return 'group';
+        }})()"""
+        session_type = await _eval_js(type_js) or "group"
+
+        return await read_seatalk_messages(
+            session_type=session_type,
+            session_id=int(data_id),
+            limit=limit,
+        )
+
+    except Exception as e:
+        return f"读取当前会话失败: {e}"
+
+
+@mcp.tool()
 async def seatalk_eval(
     code: str = "",
 ) -> str:
@@ -673,6 +858,498 @@ async def seatalk_screenshot() -> str:
 
     except Exception as e:
         return f"截图失败: {e}"
+
+
+@mcp.tool()
+async def open_seatalk_link(
+    url: str = "",
+) -> str:
+    """通过 SeaTalk 内部机制打开一个 SeaTalk 消息链接，自动跳转到对应会话和消息。
+
+    支持 link.seatalk.io/message/open?message_id=xxx 格式的链接。
+    使用 SeaTalk 的 app-link-click 事件处理内部导航，不会弹框或卡死。
+
+    打开后可用 read_current_chat 读取跳转后的会话消息。
+
+    Args:
+        url: SeaTalk 消息链接 (https://link.seatalk.io/message/open?message_id=xxx)
+    """
+    if not url:
+        return "请提供 url 参数"
+
+    err = _check_cdp_available()
+    if err:
+        return err
+
+    try:
+        safe_url = json.dumps(url)
+        js_code = f"""(function(){{
+            try {{
+                window.dispatchEvent(new CustomEvent('app-link-click', {{
+                    detail: {{ url: {safe_url} }}
+                }}));
+                return JSON.stringify({{ok: true, url: {safe_url}}});
+            }} catch(e) {{
+                return JSON.stringify({{error: e.message}});
+            }}
+        }})()"""
+
+        raw = await _eval_js(js_code)
+        result = json.loads(raw) if isinstance(raw, str) else raw
+
+        if result.get("error"):
+            return f"打开链接失败: {result['error']}"
+
+        # 等待导航完成
+        import asyncio as _asyncio
+        await _asyncio.sleep(2)
+
+        # 读取跳转后的会话信息
+        session_js = """(function(){
+            var s = window.store.getState();
+            var sess = s.messages.selectedSession;
+            if (!sess) return JSON.stringify({error: 'no session'});
+            var name = '';
+            if (sess.type === 'group') {
+                var gi = (s.contact.groupInfo || {})[sess.id];
+                name = gi ? (gi.name || '') : 'group-' + sess.id;
+            } else {
+                var ui = (s.contact.userInfo || {})[sess.id];
+                name = ui ? (ui.name || '') : 'user-' + sess.id;
+            }
+            return JSON.stringify({type: sess.type, id: sess.id, name: name});
+        })()"""
+
+        sess_raw = await _eval_js(session_js)
+        sess = json.loads(sess_raw) if isinstance(sess_raw, str) else sess_raw
+
+        if sess.get("error"):
+            return f"链接已触发跳转，但未检测到当前会话。请稍等片刻后用 read_current_chat 读取。"
+
+        return (
+            f"已跳转到: [{sess.get('type', '')}] {sess.get('name', '')} (id={sess.get('id', '')})\n"
+            f"可以用 read_current_chat 或 query_messages_sqlite 读取消息。"
+        )
+
+    except Exception as e:
+        return f"打开链接失败: {e}"
+
+
+@mcp.tool()
+async def query_messages_sqlite(
+    session_type: str = "group",
+    session_id: int = 0,
+    session_name: str = "",
+    keyword: str = "",
+    limit: int = 30,
+    hours: int = 168,
+) -> str:
+    """通过 SQLite 数据库直接查询 SeaTalk 消息（最强大的消息读取方式）。
+
+    直接查询 SeaTalk 本地 SQLite 数据库，可以读取所有历史消息，
+    不依赖会话是否在当前界面打开，也不依赖 Redux store 内存。
+
+    优先使用此工具而非 read_seatalk_messages，因为 SQLite 包含完整的历史消息。
+
+    Args:
+        session_type: 会话类型 - "group"(群聊) 或 "buddy"(私聊)
+        session_id: 会话 ID
+        session_name: 会话名称（模糊匹配，优先于 session_id）
+        keyword: 搜索关键词（可选，在消息内容中搜索）
+        limit: 返回消息数量上限，默认30
+        hours: 搜索时间范围（小时），默认168（7天）
+    """
+    err = _check_cdp_available()
+    if err:
+        return err
+
+    # 如果给了名字，先查找 session_id
+    if session_name and not session_id:
+        search_result = await _eval_js(f"""(function(){{
+            var s = window.store.getState();
+            var gi = (s.contact && s.contact.groupInfo) || {{}};
+            var ui = (s.contact && s.contact.userInfo) || {{}};
+            var keyword = {json.dumps(session_name)}.toLowerCase();
+            var matches = [];
+            for (var gid in gi) {{
+                var name = (gi[gid].name || '').toLowerCase();
+                if (name.indexOf(keyword) >= 0) {{
+                    matches.push({{type:'group', id:parseInt(gid), name:gi[gid].name}});
+                }}
+            }}
+            for (var uid in ui) {{
+                var name = (ui[uid].name || '').toLowerCase();
+                if (name.indexOf(keyword) >= 0) {{
+                    matches.push({{type:'buddy', id:parseInt(uid), name:ui[uid].name}});
+                }}
+            }}
+            return JSON.stringify(matches.slice(0, 5));
+        }})()""")
+        matches = json.loads(search_result) if isinstance(search_result, str) else search_result
+        if not matches:
+            return f"未找到匹配 '{session_name}' 的会话"
+        if len(matches) > 1:
+            lines = [f"找到 {len(matches)} 个匹配，请指定 session_id:\n"]
+            for m in matches:
+                lines.append(f"  [{m['type']}] {m['name']} (id={m['id']})")
+            return "\n".join(lines)
+        session_type = matches[0]["type"]
+        session_id = matches[0]["id"]
+
+    if not session_id:
+        return "请提供 session_id 或 session_name"
+
+    import time
+    min_ts = int(time.time()) - hours * 3600
+    sid = f"{session_type}-{session_id}"
+    safe_keyword = json.dumps(f"%{keyword}%") if keyword else '""'
+
+    js_code = f"""(function(){{
+        if (!window.sqlite || typeof window.sqlite.all !== 'function')
+            return JSON.stringify({{error: 'sqlite not available'}});
+
+        var args = {{
+            sid: {json.dumps(sid)},
+            limit: {limit},
+            minTs: {min_ts},
+            keyword: {safe_keyword}
+        }};
+
+        var sql = 'SELECT mid, u, c, t, ts, rtmid, q FROM chat_message WHERE sid = ? AND ts > ?';
+        var sqlArgs = [args.sid, args.minTs];
+
+        if (args.keyword) {{
+            sql += ' AND c LIKE ?';
+            sqlArgs.push(args.keyword);
+        }}
+
+        sql += ' ORDER BY ts DESC LIMIT ?';
+        sqlArgs.push(args.limit);
+
+        return window.sqlite.all(sql, sqlArgs).then(function(rows) {{
+            var st = window.store.getState();
+            var info = st.contact.userInfo;
+            var groups = st.contact.groupInfo;
+
+            var userId = st.login && st.login.userid;
+            var gfsToken = '';
+            var imgEls = document.querySelectorAll("img[src*='f.haiserve.com']");
+            for (var ti = 0; ti < imgEls.length; ti++) {{
+                var tm = imgEls[ti].src.match(/token=([a-f0-9]+)/);
+                if (tm) {{ gfsToken = tm[1]; break; }}
+            }}
+
+            var sessName = '';
+            var parts = args.sid.split('-');
+            if (parts[0] === 'group') {{
+                var g = groups[parts[1]];
+                sessName = g ? g.name : args.sid;
+            }} else {{
+                var u = info[parts[1]];
+                sessName = u ? u.name : args.sid;
+            }}
+
+            var messages = [];
+            for (var i = rows.length - 1; i >= 0; i--) {{
+                var m = rows[i];
+                var parsed;
+                try {{ parsed = JSON.parse(m.c); }} catch(_) {{ continue; }}
+                var text = '';
+                if (typeof parsed.c === 'string') text = parsed.c;
+                else if (typeof parsed.text === 'string') text = parsed.text;
+                else if (parsed.c && typeof parsed.c === 'object' && parsed.c.text) text = String(parsed.c.text);
+                if (!text && parsed.e && Array.isArray(parsed.e)) {{
+                    text = parsed.e.map(function(el) {{ return el.tx || ''; }}).filter(Boolean).join('\\n');
+                }}
+                text = String(text || '');
+                var sender = info[m.u];
+                var name = sender ? sender.name : String(m.u);
+                var tag = m.t || 'text';
+                var mediaUrl = null;
+                if ((tag === 'image' || tag === 'gif' || tag === 'video' || tag === 'file') && parsed.url && userId && gfsToken) {{
+                    mediaUrl = 'https://f.haiserve.com/download/' + parsed.url + '?userid=' + userId + '&token=' + gfsToken + '&exact=true';
+                }}
+                var mediaInfo = null;
+                if (tag === 'image' || tag === 'gif') {{
+                    mediaInfo = {{w: parsed.w, h: parsed.h, size: parsed.s}};
+                }} else if (tag === 'file') {{
+                    mediaInfo = {{name: parsed.n || parsed.name || '', size: parsed.s}};
+                }}
+                var quote = null;
+                if (m.q) {{
+                    try {{
+                        var qp = JSON.parse(m.q);
+                        var qSender = info[qp.u || qp.senderId];
+                        var qText = '';
+                        if (qp.c) {{
+                            try {{
+                                var qParsed = JSON.parse(qp.c);
+                                qText = typeof qParsed.c === 'string' ? qParsed.c : (typeof qParsed === 'string' ? qParsed : '');
+                            }} catch(_) {{ qText = String(qp.c); }}
+                        }}
+                        quote = {{sender: qSender ? qSender.name : '', text: String(qText).substring(0, 100)}};
+                    }} catch(_) {{}}
+                }}
+                messages.push({{
+                    mid: m.mid,
+                    sender: name,
+                    text: text.substring(0, 2000),
+                    tag: tag,
+                    ts: m.ts,
+                    isThread: m.rtmid && m.rtmid !== '0',
+                    mediaUrl: mediaUrl,
+                    mediaInfo: mediaInfo,
+                    quote: quote
+                }});
+            }}
+            return JSON.stringify({{
+                sessionName: sessName,
+                sid: args.sid,
+                total: rows.length,
+                messages: messages
+            }});
+        }});
+    }})()"""
+
+    try:
+        raw = await _eval_js(js_code)
+        data = json.loads(raw) if isinstance(raw, str) else raw
+
+        if isinstance(data, dict) and data.get("error"):
+            if "sqlite not available" in data["error"]:
+                return (
+                    "SQLite 不可用。这可能是因为 SeaTalk 刚启动还未完全加载。\n"
+                    "请稍等几秒后重试，或使用 read_seatalk_messages 从 Redux 内存读取。"
+                )
+            return f"查询失败: {data['error']}"
+
+        session_label = data.get("sessionName", sid)
+        prefix = "[群]" if session_type == "group" else "[私]"
+
+        TAG_MAP = {
+            "image": "[图片]", "gif": "[GIF]", "file": "[文件]",
+            "video": "[视频]", "sticker": "[贴纸]", "audio": "[语音]",
+            "interactive": "[卡片]", "history": "[转发]",
+        }
+
+        lines = [
+            f"{prefix} {session_label} (id={session_id})",
+            f"共 {data.get('total', 0)} 条消息 (SQLite 查询，最近 {hours}h)\n",
+            "─" * 50,
+        ]
+
+        for msg in data.get("messages", []):
+            ts_str = datetime.fromtimestamp(msg["ts"], tz=TZ8).strftime("%m-%d %H:%M:%S") if msg.get("ts") else ""
+            sender = msg.get("sender", "?")
+            tag = msg.get("tag", "text")
+            tag_label = (TAG_MAP.get(tag, f"[{tag}]") + " ") if tag != "text" else ""
+            thread_mark = " [Thread]" if msg.get("isThread") else ""
+
+            quote_line = ""
+            if msg.get("quote"):
+                q = msg["quote"]
+                quote_line = f"  (回复 {q['sender']}: \"{q['text'][:50]}\")"
+
+            media_line = ""
+            if msg.get("mediaUrl"):
+                mi = msg.get("mediaInfo") or {}
+                if tag in ("image", "gif"):
+                    dim = f" ({mi.get('w', '?')}x{mi.get('h', '?')}, {_fmt_size(mi.get('size', 0))})" if mi else ""
+                    media_line = f"  ↳ 图片{dim}: {msg['mediaUrl']}"
+                elif tag == "file":
+                    fname = mi.get("name", "") if mi else ""
+                    fsize = f" ({_fmt_size(mi.get('size', 0))})" if mi and mi.get("size") else ""
+                    media_line = f"  ↳ 文件 {fname}{fsize}: {msg['mediaUrl']}"
+                elif tag == "video":
+                    media_line = f"  ↳ 视频: {msg['mediaUrl']}"
+
+            text = msg.get("text", "").replace("\n", "\n    ")
+            lines.append(f"{ts_str} {sender}: {tag_label}{text}{thread_mark}")
+            if quote_line:
+                lines.append(quote_line)
+            if media_line:
+                lines.append(media_line)
+
+        return "\n".join(lines)
+
+    except Exception as e:
+        return f"SQLite 查询失败: {e}"
+
+
+@mcp.tool()
+async def download_seatalk_image(
+    image_url: str = "",
+    session_type: str = "group",
+    session_id: int = 0,
+    message_mid: str = "",
+    limit: int = 5,
+) -> str:
+    """下载 SeaTalk 聊天中的图片到本地，返回本地文件路径。
+
+    下载后可以用 Read 工具读取图片文件，让 AI 理解图片内容。
+
+    三种使用方式（按优先级）：
+    1. 提供 image_url — 直接下载（从 query_messages_sqlite 返回的 ↳ 图片 URL）
+    2. 提供 session_type + session_id — 自动查找该会话最近的图片消息并下载
+    3. 都不提供 — 自动查找当前打开会话的最近图片
+
+    Args:
+        image_url: 图片的完整 GFS 下载 URL（从 query_messages_sqlite 结果获取）
+        session_type: 会话类型 "group" 或 "buddy"
+        session_id: 会话 ID
+        message_mid: 指定消息的 mid（精确下载某条消息的图片）
+        limit: 最多下载几张图片（默认5，仅在自动查找模式生效）
+    """
+    import time as _time
+    import base64 as _base64
+    import urllib.request
+
+    DOWNLOAD_DIR = os.path.expanduser("~/.seatalk-mcp-images")
+    os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+
+    err = _check_cdp_available()
+    if err:
+        return err
+
+    async def _get_gfs_credentials() -> tuple:
+        """从 SeaTalk 页面获取 userId 和 GFS token"""
+        cred_js = (
+            "(function(){"
+            "var s = window.store.getState();"
+            "var userId = s.login && s.login.userid;"
+            "var token = '';"
+            "var imgs = document.querySelectorAll('img[src*=\"f.haiserve.com\"]');"
+            "for (var i = 0; i < imgs.length; i++) {"
+            "var m = imgs[i].src.match(/token=([a-f0-9]+)/);"
+            "if (m) { token = m[1]; break; }"
+            "}"
+            "return JSON.stringify({userId: String(userId || ''), token: token});"
+            "})()"
+        )
+        raw = await _eval_js(cred_js)
+        creds = json.loads(raw) if isinstance(raw, str) else raw
+        return creds.get("userId", ""), creds.get("token", "")
+
+    def _download_one(url: str, filename: str) -> str:
+        """下载单张图片，返回本地路径"""
+        filepath = os.path.join(DOWNLOAD_DIR, filename)
+        req = urllib.request.Request(url, headers={"User-Agent": "SeaTalk-MCP/1.0"})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = resp.read()
+        with open(filepath, "wb") as f:
+            f.write(data)
+        return filepath
+
+    # ── 方式1: 直接提供 URL ──
+    if image_url:
+        try:
+            ts = int(_time.time())
+            filename = f"img_{ts}.png"
+            filepath = _download_one(image_url, filename)
+            size = os.path.getsize(filepath)
+            return (
+                f"图片已下载: {filepath}\n"
+                f"大小: {_fmt_size(size)}\n\n"
+                f"请用 Read 工具读取此文件来查看图片内容。"
+            )
+        except Exception as e:
+            return f"下载失败: {e}"
+
+    # ── 方式2/3: 从 SQLite 查找图片消息 ──
+    userId, gfsToken = await _get_gfs_credentials()
+    if not userId or not gfsToken:
+        return "无法获取 GFS 凭证（userId 或 token 为空），请确保 SeaTalk 页面已完全加载。"
+
+    # 确定 session
+    sid = ""
+    if session_id:
+        sid = f"{session_type}-{session_id}"
+    else:
+        sess_js = """(function(){
+            var sess = window.store.getState().messages.selectedSession;
+            if (!sess) return JSON.stringify({error: 'no session'});
+            return JSON.stringify({type: sess.type, id: sess.id});
+        })()"""
+        sess_raw = await _eval_js(sess_js)
+        sess = json.loads(sess_raw) if isinstance(sess_raw, str) else sess_raw
+        if sess.get("error"):
+            return "未找到当前会话，请提供 session_type 和 session_id。"
+        sid = f"{sess['type']}-{sess['id']}"
+
+    # 查询图片消息
+    mid_filter = f"AND mid = '{message_mid}'" if message_mid else ""
+    find_js = f"""(function(){{
+        if (!window.sqlite) return JSON.stringify({{error: 'sqlite not available'}});
+        return window.sqlite.all(
+            "SELECT mid, c, ts FROM chat_message WHERE sid = ? AND t = 'image' {mid_filter} ORDER BY ts DESC LIMIT ?",
+            ['{sid}', {limit}]
+        ).then(function(rows) {{
+            var results = [];
+            for (var i = 0; i < rows.length; i++) {{
+                try {{
+                    var p = JSON.parse(rows[i].c);
+                    results.push({{
+                        mid: rows[i].mid,
+                        ts: rows[i].ts,
+                        url: p.url || '',
+                        w: p.w || 0,
+                        h: p.h || 0,
+                        s: p.s || 0
+                    }});
+                }} catch(_) {{}}
+            }}
+            return JSON.stringify(results);
+        }});
+    }})()"""
+
+    try:
+        raw = await _eval_js(find_js)
+        images = json.loads(raw) if isinstance(raw, str) else raw
+    except Exception as e:
+        return f"查询图片消息失败: {e}"
+
+    if isinstance(images, dict) and images.get("error"):
+        return f"查询失败: {images['error']}"
+
+    if not images:
+        return f"在 {sid} 中未找到图片消息。"
+
+    # 逐张下载
+    downloaded = []
+    for img in images:
+        if not img.get("url"):
+            continue
+        dl_url = f"https://f.haiserve.com/download/{img['url']}?userid={userId}&token={gfsToken}&exact=true"
+        ts_str = datetime.fromtimestamp(img["ts"], tz=TZ8).strftime("%m%d_%H%M%S") if img.get("ts") else str(int(_time.time()))
+        filename = f"img_{ts_str}_{img['mid'][-6:]}.png"
+        try:
+            filepath = _download_one(dl_url, filename)
+            size = os.path.getsize(filepath)
+            downloaded.append({
+                "path": filepath,
+                "mid": img["mid"],
+                "size": size,
+                "w": img.get("w", 0),
+                "h": img.get("h", 0),
+            })
+        except Exception as e:
+            downloaded.append({"mid": img["mid"], "error": str(e)})
+
+    if not downloaded:
+        return "未找到可下载的图片。"
+
+    lines = [f"已下载 {len([d for d in downloaded if 'path' in d])}/{len(downloaded)} 张图片:\n"]
+    for d in downloaded:
+        if "path" in d:
+            lines.append(
+                f"  {d['path']}\n"
+                f"    尺寸: {d['w']}x{d['h']}, 大小: {_fmt_size(d['size'])}"
+            )
+        else:
+            lines.append(f"  [失败] mid={d['mid']}: {d.get('error', 'unknown')}")
+
+    lines.append(f"\n请用 Read 工具读取上述图片文件来查看内容。")
+    return "\n".join(lines)
 
 
 # ═══════════════════════════════════════════════════════════════

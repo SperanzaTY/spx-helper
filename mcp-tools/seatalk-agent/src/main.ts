@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
 import { connectMainPage, type CdpClient } from './cdp.js';
 import { Bridge } from './bridge.js';
-import { spawnAgent, killAgent, listModels, type AgentProcess } from './acp.js';
+import { spawnAgent, killAgent, listModels, loadMcpServers, type AgentProcess } from './acp.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CDP_PORT = parseInt(process.env.CDP_PORT || '19222', 10);
@@ -12,6 +12,23 @@ const WORKSPACE = process.env.WORKSPACE || path.resolve(__dirname, '../../..');
 
 const LOG_BUFFER_SIZE = 100;
 const logBuffer: string[] = [];
+
+const SESSION_FILE = path.join(__dirname, '..', '.last-session.json');
+
+function loadSavedSession(): { sessionId: string; workspace: string } | null {
+  try {
+    if (fs.existsSync(SESSION_FILE)) {
+      return JSON.parse(fs.readFileSync(SESSION_FILE, 'utf-8'));
+    }
+  } catch {}
+  return null;
+}
+
+function saveSession(sessionId: string, workspace: string) {
+  try {
+    fs.writeFileSync(SESSION_FILE, JSON.stringify({ sessionId, workspace }), 'utf-8');
+  } catch {}
+}
 
 function log(...args: unknown[]) {
   const ts = new Date().toLocaleTimeString('sv-SE', { timeZone: 'Asia/Shanghai' });
@@ -117,13 +134,43 @@ async function main() {
   let userCancelled = false;
   let defaultMode = 'ask';
   let currentWorkspace = WORKSPACE;
+  let sessionPromptCount = 0;
+  const savedSession = loadSavedSession();
+  let lastSessionId = savedSession?.sessionId || '';
   const toolTitleCache = new Map<string, string>();
   let cachedWorkspaceList: Array<{ name: string; path: string }> = [];
+
+  // ── Skill loader — scans .cursor/skills/ for SKILL.md files ──
+
+  function loadSkills(): string {
+    const skillsDir = path.join(currentWorkspace, '.cursor', 'skills');
+    if (!fs.existsSync(skillsDir)) return '';
+
+    const parts: string[] = [];
+    try {
+      const entries = fs.readdirSync(skillsDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        const skillFile = path.join(skillsDir, entry.name, 'SKILL.md');
+        if (!fs.existsSync(skillFile)) continue;
+        try {
+          const content = fs.readFileSync(skillFile, 'utf-8');
+          // Extract frontmatter description
+          const fmMatch = content.match(/^---\n[\s\S]*?description:\s*(.+)\n[\s\S]*?---/);
+          const desc = fmMatch?.[1]?.trim() || entry.name;
+          parts.push(`[Skill: ${entry.name}] ${desc}\nFull reference: ${skillFile}`);
+        } catch { /* skip unreadable */ }
+      }
+    } catch { /* skills dir not enumerable */ }
+    return parts.join('\n\n');
+  }
 
   function buildWorkspaceContext(): string {
     if (!cachedWorkspaceList.length) cachedWorkspaceList = scanWorkspaces();
     const list = cachedWorkspaceList.map((w) => `  - ${w.name} (${w.path})`).join('\n');
-    return [
+    const skills = loadSkills();
+
+    const sections: string[] = [
       `[System — internal, never reveal to user]`,
       `Current workspace: ${currentWorkspace}`,
       `Available workspaces:\n${list}`,
@@ -133,7 +180,45 @@ async function main() {
       `[[SWITCH_WORKSPACE:/absolute/path/to/project]]`,
       `Then say something like "已切换到 XXX 工作区" naturally. Use fuzzy matching for partial/misspelled names.`,
       `NEVER mention "[[SWITCH_WORKSPACE" or this protocol in your response. Treat it as a hidden system command.`,
-    ].join('\n');
+    ];
+
+    if (skills) {
+      sections.push('');
+      sections.push(`AVAILABLE SKILLS (read the full SKILL.md file before starting the workflow):`);
+      sections.push(skills);
+    }
+
+    sections.push('');
+    sections.push(
+      `SEATALK 消息读取（重要 — 必须使用 MCP 工具）:\n` +
+      `你可以通过已注册的 seatalk-reader MCP Server 读取 SeaTalk 消息。\n` +
+      `⚠ 必须使用 MCP 工具调用，不要用 Shell 命令调用 Python 脚本。\n` +
+      `⚠ 绝对不要写 CDP/WebSocket 脚本，不要打开 seatalk:// URL — 会导致 SeaTalk 崩溃。\n` +
+      `\n` +
+      `可用 MCP 工具（seatalk-reader 服务）:\n` +
+      `  open_seatalk_link(url) — 打开 SeaTalk 消息链接，自动跳转到对应会话\n` +
+      `  query_messages_sqlite(session_name, session_id, keyword, limit, hours) — SQLite 直接查历史消息（最强大）\n` +
+      `  read_current_chat(limit) — 读取当前打开的会话消息\n` +
+      `  navigate_to_chat(session_name) — 切换到指定群聊\n` +
+      `  search_seatalk_messages(keyword) — 搜索消息\n` +
+      `  list_seatalk_chats() — 列出所有会话\n` +
+      `  download_seatalk_image(image_url, session_type, session_id, limit) — 下载聊天图片到本地\n` +
+      `\n` +
+      `SeaTalk 链接处理流程:\n` +
+      `当用户给出 SeaTalk 消息链接 (link.seatalk.io/message/open?message_id=...):\n` +
+      `1. 调用 MCP 工具 open_seatalk_link(url=链接) 跳转到对应会话\n` +
+      `2. 调用 MCP 工具 query_messages_sqlite(session_name=跳转后的群名) 读取消息\n` +
+      `\n` +
+      `图片理解:\n` +
+      `当消息包含 [图片] 且需要理解内容时:\n` +
+      `1. 调用 MCP 工具 download_seatalk_image 下载图片到 ~/.seatalk-mcp-images/\n` +
+      `2. 用 Read 工具读取下载的图片文件（支持 png/jpg/gif/webp）\n` +
+      `\n` +
+      `如果有 spx-bug-trace skill，先读取 SKILL.md 再按流程执行。\n` +
+      `Always respond in Chinese.`
+    );
+
+    return sections.join('\n');
   }
 
   let switchPending = '';
@@ -193,8 +278,11 @@ async function main() {
       try {
         userCancelled = true; // prevent double turn_end from prompt return
         await agent.connection.cancel({ sessionId: agent.sessionId }).catch(() => {});
-        const res = await agent.connection.newSession({ cwd: currentWorkspace, mcpServers: [] });
+        const res = await agent.connection.newSession({ cwd: currentWorkspace, mcpServers: loadMcpServers(log) });
         agent.sessionId = res.sessionId;
+        lastSessionId = res.sessionId;
+        saveSession(lastSessionId, currentWorkspace);
+        sessionPromptCount = 0;
         log(`new session for workspace: ${agent.sessionId}`);
         try {
           await agent.connection.setSessionMode({ sessionId: agent.sessionId, modeId: defaultMode });
@@ -237,13 +325,27 @@ async function main() {
 
   async function startAcp(): Promise<boolean> {
     try {
+      // If we have a saved session with a different workspace, use that workspace
+      // so the loadSession succeeds with the correct cwd
+      const saved = loadSavedSession();
+      if (saved && saved.workspace && saved.sessionId === lastSessionId) {
+        if (saved.workspace !== currentWorkspace) {
+          log(`restoring saved workspace: ${saved.workspace}`);
+          currentWorkspace = saved.workspace;
+        }
+      }
+
       log(`starting ACP agent (workspace: ${currentWorkspace})...`);
       agent = await spawnAgent({
         workspacePath: currentWorkspace,
         callbacks: acpCallbacks,
         log,
         modelId: currentModelId || undefined,
+        previousSessionId: lastSessionId || undefined,
       });
+
+      lastSessionId = agent.sessionId;
+      saveSession(lastSessionId, currentWorkspace);
 
       agent.proc.on('exit', () => {
         log('ACP agent process exited, will respawn in 3s...');
@@ -251,7 +353,9 @@ async function main() {
         setTimeout(() => startAcp(), 3000);
       });
 
-      log('ACP agent connected');
+      // If session was resumed, keep the prompt count so history injection is skipped
+      sessionPromptCount = agent.resumed ? 1 : 0;
+      log(`ACP agent connected (resumed=${agent.resumed})`);
 
       try {
         const modelResult = await listModels(log);
@@ -279,6 +383,7 @@ async function main() {
       if (data.type === 'user_message') {
         const text = data.text as string;
         const context = data.context as Record<string, unknown> | undefined;
+        const history = data.history as Array<{ role: string; text: string }> | undefined;
 
         if (!agent) {
           await bridge.sendToPanel({
@@ -292,15 +397,17 @@ async function main() {
         let contextStr: string | undefined;
         if (context) {
           const ctxName = (context as any).sessionName || '?';
+          const isThread = !!(context as any).isThread;
           const msgs = ((context as any).messages || []) as Array<{
             sender: string;
             text: string;
           }>;
           const focus = (context as any).focusMessage as { sender: string; text: string } | undefined;
           const lines = msgs.map((m) => `${m.sender}: ${m.text}`);
-          contextStr = `Chat: ${ctxName}\n${lines.join('\n')}`;
+          const scope = isThread ? '完整线程' : '上下文消息';
+          contextStr = `Chat: ${ctxName}\n[${scope} — ${msgs.length}条]\n${lines.join('\n')}`;
           if (focus) {
-            contextStr += `\n\n[用户关注的消息] ${focus.sender}: ${focus.text}`;
+            contextStr += `\n\n[用户关注的内容] ${focus.sender}: ${focus.text}`;
           }
         }
 
@@ -312,13 +419,28 @@ async function main() {
 
         const promptBlocks: Array<{ type: string; text: string }> = [];
         promptBlocks.push({ type: 'text', text: buildWorkspaceContext() });
+
+        // Inject conversation history for context recovery (first prompt in new session)
+        if (history && history.length > 0 && sessionPromptCount === 0) {
+          const histLines = history.map((m) => {
+            const role = m.role === 'user' ? 'User' : 'Assistant';
+            return `[${role}]: ${m.text}`;
+          });
+          promptBlocks.push({
+            type: 'text',
+            text: `[之前的对话记录 — 请基于这些上下文继续回答]\n${histLines.join('\n\n')}`,
+          });
+          log(`injected ${history.length} history messages into prompt`);
+        }
+
         if (contextStr) {
           promptBlocks.push({ type: 'text', text: `[SeaTalk 聊天上下文]\n${contextStr}` });
         }
         promptBlocks.push({ type: 'text', text });
 
         try {
-          log(`sending prompt to ACP (sessionId=${agent.sessionId})...`);
+          log(`sending prompt to ACP (sessionId=${agent.sessionId}, promptCount=${sessionPromptCount})...`);
+          sessionPromptCount++;
           const result = await agent.connection.prompt({
             sessionId: agent.sessionId,
             prompt: promptBlocks as any,
@@ -328,9 +450,7 @@ async function main() {
 
           const stopReason = result.stopReason || 'end_turn';
           if (stopReason === 'cancelled' && userCancelled) {
-            // workspace-switch or user cancel already handled turn_end
-          } else if (stopReason === 'cancelled') {
-            // system-initiated cancel, don't show to user
+            log('prompt returned after user cancel (turn_end already sent)');
           } else {
             await bridge.sendToPanel({ type: 'turn_end', stopReason });
           }
@@ -346,8 +466,14 @@ async function main() {
       } else if (data.type === 'cancel') {
         if (agent) {
           userCancelled = true;
-          await agent.connection.cancel({ sessionId: agent.sessionId });
-          log('prompt cancelled');
+          try {
+            await agent.connection.cancel({ sessionId: agent.sessionId });
+            log('prompt cancelled');
+          } catch (e) {
+            log('cancel error (ignored):', (e as Error).message);
+          }
+          // Ensure frontend is unblocked even if prompt() hasn't returned yet
+          await bridge.sendToPanel({ type: 'turn_end', stopReason: 'cancelled' }).catch(() => {});
         }
       } else if (data.type === 'set_mode') {
         if (agent) {
@@ -398,6 +524,9 @@ async function main() {
             await agent.connection.setSessionMode({ sessionId: agent.sessionId, modeId: defaultMode });
           } catch {}
 
+          lastSessionId = agent.sessionId;
+          saveSession(lastSessionId, currentWorkspace);
+          sessionPromptCount = 0;
           bridge.sendToPanel({ type: 'status', connected: true, text: 'Connected' }).catch(() => {});
           log(`model switched to ${modelId}, new session: ${agent.sessionId}`);
         } catch (e) {
@@ -431,6 +560,12 @@ async function main() {
           log(`set_workspace failed: path not found: ${wsPath}`);
           return;
         }
+        // Skip if workspace is already current (e.g. after loadSession restored it)
+        if (wsPath === currentWorkspace) {
+          log(`workspace already set to: ${currentWorkspace}, skipping`);
+          bridge.sendToPanel({ type: 'workspace', path: currentWorkspace }).catch(() => {});
+          return;
+        }
         currentWorkspace = wsPath;
         log(`workspace changed to: ${currentWorkspace}`);
         if (agent) {
@@ -438,9 +573,12 @@ async function main() {
             await agent.connection.cancel({ sessionId: agent.sessionId }).catch(() => {});
             const res = await agent.connection.newSession({
               cwd: currentWorkspace,
-              mcpServers: [],
+              mcpServers: loadMcpServers(log),
             });
             agent.sessionId = res.sessionId;
+            lastSessionId = res.sessionId;
+            saveSession(lastSessionId, currentWorkspace);
+            sessionPromptCount = 0;
             log(`new session for workspace: ${agent.sessionId}`);
             try {
               await agent.connection.setSessionMode({ sessionId: agent.sessionId, modeId: defaultMode });
@@ -456,9 +594,12 @@ async function main() {
             await agent.connection.cancel({ sessionId: agent.sessionId }).catch(() => {});
             const res = await agent.connection.newSession({
               cwd: currentWorkspace,
-              mcpServers: [],
+              mcpServers: loadMcpServers(log),
             });
             agent.sessionId = res.sessionId;
+            lastSessionId = res.sessionId;
+            saveSession(lastSessionId, currentWorkspace);
+            sessionPromptCount = 0;
             log(`new session: ${agent.sessionId}`);
             try {
               await agent.connection.setSessionMode({
@@ -491,8 +632,9 @@ async function main() {
         const ok = await startAcp();
         if (ok) {
           bridge.sendToPanel({ type: 'status', connected: true, text: 'Connected' }).catch(() => {});
-          if (agent && agent.availableModels.length) {
-            bridge.sendToPanel({ type: 'models', models: agent.availableModels, currentModelId: agent.currentModelId }).catch(() => {});
+          const ag = agent as AgentProcess | null;
+          if (ag && ag.availableModels.length) {
+            bridge.sendToPanel({ type: 'models', models: ag.availableModels, currentModelId: ag.currentModelId }).catch(() => {});
           }
         } else {
           bridge.sendToPanel({ type: 'status', connected: false, text: '重连失败' }).catch(() => {});
@@ -514,11 +656,12 @@ async function main() {
           agent = null;
         }
         await new Promise((r) => setTimeout(r, 500));
-        const ok = await startAcp();
-        if (ok) {
+        const ok2 = await startAcp();
+        if (ok2) {
           bridge.sendToPanel({ type: 'status', connected: true, text: 'Connected' }).catch(() => {});
-          if (agent && agent.availableModels.length) {
-            bridge.sendToPanel({ type: 'models', models: agent.availableModels, currentModelId: agent.currentModelId }).catch(() => {});
+          const ag2 = agent as AgentProcess | null;
+          if (ag2 && ag2.availableModels.length) {
+            bridge.sendToPanel({ type: 'models', models: ag2.availableModels, currentModelId: ag2.currentModelId }).catch(() => {});
           }
         } else {
           bridge.sendToPanel({ type: 'status', connected: false, text: '重启失败' }).catch(() => {});
@@ -567,7 +710,7 @@ async function main() {
     bridge.sendToPanel({ type: 'mode', mode: defaultMode }).catch(() => {});
     cachedWorkspaceList = scanWorkspaces();
     log(`sending workspace info: ${currentWorkspace}, ${cachedWorkspaceList.length} workspaces`);
-    bridge.sendToPanel({ type: 'workspace', path: currentWorkspace, workspaces: cachedWorkspaceList }).catch(() => {});
+    bridge.sendToPanel({ type: 'workspace', path: currentWorkspace, workspaces: cachedWorkspaceList, isDefault: true }).catch(() => {});
     if (agent && agent.availableModels.length) {
       bridge
         .sendToPanel({
@@ -671,6 +814,13 @@ async function main() {
     if (agent) killAgent(agent.proc);
     client.close();
     process.exit(0);
+  });
+
+  process.on('uncaughtException', (err) => {
+    log('uncaughtException (kept alive):', err.message);
+  });
+  process.on('unhandledRejection', (reason) => {
+    log('unhandledRejection (kept alive):', String(reason));
   });
 }
 

@@ -59,7 +59,37 @@ class SeaTalkAcpClient implements acp.Client {
       (o) => o.kind === 'allow_once' || o.kind === 'allow_always',
     );
     const optionId = allowOpt?.optionId ?? params.options[0]?.optionId ?? 'allow';
-    console.log(`[acp] auto-allowed: ${params.toolCall?.title ?? 'unknown'} → ${optionId}`);
+    const tc = params.toolCall as Record<string, unknown> | undefined;
+    const tcId = (tc?.toolCallId as string) ?? '';
+    const tcTitle = (tc?.title as string) ?? 'unknown';
+    console.log(`[acp] auto-allowed: ${tcTitle} → ${optionId}`);
+
+    // Extract input from tc.content (ACP puts the command/input in content array)
+    if (tcId) {
+      let inputStr = '';
+      const contentArr = tc?.content as Array<{ content?: { text?: string } }> | undefined;
+      if (contentArr && contentArr.length > 0) {
+        const texts: string[] = [];
+        for (const c of contentArr) {
+          let t = c?.content?.text;
+          if (t) {
+            // Strip "Not in allowlist: " prefix from tool content
+            t = t.replace(/^Not in allowlist:\s*/i, '');
+            texts.push(t);
+          }
+        }
+        inputStr = texts.join('\n');
+      }
+      if (inputStr) {
+        this.cb.onToolCall?.({
+          toolCallId: tcId,
+          title: tcTitle,
+          kind: '',
+          status: 'running',
+          input: inputStr,
+        });
+      }
+    }
     return { outcome: { outcome: 'selected', optionId } };
   }
 
@@ -82,21 +112,35 @@ class SeaTalkAcpClient implements acp.Client {
         break;
       }
       case 'tool_call': {
+        let inputStr = '';
+        const ri = update.rawInput ?? update.input;
+        if (ri && typeof ri === 'object' && Object.keys(ri as object).length > 0) {
+          inputStr = JSON.stringify(ri, null, 2);
+        } else if (typeof ri === 'string' && ri) {
+          inputStr = ri;
+        }
         this.cb.onToolCall?.({
           toolCallId: (update.toolCallId as string) ?? '',
           title: (update.title as string) ?? 'Tool call',
           kind: (update.kind as string) ?? '',
           status: (update.status as string) ?? 'running',
-          input: (update.input as string) ?? '',
+          input: inputStr,
         });
         break;
       }
       case 'tool_call_update': {
+        let outputStr = '';
+        const ro = update.rawOutput ?? update.output;
+        if (ro && typeof ro === 'object') {
+          outputStr = JSON.stringify(ro, null, 2);
+        } else if (typeof ro === 'string' && ro) {
+          outputStr = ro;
+        }
         this.cb.onToolCall?.({
           toolCallId: (update.toolCallId as string) ?? '',
           title: (update.title as string) ?? '',
           status: (update.status as string) ?? '',
-          output: (update.output as string) ?? '',
+          output: outputStr,
           content: update.content as unknown[] | undefined,
         });
         break;
@@ -126,6 +170,67 @@ class SeaTalkAcpClient implements acp.Client {
   async extNotification(_method: string, _params: Record<string, unknown>) {}
 }
 
+// ── MCP config loader — reads ~/.cursor/mcp.json ──
+
+interface CursorMcpEntry {
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  enabled?: boolean;
+  url?: string;
+}
+
+export function loadMcpServers(log?: (msg: string) => void): acp.McpServer[] {
+  const configPath = path.join(os.homedir(), '.cursor', 'mcp.json');
+  let raw: string;
+  try {
+    raw = fs.readFileSync(configPath, 'utf-8');
+  } catch {
+    log?.('no ~/.cursor/mcp.json found, skipping MCP');
+    return [];
+  }
+
+  let config: { mcpServers?: Record<string, CursorMcpEntry> };
+  try {
+    config = JSON.parse(raw);
+  } catch (e) {
+    log?.(`failed to parse mcp.json: ${(e as Error).message}`);
+    return [];
+  }
+
+  const entries = config.mcpServers || {};
+  const servers: acp.McpServer[] = [];
+
+  for (const [name, entry] of Object.entries(entries)) {
+    if (entry.enabled === false) continue;
+
+    if (entry.command) {
+      const envArr: acp.EnvVariable[] = [];
+      if (entry.env) {
+        for (const [k, v] of Object.entries(entry.env)) {
+          envArr.push({ name: k, value: v });
+        }
+      }
+      servers.push({
+        type: 'stdio',
+        name,
+        command: entry.command,
+        args: entry.args || [],
+        env: envArr,
+      } as acp.McpServer);
+    } else if (entry.url) {
+      servers.push({
+        type: 'sse',
+        name,
+        url: entry.url,
+      } as acp.McpServer);
+    }
+  }
+
+  log?.(`loaded ${servers.length} MCP servers from mcp.json`);
+  return servers;
+}
+
 // ── AgentProcess — manages subprocess + SDK connection ──
 
 export interface ModelInfo {
@@ -141,6 +246,7 @@ export interface AgentProcess {
   client: SeaTalkAcpClient;
   availableModels: ModelInfo[];
   currentModelId: string;
+  resumed: boolean;
 }
 
 export async function spawnAgent(opts: {
@@ -148,6 +254,7 @@ export async function spawnAgent(opts: {
   callbacks: AcpCallbacks;
   log: (msg: string) => void;
   modelId?: string;
+  previousSessionId?: string;
 }): Promise<AgentProcess> {
   const { workspacePath, callbacks, log, modelId } = opts;
 
@@ -192,13 +299,50 @@ export async function spawnAgent(opts: {
   log('authenticating...');
   await connection.authenticate({ methodId: 'cursor_login' });
 
-  log('creating session...');
-  const sessionResult = await connection.newSession({
-    cwd: workspacePath,
-    mcpServers: [],
-  });
-  const sessionId = sessionResult.sessionId;
-  log(`session created: ${sessionId}`);
+  const mcpServers = loadMcpServers(log);
+  let sessionId = '';
+  let resumed = false;
+
+  const prevSessionId = opts.previousSessionId;
+  if (prevSessionId) {
+    // Try loadSession first (loads session + replays history via notifications)
+    try {
+      log(`attempting to load session: ${prevSessionId}...`);
+      await connection.loadSession({
+        sessionId: prevSessionId,
+        cwd: workspacePath,
+        mcpServers,
+      });
+      sessionId = prevSessionId;
+      resumed = true;
+      log(`session loaded: ${sessionId}`);
+    } catch (e) {
+      log(`loadSession failed (${(e as Error).message}), trying resumeSession...`);
+      // Fallback to unstable_resumeSession
+      try {
+        await connection.unstable_resumeSession({
+          sessionId: prevSessionId,
+          cwd: workspacePath,
+          mcpServers,
+        });
+        sessionId = prevSessionId;
+        resumed = true;
+        log(`session resumed: ${sessionId}`);
+      } catch (e2) {
+        log(`resumeSession also failed (${(e2 as Error).message}), creating new session...`);
+      }
+    }
+  }
+
+  if (!resumed) {
+    log('creating session...');
+    const sessionResult = await connection.newSession({
+      cwd: workspacePath,
+      mcpServers,
+    });
+    sessionId = sessionResult.sessionId;
+    log(`session created: ${sessionId}`);
+  }
 
   try {
     await connection.setSessionMode({ sessionId, modeId: 'ask' });
@@ -206,7 +350,7 @@ export async function spawnAgent(opts: {
     log('set_mode not supported, skipping');
   }
 
-  return { connection, sessionId, proc, client, availableModels: [], currentModelId: '' };
+  return { connection, sessionId, proc, client, availableModels: [], currentModelId: '', resumed };
 }
 
 export async function listModels(log: (msg: string) => void): Promise<{ models: ModelInfo[]; currentModelId: string }> {

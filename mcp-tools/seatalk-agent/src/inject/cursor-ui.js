@@ -2,6 +2,31 @@
 // No dependency on seatalk-enhance / window.__helper
 (function () {
 
+  // ── Load marked.js for proper GFM Markdown rendering ──
+  var markedLoaded = typeof marked !== 'undefined';
+  if (!markedLoaded) {
+    (function loadMarked() {
+      var s = document.createElement('script');
+      s.src = 'https://cdn.jsdelivr.net/npm/marked@15/marked.min.js';
+      s.onload = function () {
+        markedLoaded = true;
+        if (window.marked) window.marked.setOptions({ breaks: true, gfm: true });
+        console.log('[cursor-ui] marked.js loaded');
+      };
+      s.onerror = function () {
+        var s2 = document.createElement('script');
+        s2.src = 'https://unpkg.com/marked@15/marked.min.js';
+        s2.onload = function () {
+          markedLoaded = true;
+          if (window.marked) window.marked.setOptions({ breaks: true, gfm: true });
+          console.log('[cursor-ui] marked.js loaded (fallback)');
+        };
+        document.head.appendChild(s2);
+      };
+      document.head.appendChild(s);
+    })();
+  }
+
   function escapeHtml(s) {
     return String(s == null ? '' : s)
       .replace(/&/g, '&amp;')
@@ -60,7 +85,7 @@
     '  border-radius:10px; box-shadow:0 8px 32px rgba(0,0,0,0.5);',
     '  backdrop-filter:blur(16px); -webkit-backdrop-filter:blur(16px);',
     '  font-family:-apple-system,BlinkMacSystemFont,sans-serif;',
-    '  display:flex; flex-direction:column;',
+    '  display:flex; flex-direction:column; overflow:hidden;',
     '  opacity:0; transform:translateY(8px); transition:opacity .2s, transform .2s;',
     '}',
     '.hp-panel.show { opacity:1; transform:translateY(0); }',
@@ -79,14 +104,24 @@
     '.hp-panel-body { padding:10px 14px; display:flex; flex-direction:column; gap:8px; overflow-y:auto; flex:1; min-height:0; }',
     '.hp-panel-body::-webkit-scrollbar { width:4px; }',
     '.hp-panel-body::-webkit-scrollbar-thumb { background:rgba(255,255,255,0.12); border-radius:2px; }',
-    '.hp-panel-resize {',
-    '  position:absolute; bottom:0; left:10%; right:10%; height:6px;',
-    '  cursor:ns-resize; border-radius:0 0 10px 10px;',
+    '.hp-panel-resize-n { position:absolute; top:0; left:10px; right:10px; height:4px; cursor:ns-resize; z-index:5; }',
+    '.hp-panel-resize-s { position:absolute; bottom:0; left:10px; right:10px; height:4px; cursor:ns-resize; z-index:5; }',
+    '.hp-panel-resize-w { position:absolute; top:10px; bottom:10px; left:0; width:4px; cursor:ew-resize; z-index:5; }',
+    '.hp-panel-resize-e { position:absolute; top:10px; bottom:10px; right:0; width:4px; cursor:ew-resize; z-index:5; }',
+    '.hp-panel-resize-nw { position:absolute; top:0; left:0; width:10px; height:10px; cursor:nwse-resize; z-index:6; }',
+    '.hp-panel-resize-ne { position:absolute; top:0; right:0; width:10px; height:10px; cursor:nesw-resize; z-index:6; }',
+    '.hp-panel-resize-sw { position:absolute; bottom:0; left:0; width:10px; height:10px; cursor:nesw-resize; z-index:6; }',
+    '.hp-panel-resize-se { position:absolute; bottom:0; right:0; width:10px; height:10px; cursor:nwse-resize; z-index:6; }',
+    '.hp-panel.docked {',
+    '  position:relative !important; border-radius:0; transition:none; overflow:hidden;',
+    '  left:auto !important; top:auto !important; height:auto !important;',
+    '  flex-shrink:0; border:none; border-left:1px solid rgba(255,255,255,0.08);',
+    '  box-shadow:none; opacity:1 !important; transform:none !important;',
+    '  text-align:left;',
     '}',
-    '.hp-panel-resize-corner {',
-    '  position:absolute; bottom:0; right:0; width:16px; height:16px;',
-    '  cursor:nwse-resize; border-radius:0 0 10px 0;',
-    '}',
+    '.hp-panel.docked .hp-panel-resize-n,.hp-panel.docked .hp-panel-resize-s,.hp-panel.docked .hp-panel-resize-e,' +
+    '.hp-panel.docked .hp-panel-resize-nw,.hp-panel.docked .hp-panel-resize-ne,.hp-panel.docked .hp-panel-resize-sw,.hp-panel.docked .hp-panel-resize-se { display:none; }',
+    '.hp-panel.docked .hp-panel-resize-w { top:0; bottom:0; left:0; width:4px; cursor:ew-resize; }',
     // Sidebar button
     '.cursor-sidebar-btn {',
     '  width:40px; height:40px; display:flex; align-items:center; justify-content:center;',
@@ -96,7 +131,7 @@
     '.cursor-sidebar-btn:hover { background:rgba(255,255,255,0.08); }',
     '.cursor-sidebar-btn.active { background:rgba(77,150,255,0.18); }',
     '.cursor-sidebar-btn svg { width:22px; height:22px; }',
-    // Tooltip
+    // Tooltip (always dark since it floats globally)
     '.cursor-tooltip {',
     '  position:fixed; z-index:2147483647; pointer-events:none;',
     '  background:#252526; border:1px solid #3c3c3c; border-radius:6px;',
@@ -156,7 +191,12 @@
 
     var html = '<div class="hp-panel-header"><span class="hp-panel-title">' + (opts.title || '') + '</span><span class="hp-panel-close">\u2715</span></div>';
     html += '<div class="hp-panel-body">' + (opts.content || '') + '</div>';
-    if (resizable) html += '<div class="hp-panel-resize"></div><div class="hp-panel-resize-corner"></div>';
+    if (resizable) {
+      html += '<div class="hp-panel-resize-n"></div><div class="hp-panel-resize-s"></div>';
+      html += '<div class="hp-panel-resize-w"></div><div class="hp-panel-resize-e"></div>';
+      html += '<div class="hp-panel-resize-nw"></div><div class="hp-panel-resize-ne"></div>';
+      html += '<div class="hp-panel-resize-sw"></div><div class="hp-panel-resize-se"></div>';
+    }
     panel.innerHTML = html;
 
     layer.appendChild(panel);
@@ -185,31 +225,52 @@
       document.removeEventListener('mouseup', onDragEnd);
     });
 
-    // Resize
+    // Resize — supports all edges and corners
     if (resizable) {
       var resizeState = null;
-      var resizeBar = panel.querySelector('.hp-panel-resize');
-      var resizeCorner = panel.querySelector('.hp-panel-resize-corner');
+      var MIN_W = 320, MAX_W = 900, MIN_H = 250;
+      var edges = ['n', 's', 'w', 'e', 'nw', 'ne', 'sw', 'se'];
       function onResizeMove(e) {
         if (!resizeState) return;
-        var newH = Math.max(300, Math.min(window.innerHeight * 0.85, resizeState.origH + e.clientY - resizeState.startY));
-        panel.style.height = newH + 'px';
-        if (resizeState.resizeW) {
-          var newW = Math.max(320, Math.min(700, resizeState.origW + e.clientX - resizeState.startX));
+        var dx = e.clientX - resizeState.startX;
+        var dy = e.clientY - resizeState.startY;
+        var dir = resizeState.dir;
+        if (isDocked) {
+          // Docked: only w handle active, drag left edge to resize width
+          var newW = Math.max(MIN_W, Math.min(MAX_W, resizeState.origW - dx));
           panel.style.width = newW + 'px';
+          return;
         }
+        var newW = resizeState.origW, newH = resizeState.origH;
+        var newLeft = resizeState.origLeft, newTop = resizeState.origTop;
+        if (dir.indexOf('e') >= 0) newW = Math.max(MIN_W, Math.min(MAX_W, resizeState.origW + dx));
+        if (dir.indexOf('w') >= 0) { newW = Math.max(MIN_W, Math.min(MAX_W, resizeState.origW - dx)); newLeft = resizeState.origLeft + (resizeState.origW - newW); }
+        if (dir.indexOf('s') >= 0) newH = Math.max(MIN_H, Math.min(window.innerHeight - 20, resizeState.origH + dy));
+        if (dir.indexOf('n') >= 0) { newH = Math.max(MIN_H, Math.min(window.innerHeight - 20, resizeState.origH - dy)); newTop = resizeState.origTop + (resizeState.origH - newH); }
+        panel.style.width = newW + 'px';
+        panel.style.height = newH + 'px';
+        panel.style.left = newLeft + 'px';
+        panel.style.top = newTop + 'px';
       }
       function onResizeEnd() {
-        if (resizeState) { resizeState = null; savePanelSize(opts.sizeKey, panel.offsetWidth, panel.offsetHeight); }
+        if (!resizeState) return;
+        resizeState = null;
+        if (isDocked) {
+          try { localStorage.setItem(DOCK_W_KEY, '' + panel.offsetWidth); } catch (_) {}
+        } else {
+          savePanelSize(opts.sizeKey, panel.offsetWidth, panel.offsetHeight);
+        }
       }
-      resizeBar.addEventListener('mousedown', function (e) {
-        resizeState = { startX: e.clientX, startY: e.clientY, origW: panel.offsetWidth, origH: panel.offsetHeight, resizeW: false };
-        e.preventDefault(); e.stopPropagation();
-      });
-      resizeCorner.addEventListener('mousedown', function (e) {
-        resizeState = { startX: e.clientX, startY: e.clientY, origW: panel.offsetWidth, origH: panel.offsetHeight, resizeW: true };
-        e.preventDefault(); e.stopPropagation();
-      });
+      for (var ei = 0; ei < edges.length; ei++) {
+        (function(dir) {
+          var handle = panel.querySelector('.hp-panel-resize-' + dir);
+          if (!handle) return;
+          handle.addEventListener('mousedown', function (e) {
+            resizeState = { dir: dir, startX: e.clientX, startY: e.clientY, origW: panel.offsetWidth, origH: panel.offsetHeight, origLeft: panel.offsetLeft, origTop: panel.offsetTop };
+            e.preventDefault(); e.stopPropagation();
+          });
+        })(edges[ei]);
+      }
       document.addEventListener('mousemove', onResizeMove);
       document.addEventListener('mouseup', onResizeEnd);
       cleanupFns.push(function () {
@@ -220,6 +281,13 @@
 
     // Close
     function close() {
+      if (isDocked) {
+        // Move back to layer before removing so SeaTalk layout restores
+        panel.style.position = 'fixed';
+        panel.style.flexShrink = '';
+        layer.appendChild(panel);
+        isDocked = false;
+      }
       panel.classList.remove('show');
       setTimeout(function () { if (panel.parentNode) panel.parentNode.removeChild(panel); }, 200);
       for (var i = 0; i < cleanupFns.length; i++) cleanupFns[i]();
@@ -238,10 +306,80 @@
       setTimeout(function () { document.addEventListener('mousedown', closeDocHandler, true); }, 0);
     }
 
+    var isDocked = false;
+    var floatState = null;
+    var DOCK_W_KEY = 'cursor_panel_dock_w';
+
+    function findDockHost() {
+      return document.querySelector('.home-main-window.hbox') ||
+             document.querySelector('.home-main-window');
+    }
+
+    function dock() {
+      if (isDocked) return;
+      var host = findDockHost();
+      if (!host) { console.warn('[cursor-ui] dock host not found'); return; }
+      floatState = { left: panel.style.left, top: panel.style.top, width: panel.style.width, height: panel.style.height, parent: panel.parentNode };
+      var savedDockW = 420;
+      try { var v = localStorage.getItem(DOCK_W_KEY); if (v) savedDockW = parseInt(v) || 420; } catch (_) {}
+      var dockW = Math.max(320, Math.min(700, savedDockW));
+
+      panel.style.position = 'relative';
+      panel.style.left = '';
+      panel.style.top = '';
+      panel.style.width = dockW + 'px';
+      panel.style.height = '';
+      panel.style.flexShrink = '0';
+      panel.classList.add('docked');
+      host.appendChild(panel);
+
+      isDocked = true;
+      try { localStorage.setItem('cursor_panel_docked', '1'); } catch (_) {}
+      try { localStorage.setItem(DOCK_W_KEY, '' + dockW); } catch (_) {}
+    }
+
+    function undock() {
+      if (!isDocked) return;
+      panel.classList.remove('docked');
+      panel.style.position = 'fixed';
+      panel.style.flexShrink = '';
+      var parent = (floatState && floatState.parent) || layer;
+      parent.appendChild(panel);
+      if (floatState) {
+        panel.style.left = floatState.left;
+        panel.style.top = floatState.top;
+        panel.style.width = floatState.width;
+        panel.style.height = floatState.height;
+      } else {
+        panel.style.width = panelW + 'px';
+        panel.style.height = panelH + 'px';
+        panel.style.left = (window.innerWidth - panelW - 16) + 'px';
+        panel.style.top = (window.innerHeight - panelH - 40) + 'px';
+      }
+      isDocked = false;
+      try { localStorage.setItem('cursor_panel_docked', '0'); } catch (_) {}
+    }
+
+    // Save dock width on resize end when docked
+    var origOnResizeEnd = null;
+    if (resizable) {
+      var _origSave = savePanelSize;
+      cleanupFns.push(function () {
+        if (isDocked) undock();
+      });
+    }
+
+    // Auto-dock if was docked last time
+    try { if (localStorage.getItem('cursor_panel_docked') === '1') { setTimeout(dock, 100); } } catch (_) {}
+
     var handle = {
       el: panel,
       body: panel.querySelector('.hp-panel-body'),
       close: close,
+      dock: dock,
+      undock: undock,
+      isDocked: function () { return isDocked; },
+      toggleDock: function () { isDocked ? undock() : dock(); },
       setTitle: function (t) {
         var titleEl = panel.querySelector('.hp-panel-title');
         if (titleEl) titleEl.innerHTML = t;
@@ -283,17 +421,79 @@
   // ── Streaming renderer ──
   var streaming = {
     renderMarkdown: function (text) {
-      if (typeof marked !== 'undefined') {
-        try { return sanitizeHtml(marked.parse(text, { breaks: true })); } catch (_) {}
+      if (typeof marked !== 'undefined' && marked.parse) {
+        try {
+          var html = marked.parse(text, { breaks: true, gfm: true });
+          return sanitizeHtml(html);
+        } catch (_) {}
       }
+      // Fallback: basic regex-based rendering
       var s = escapeHtml(text);
       s = s.replace(/```(\w*)\n([\s\S]*?)```/g, function (_, lang, code) {
         return '<pre><code>' + code + '</code></pre>';
       });
+      // Simple table rendering for GFM tables
+      s = s.replace(/((?:^\|.+\|$\n?)+)/gm, function(tableBlock) {
+        var rows = tableBlock.trim().split('\n');
+        if (rows.length < 2) return tableBlock;
+        var html = '<table>';
+        for (var ri = 0; ri < rows.length; ri++) {
+          var row = rows[ri].trim();
+          if (/^\|[\s:|-]+\|$/.test(row)) continue; // skip separator row
+          var cells = row.split('|').filter(function(c, idx, arr) { return idx > 0 && idx < arr.length - 1; });
+          var tag = ri === 0 ? 'th' : 'td';
+          html += '<tr>';
+          for (var ci = 0; ci < cells.length; ci++) {
+            html += '<' + tag + '>' + cells[ci].trim() + '</' + tag + '>';
+          }
+          html += '</tr>';
+        }
+        html += '</table>';
+        return html;
+      });
       s = s.replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
-      s = s.replace(/`([^`]+)`/g, '<code style="background:rgba(255,255,255,0.08);padding:1px 4px;border-radius:3px;font-size:12px">$1</code>');
+      s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
+      s = s.replace(/^---$/gm, '<hr>');
+      s = s.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
       s = s.replace(/\n/g, '<br>');
       return s;
+    },
+
+    maskSecrets: function (text) {
+      return String(text || '')
+        .replace(/(TOKEN|SECRET|PASSWORD|KEY|CREDENTIAL|API_KEY)=('[^']*'|"[^"]*"|[^\s&;]+)/gi, function(_, k, v) {
+          return k + '=***';
+        })
+        .replace(/(token|password|secret|apikey|api_key)["']?\s*[:=]\s*["']?[A-Za-z0-9+/=]{8,}["']?/gi, function(m) {
+          return m.substring(0, m.indexOf('=') + 1) + '***';
+        });
+    },
+
+    friendlyToolName: function (tc) {
+      var name = tc.name || '';
+      var desc = (tc.tool && tc.tool.action_description) || '';
+      var kind = (tc.tool && tc.tool.kind) || tc.kind || '';
+
+      var toolTypeMap = {
+        'Terminal': 'Terminal',
+        'Shell': 'Shell',
+        'Read File': 'Read File',
+        'Write File': 'Write File',
+        'Edit File': 'Edit File',
+        'Find': 'Search',
+        'Grep': 'Search',
+        'List MCP Resources': 'MCP Resources',
+        'List Directory': 'List Dir'
+      };
+
+      // tc.name for shell commands is the full command string — detect and simplify
+      if (!toolTypeMap[name] && name.length > 40) {
+        // Likely a raw shell command string — show as "Shell"
+        return { type: 'Shell', detail: desc || '' };
+      }
+
+      var friendlyType = toolTypeMap[name] || name;
+      return { type: friendlyType, detail: desc && desc !== name ? desc : '' };
     },
 
     renderToolCallHTML: function (tc, opts) {
@@ -301,25 +501,33 @@
       var prefix = opts.prefix || 'hs';
       var truncLen = opts.truncateLen || 500;
       var toggleAttr = opts.toggleAttr || 'tool-call';
-      var desc = (tc.tool && tc.tool.action_description) || tc.name || 'tool';
-      var label = '\u{1f527} ' + escapeHtml(tc.name || 'tool');
-      if (desc !== tc.name) label += ' \u2014 ' + escapeHtml(desc);
-      if (tc.result) label += ' \u2705';
+      var isCompleted = tc.status === 'completed' || !!tc.result;
+      var isError = tc.status === 'error';
+      var statusIcon = isCompleted ? '\u2705' : isError ? '\u274c' : '\u23f3';
+      var friendly = streaming.friendlyToolName(tc);
+      var label = statusIcon + ' ' + escapeHtml(friendly.type);
+      if (friendly.detail) label += ' <span style="opacity:0.6">\u2014 ' + escapeHtml(friendly.detail) + '</span>';
+      if (!isCompleted && !isError) label += ' <span style="opacity:0.5;font-size:10px">running...</span>';
       var body = '';
       if (tc.arguments) {
-        try { body += '<div class="' + prefix + '-tool-call-section"><b>Args:</b> ' + escapeHtml(JSON.stringify(JSON.parse(tc.arguments), null, 2)) + '</div>'; }
-        catch (_) { body += '<div class="' + prefix + '-tool-call-section"><b>Args:</b> ' + escapeHtml(tc.arguments) + '</div>'; }
+        var argsDisplay = streaming.maskSecrets(tc.arguments);
+        try { argsDisplay = JSON.stringify(JSON.parse(argsDisplay), null, 2); } catch (_) {}
+        if (argsDisplay.length > 1000) argsDisplay = argsDisplay.substring(0, 1000) + '\n...';
+        body += '<div class="' + prefix + '-tool-call-section"><b>Input:</b><pre style="margin:4px 0 0;white-space:pre-wrap;word-break:break-all;font-size:11px;color:var(--cp-tool-input,#9cdcfe)">' + escapeHtml(argsDisplay) + '</pre></div>';
       }
       if (tc.result) {
+        var resultDisplay = tc.result;
         try {
-          var r = JSON.parse(tc.result);
-          var rt = r.result || JSON.stringify(r, null, 2);
-          if (rt.length > truncLen) rt = rt.substring(0, truncLen) + '...';
-          body += '<div class="' + prefix + '-tool-call-section"><b>Result:</b> ' + escapeHtml(rt) + '</div>';
-        } catch (_) {
-          var rt2 = tc.result.length > truncLen ? tc.result.substring(0, truncLen) + '...' : tc.result;
-          body += '<div class="' + prefix + '-tool-call-section"><b>Result:</b> ' + escapeHtml(rt2) + '</div>';
-        }
+          var parsed = JSON.parse(tc.result);
+          resultDisplay = parsed.result || JSON.stringify(parsed, null, 2);
+        } catch (_) {}
+        resultDisplay = streaming.maskSecrets(resultDisplay);
+        if (resultDisplay.length > truncLen) resultDisplay = resultDisplay.substring(0, truncLen) + '\n...';
+        body += '<div class="' + prefix + '-tool-call-section"><b>Output:</b><pre style="margin:4px 0 0;white-space:pre-wrap;word-break:break-all;font-size:11px;color:var(--cp-tool-output,#b5cea8)">' + escapeHtml(resultDisplay) + '</pre></div>';
+      }
+      // If no body content, don't render the expandable container at all
+      if (!body) {
+        return '<div class="' + prefix + '-tool-call-label">' + label + '</div>';
       }
       var bodyClass = opts.collapsed !== false ? prefix + '-tool-call-body' : prefix + '-tool-call-body open';
       return '<div class="' + prefix + '-tool-call-label" data-toggle="' + toggleAttr + '">' + label + '</div>' +
@@ -333,9 +541,10 @@
         if (labels[i]._bound) continue;
         labels[i]._bound = true;
         labels[i].addEventListener('click', function () {
-          var body = this.nextElementSibling;
-          if (body) {
-            var inner = body.querySelector('.' + prefix + '-tool-call-body');
+          var wrapper = this.nextElementSibling;
+          if (wrapper) {
+            var inner = wrapper.querySelector('.' + prefix + '-tool-call-body');
+            if (!inner) inner = wrapper.classList.contains(prefix + '-tool-call-body') ? wrapper : null;
             if (inner) inner.classList.toggle('open');
           }
         });
@@ -412,13 +621,17 @@
             removeTyping();
             var elId = prefix + '-tc-' + (evt.toolCall.id || '').replace(/[^a-zA-Z0-9]/g, '');
             var el = toolCallEls[elId];
+            var wasOpen = false;
             if (!el) {
               el = document.createElement('div');
               el.id = elId;
               container.appendChild(el);
               toolCallEls[elId] = el;
+            } else {
+              var existingBody = el.querySelector('.' + prefix + '-tool-call-body');
+              wasOpen = existingBody && existingBody.classList.contains('open');
             }
-            el.innerHTML = streaming.renderToolCallHTML(evt.toolCall, { prefix: prefix, truncateLen: truncLen, toggleAttr: toggleAttr, collapsed: false });
+            el.innerHTML = streaming.renderToolCallHTML(evt.toolCall, { prefix: prefix, truncateLen: truncLen, toggleAttr: toggleAttr, collapsed: !wasOpen });
             streaming.bindToolCallToggle(el, prefix, toggleAttr);
           }
           if (evt.type === 'text') {
@@ -437,6 +650,13 @@
           if (thinkText && thinkBodyEl) {
             thinkBodyEl.classList.add('collapsed');
             thinkLabelEl.textContent = '\u{1f4ad} thought (' + Math.round(thinkText.length / 4) + ' tokens) \u25b6';
+          }
+          for (var tcKey in toolCallEls) {
+            var tcEl = toolCallEls[tcKey];
+            if (tcEl) {
+              var tcBody = tcEl.querySelector('.' + prefix + '-tool-call-body');
+              if (tcBody) tcBody.classList.remove('open');
+            }
           }
         },
 
