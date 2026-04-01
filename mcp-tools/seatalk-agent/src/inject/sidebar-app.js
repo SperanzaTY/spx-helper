@@ -960,6 +960,7 @@
         if (!turnView && !turnEl) return;
         endTurn(d.stopReason);
       } else if (d.type === 'status') {
+        var wasDisconnected = !cachedStatus.connected;
         cachedStatus = { connected: !!d.connected, text: d.text || (d.connected ? 'Connected' : 'Disconnected') };
         if (statusDot) statusDot.className = 'cursor-status-dot ' + (cachedStatus.connected ? 'on' : 'off');
         if (statusText) statusText.textContent = cachedStatus.text;
@@ -969,6 +970,12 @@
           else { rcBtn.classList.add('show'); rcBtn.textContent = '重连'; }
         }
         updateSidebarBtnStatus();
+        // After update restart: detect reconnection and auto-close update overlay
+        if (wasDisconnected && cachedStatus.connected && updateOverlay && updateOverlay.classList.contains('show')) {
+          appendUpdateProgress('✅ Agent 已重新连接！更新成功。');
+          if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: 'update_check' }));
+          setTimeout(function () { updateOverlay.classList.remove('show'); }, 3000);
+        }
       } else if (d.type === 'logs') {
         showLogsOverlay(d.lines || []);
       } else if (d.type === 'diagnostics') {
