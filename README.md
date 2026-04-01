@@ -251,27 +251,30 @@ npm install
 
 #### 步骤 2：一键安装（推荐）
 
-运行安装脚本，自动配置 SeaTalk 自启动 + Agent 自动注入：
-
 ```bash
 bash install.sh
 ```
 
-安装完成后，在终端输入 `seatalk` 即可一键启动（自动带 CDP 调试端口 + 自动注入 Agent）：
+安装完成后会配置：
+- **CDP 守护进程**（开机自启）：持续监听 SeaTalk 进程，**无论怎么打开 SeaTalk（双击/Dock/Spotlight），都会自动启用 CDP 端口**。用户不用关心 CDP 是什么
+- **`seatalk` 命令**：在终端输入即可一键启动 SeaTalk + Agent
 
 ```bash
+# 安装后，推荐用这个命令启动 SeaTalk + Agent
 seatalk
 ```
+
+> 安装后即使直接双击 SeaTalk 图标打开，CDP 守护进程也会自动在后台将其重启为 CDP 模式（SeaTalk 会闪一下然后正常使用），之后只需 `npm start` 启动 Agent 即可。
 
 > 卸载：`bash install.sh uninstall`
 
 #### 步骤 2（备选）：手动启动
 
-如果不想用安装脚本，可以手动启动：
+如果不想用安装脚本：
 
 ```bash
 # 1. 先完全退出 SeaTalk（Cmd+Q）
-# 2. 启动 Agent（会自动拉起 SeaTalk 并注入）
+# 2. 启动 Agent（会自动以 CDP 模式拉起 SeaTalk 并注入）
 npm start
 ```
 
@@ -285,7 +288,7 @@ npm start
 [xx:xx:xx] [agent] injection complete!
 ```
 
-> `npm start` 会自动检测 SeaTalk 是否以 CDP 模式运行，如果没有会自动启动它。
+> 注意：如果没有运行 `install.sh`，直接双击打开 SeaTalk 不会启用 CDP 端口，需要手动用 `open -a SeaTalk --args --remote-debugging-port=19222` 启动。
 
 #### 步骤 3：使用
 
@@ -296,11 +299,33 @@ npm start
 #### SeaTalk Agent 常见问题
 
 <details>
-<summary>连接 SeaTalk 失败？</summary>
+<summary>SeaTalk 打开了但看不到 Cursor 面板？</summary>
 
-1. 确认 SeaTalk 是以 `--remote-debugging-port=19222` 参数启动的
-2. 在浏览器访问 http://127.0.0.1:19222/json 确认可以连接
-3. 确保没有其他程序占用 19222 端口
+1. 确认已运行过 `bash install.sh`（CDP 守护进程会自动处理 CDP 模式）
+2. 确认 Agent 在运行：终端执行 `seatalk` 或 `cd seatalk-agent && npm start`
+3. 验证 CDP 是否生效：`curl -s http://127.0.0.1:19222/json`，应返回 JSON
+4. 如果 CDP 没开启且未安装守护进程，手动执行：
+   - `pkill -x SeaTalk`
+   - `open -a SeaTalk --args --remote-debugging-port=19222`
+
+</details>
+
+<details>
+<summary>SeaTalk 启动后会闪一下？</summary>
+
+这是 CDP 守护进程在工作 — 它检测到 SeaTalk 没有开启 CDP 端口，会自动重启它。这只在首次打开时发生一次，之后正常使用。
+
+</details>
+
+<details>
+<summary>终端一直显示 "waiting for SeaTalk..."？</summary>
+
+说明 Agent 连不上 SeaTalk 的 CDP 端口：
+
+1. 确认 SeaTalk 正在运行
+2. 确认是以 CDP 模式启动的：`curl -s http://127.0.0.1:19222/json` 应返回 JSON
+3. 如果返回 "连接被拒绝" 且已安装守护进程，检查守护进程日志：`cat ~/.seatalk-agent/logs/cdp-daemon.log`
+4. 确保没有其他程序占用 19222 端口：`lsof -i :19222`
 
 </details>
 
@@ -308,8 +333,15 @@ npm start
 <summary>Agent 启动但面板没有出现？</summary>
 
 1. 检查终端输出是否有 `injection complete!`
-2. 如果有错误，尝试重新启动 SeaTalk 和 Agent
-3. 在面板的设置菜单中点击 "重新注入 UI"
+2. 如果显示 `skipping injection (agent UI already present)`，说明 UI 已注入但可能被隐藏了，点击 SeaTalk 窗口右侧的紫色图标
+3. 如果有错误，尝试完全退出 SeaTalk 和 Agent 后重新启动
+
+</details>
+
+<details>
+<summary>每次都要从终端启动很麻烦？</summary>
+
+运行 `bash install.sh` 后，只需在终端输入 `seatalk` 一个命令即可完成所有启动。也可以将 `seatalk` 命令设置为开机自启。
 
 </details>
 

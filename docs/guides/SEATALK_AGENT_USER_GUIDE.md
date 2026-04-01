@@ -36,11 +36,17 @@ cd spx-helper/seatalk-agent
 # 2. 安装依赖
 npm install
 
-# 3. 一键安装（自动配置开机启动 + seatalk 命令别名）
+# 3. 一键安装
 bash install.sh
 ```
 
-安装完成后，重新打开终端，输入 `seatalk` 即可启动。
+安装完成后，**重新打开终端**（让 shell 配置生效），输入 `seatalk` 即可启动。
+
+安装脚本会配置：
+- **CDP 守护进程**（开机自启）：持续监听 SeaTalk 进程，**无论怎么打开 SeaTalk（双击/Dock/Spotlight），都会自动启用 CDP 端口**
+- **`seatalk` 命令**：终端一键启动 SeaTalk + Agent
+
+> 安装后你可以用任何方式打开 SeaTalk（双击、Dock、Spotlight 都可以），CDP 守护进程会自动处理。
 
 ### 卸载
 
@@ -52,12 +58,14 @@ bash install.sh uninstall
 
 ## 启动
 
+### 方式一：使用 `seatalk` 命令（推荐）
+
 ```bash
 seatalk
 ```
 
 这个命令会自动：
-1. 启动 SeaTalk 客户端（带调试端口）
+1. 以 CDP 模式启动 SeaTalk 客户端
 2. 连接 SeaTalk 页面
 3. 注入 AI 侧边栏
 4. 连接 Cursor Agent
@@ -65,11 +73,47 @@ seatalk
 看到以下日志说明启动成功：
 
 ```
+[agent] SeaTalk launched with --remote-debugging-port=19222
 [agent] connected: SeaTalk (https://web.haiserve.com/)
 [agent] SPA ready
 [agent] injection complete!
 [agent] ACP agent connected
 ```
+
+### 方式二：直接打开 SeaTalk（需先运行过 install.sh）
+
+如果你已经运行过 `install.sh`，可以用任何方式打开 SeaTalk（双击图标、Dock、Spotlight）。CDP 守护进程会在后台自动将其重启为 CDP 模式（SeaTalk 会闪一下）。然后启动 Agent：
+
+```bash
+cd spx-helper/seatalk-agent
+npm start
+```
+
+### 方式三：手动分步启动（未安装守护进程）
+
+如果没有运行过 `install.sh`：
+
+```bash
+# 1. 先完全退出 SeaTalk（Cmd+Q 或 pkill SeaTalk）
+
+# 2. 以 CDP 模式打开 SeaTalk
+open -a SeaTalk --args --remote-debugging-port=19222
+
+# 3. 等 SeaTalk 打开后，启动 Agent
+cd spx-helper/seatalk-agent
+npm start
+```
+
+### 验证 CDP 是否生效
+
+如果不确定 SeaTalk 是否以 CDP 模式运行，在终端执行：
+
+```bash
+curl -s http://127.0.0.1:19222/json
+```
+
+- 返回 JSON 数据 → CDP 已启用，可以启动 Agent
+- 返回"连接被拒绝" → CDP 未启用，参考上面的启动方式
 
 ---
 
@@ -359,11 +403,23 @@ AI 的回复中你会看到：
 
 ## 常见问题
 
-### 面板打不开
+### SeaTalk 打开了但看不到 Cursor 面板
 
-1. 确认 `seatalk` 命令已启动且日志显示 `injection complete!`
-2. 检查 SeaTalk 是否以调试模式启动（终端输入 `curl http://localhost:19222/json` 应有返回）
-3. 设置菜单 → **重新注入 UI**
+1. 确认已运行过 `bash install.sh`（安装 CDP 守护进程，自动处理 CDP 模式）
+2. 确认 Agent 在运行：终端执行 `seatalk` 或 `cd seatalk-agent && npm start`
+3. 如果还是不行，验证 CDP 是否生效：`curl -s http://127.0.0.1:19222/json`
+4. 如果 CDP 没开启且未安装守护进程，手动退出 SeaTalk 后执行：`open -a SeaTalk --args --remote-debugging-port=19222`
+
+### SeaTalk 启动后会闪一下
+
+这是正常现象。CDP 守护进程检测到 SeaTalk 未开启 CDP 端口时，会自动重启它。只在每次打开 SeaTalk 时发生一次，之后正常使用。
+
+### Agent 日志一直显示 "waiting for SeaTalk..."
+
+1. 确认 SeaTalk 正在运行
+2. `curl -s http://127.0.0.1:19222/json` 应返回 JSON
+3. 如果已安装守护进程，检查日志：`cat ~/.seatalk-agent/logs/cdp-daemon.log`
+4. 确保没有其他程序占用 19222 端口：`lsof -i :19222`
 
 ### AI 没有回应
 
