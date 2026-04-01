@@ -15,6 +15,8 @@
   // ── State ──
   var STORE_KEY = '__cursorConversations';
   var WS_KEY = '__cursorLastWorkspace';
+  var WS_RECENT_KEY = '__cursorRecentWorkspaces';
+  var MAX_RECENT_WS = 10;
   var messages = [];
   var conversations = loadConvs(), currentIdx = -1;
   var MODE_KEY = '__cursorMode';
@@ -356,6 +358,7 @@
     '.cursor-ws-picker-item .ws-info { flex:1; overflow:hidden; }',
     '.cursor-ws-picker-item .ws-name { font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }',
     '.cursor-ws-picker-item .ws-path { font-size:10px; color:var(--cp-text-dim2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }',
+    '.cursor-ws-picker-section { font-size:10px; font-weight:600; color:var(--cp-text-dim2); padding:8px 12px 4px; text-transform:uppercase; letter-spacing:.5px; border-bottom:1px solid var(--cp-border); margin-bottom:2px; }',
 
     // Cursor icon injected into SeaTalk native quick-operation-menu
     '.quick-operation-icon.cursor-qo-icon { color:var(--cp-qo-icon, #a78bfa); transition:color .12s; }',
@@ -1001,11 +1004,15 @@
         if (d.isDefault && savedWs && savedWs !== (d.path || '')) {
           cachedWorkspace = savedWs;
           updateWsLabel();
+          saveRecentWorkspace(savedWs);
           if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: 'set_workspace', path: savedWs }));
         } else {
           cachedWorkspace = d.path || '';
           updateWsLabel();
-          if (cachedWorkspace) { try { localStorage.setItem(WS_KEY, cachedWorkspace); } catch (_) {} }
+          if (cachedWorkspace) {
+            try { localStorage.setItem(WS_KEY, cachedWorkspace); } catch (_) {}
+            saveRecentWorkspace(cachedWorkspace);
+          }
         }
       } else if (d.type === 'usage') {
         updateUsageBadge(d);
@@ -1391,22 +1398,49 @@
 
     function renderWsList(filter) {
       var f = (filter || '').toLowerCase();
-      var items = cachedWorkspaceList.filter(function (w) {
-        return !f || w.name.toLowerCase().indexOf(f) >= 0 || w.path.toLowerCase().indexOf(f) >= 0;
-      });
-      if (items.length === 0 && f) {
+      var recentList = loadRecentWorkspaces();
+      var scannedList = cachedWorkspaceList.slice();
+
+      // Ensure current workspace is in recent list
+      if (cachedWorkspace) {
+        var inRecent = false;
+        for (var ri = 0; ri < recentList.length; ri++) { if (recentList[ri].path === cachedWorkspace) { inRecent = true; break; } }
+        if (!inRecent) {
+          var parts = cachedWorkspace.replace(/\/+$/, '').split('/');
+          recentList.unshift({ name: parts[parts.length - 1] || cachedWorkspace, path: cachedWorkspace });
+        }
+      }
+
+      // Filter
+      function matchFilter(w) { return !f || w.name.toLowerCase().indexOf(f) >= 0 || w.path.toLowerCase().indexOf(f) >= 0; }
+      var filteredRecent = recentList.filter(matchFilter);
+      var recentPaths = {};
+      for (var rj = 0; rj < recentList.length; rj++) recentPaths[recentList[rj].path] = true;
+      var filteredScanned = scannedList.filter(function (w) { return !recentPaths[w.path] && matchFilter(w); });
+
+      // Custom path fallback when nothing matches a search
+      if (filteredRecent.length === 0 && filteredScanned.length === 0 && f) {
         wsPickerList.innerHTML = '<div class="cursor-ws-picker-item" data-path="' + escapeHtml(f) + '"><span class="ws-icon">📂</span><div class="ws-info"><div class="ws-name">Use: ' + escapeHtml(f) + '</div><div class="ws-path">Press Enter or click to use this path</div></div></div>';
         return;
       }
-      var html = '';
-      for (var i = 0; i < items.length; i++) {
-        var w = items[i];
+
+      function renderItem(w) {
         var isCurrent = w.path === cachedWorkspace;
         var act = isCurrent ? ' active' : '';
         var icon = isCurrent ? '✓' : '📁';
-        html += '<div class="cursor-ws-picker-item' + act + '" data-path="' + escapeHtml(w.path) + '"><span class="ws-icon">' + icon + '</span><div class="ws-info"><div class="ws-name">' + escapeHtml(w.name) + '</div><div class="ws-path">' + escapeHtml(w.path) + '</div></div></div>';
+        return '<div class="cursor-ws-picker-item' + act + '" data-path="' + escapeHtml(w.path) + '"><span class="ws-icon">' + icon + '</span><div class="ws-info"><div class="ws-name">' + escapeHtml(w.name) + '</div><div class="ws-path">' + escapeHtml(w.path) + '</div></div></div>';
       }
-      wsPickerList.innerHTML = html || '<div style="text-align:center;padding:20px;color:#5a5a5a;font-size:12px">No workspaces found</div>';
+
+      var html = '';
+      if (filteredRecent.length > 0) {
+        html += '<div class="cursor-ws-picker-section">最近使用</div>';
+        for (var a = 0; a < filteredRecent.length; a++) html += renderItem(filteredRecent[a]);
+      }
+      if (filteredScanned.length > 0) {
+        html += '<div class="cursor-ws-picker-section">本机项目</div>';
+        for (var b = 0; b < filteredScanned.length; b++) html += renderItem(filteredScanned[b]);
+      }
+      wsPickerList.innerHTML = html || '<div style="text-align:center;padding:20px;color:var(--cp-text-dim2);font-size:12px">No workspaces found<br><span style="font-size:10px;margin-top:4px;display:inline-block">点击「浏览...」选择项目文件夹，或在搜索框输入路径后按 Enter</span></div>';
     }
 
     wsBar.addEventListener('click', function () {
@@ -1437,10 +1471,29 @@
       }
     });
 
+    function loadRecentWorkspaces() {
+      try {
+        var raw = localStorage.getItem(WS_RECENT_KEY);
+        if (raw) { var arr = JSON.parse(raw); if (Array.isArray(arr)) return arr; }
+      } catch (_) {}
+      return [];
+    }
+    function saveRecentWorkspace(wsPath) {
+      if (!wsPath) return;
+      var recent = loadRecentWorkspaces();
+      // Remove if already exists, then prepend
+      recent = recent.filter(function (r) { return r.path !== wsPath; });
+      var parts = wsPath.replace(/\/+$/, '').split('/');
+      recent.unshift({ name: parts[parts.length - 1] || wsPath, path: wsPath });
+      if (recent.length > MAX_RECENT_WS) recent = recent.slice(0, MAX_RECENT_WS);
+      try { localStorage.setItem(WS_RECENT_KEY, JSON.stringify(recent)); } catch (_) {}
+    }
+
     function selectWorkspace(p) {
       cachedWorkspace = p;
       updateWsLabel();
       try { localStorage.setItem(WS_KEY, p); } catch (_) {}
+      saveRecentWorkspace(p);
       wsPicker.classList.remove('show');
       saveCurrentConv(); currentIdx = -1; messages = []; turnView = null;
       renderAllMessages(messagesEl);

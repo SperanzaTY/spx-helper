@@ -170,16 +170,30 @@ function readScript(name: string): string {
   return fs.readFileSync(path.join(__dirname, 'inject', name), 'utf-8');
 }
 
-function scanWorkspaces(): Array<{ name: string; path: string }> {
+function scanWorkspaces(activeWorkspace?: string): Array<{ name: string; path: string }> {
   const home = process.env.HOME || '/Users/' + process.env.USER;
   const dirs: Array<{ name: string; path: string }> = [];
-  const scanRoots = [path.join(home, 'Cursor'), home];
+  const SKIP_NAMES = new Set(['node_modules', 'Library', '.Trash', 'Applications', 'Music', 'Movies', 'Pictures', 'Public']);
+  const scanRoots = [
+    path.join(home, 'Cursor'),
+    path.join(home, 'Projects'),
+    path.join(home, 'projects'),
+    path.join(home, 'workspace'),
+    path.join(home, 'Workspace'),
+    path.join(home, 'code'),
+    path.join(home, 'Code'),
+    path.join(home, 'dev'),
+    path.join(home, 'Dev'),
+    path.join(home, 'repos'),
+    path.join(home, 'src'),
+    home,
+  ];
   const seen = new Set<string>();
   for (const root of scanRoots) {
     try {
       const entries = fs.readdirSync(root, { withFileTypes: true });
       for (const e of entries) {
-        if (!e.isDirectory() || e.name.startsWith('.') || e.name === 'node_modules' || e.name === 'Library') continue;
+        if (!e.isDirectory() || e.name.startsWith('.') || SKIP_NAMES.has(e.name)) continue;
         const full = path.join(root, e.name);
         if (seen.has(full)) continue;
         seen.add(full);
@@ -192,6 +206,13 @@ function scanWorkspaces(): Array<{ name: string; path: string }> {
       }
     } catch { /* root not readable */ }
   }
+
+  // Always include the active workspace even if not in scan roots
+  if (activeWorkspace && !seen.has(activeWorkspace)) {
+    const name = path.basename(activeWorkspace);
+    dirs.unshift({ name, path: activeWorkspace });
+  }
+
   return dirs;
 }
 
@@ -299,7 +320,7 @@ async function main() {
   }
 
   function buildWorkspaceContext(): string {
-    if (!cachedWorkspaceList.length) cachedWorkspaceList = scanWorkspaces();
+    if (!cachedWorkspaceList.length) cachedWorkspaceList = scanWorkspaces(currentWorkspace);
     const list = cachedWorkspaceList.map((w) => `  - ${w.name} (${w.path})`).join('\n');
     const skills = loadSkills();
 
@@ -726,11 +747,15 @@ async function main() {
         // Skip if workspace is already current (e.g. after loadSession restored it)
         if (wsPath === currentWorkspace) {
           log(`workspace already set to: ${currentWorkspace}, skipping`);
-          bridge.sendToPanel({ type: 'workspace', path: currentWorkspace }).catch(() => {});
+          bridge.sendToPanel({ type: 'workspace', path: currentWorkspace, workspaces: cachedWorkspaceList }).catch(() => {});
           return;
         }
         currentWorkspace = wsPath;
         log(`workspace changed to: ${currentWorkspace}`);
+        // Add to cached list if not already present
+        if (!cachedWorkspaceList.some(w => w.path === wsPath)) {
+          cachedWorkspaceList.unshift({ name: path.basename(wsPath), path: wsPath });
+        }
         if (agent) {
           try {
             await agent.connection.cancel({ sessionId: agent.sessionId }).catch(() => {});
@@ -750,7 +775,7 @@ async function main() {
             log('set_workspace session failed:', (e as Error).message);
           }
         }
-        bridge.sendToPanel({ type: 'workspace', path: currentWorkspace }).catch(() => {});
+        bridge.sendToPanel({ type: 'workspace', path: currentWorkspace, workspaces: cachedWorkspaceList }).catch(() => {});
       } else if (data.type === 'new_conversation') {
         if (agent) {
           try {
@@ -891,7 +916,7 @@ async function main() {
       })
       .catch(() => {});
     bridge.sendToPanel({ type: 'mode', mode: defaultMode }).catch(() => {});
-    cachedWorkspaceList = scanWorkspaces();
+    cachedWorkspaceList = scanWorkspaces(currentWorkspace);
     log(`sending workspace info: ${currentWorkspace}, ${cachedWorkspaceList.length} workspaces`);
     bridge.sendToPanel({ type: 'workspace', path: currentWorkspace, workspaces: cachedWorkspaceList, isDefault: true }).catch(() => {});
     if (agent && agent.availableModels.length) {
