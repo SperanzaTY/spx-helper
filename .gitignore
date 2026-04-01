@@ -51,7 +51,12 @@ test/
 # 但是保留scripts目录下的所有文件
 !scripts/**
 
-# Python cache
+# Python cache & venv
 __pycache__/
 *.pyc
 *.egg-info/
+.venv/
+venv/
+
+# SeaTalk Agent runtime
+.last-session.json
