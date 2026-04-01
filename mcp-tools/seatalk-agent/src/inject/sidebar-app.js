@@ -44,7 +44,12 @@
     var conv = {
       id: currentIdx >= 0 && conversations[currentIdx] ? conversations[currentIdx].id : Date.now(),
       ts: Date.now(),
-      messages: messages.map(function (m) { return { role: m.role, text: m.text }; }),
+      messages: messages.map(function (m) {
+        var o = { role: m.role, text: m.text };
+        if (m.thinking) o.thinking = m.thinking.length > 2000 ? m.thinking.substring(0, 2000) + '\n...(思考内容过长，已截断)' : m.thinking;
+        if (m.toolSummary) o.toolSummary = m.toolSummary;
+        return o;
+      }),
       summary: first ? first.text.substring(0, 80) : '(empty)',
       workspace: cachedWorkspace || ''
     };
@@ -143,6 +148,7 @@
 
     // Streaming result — markdown rendering
     '.ca-result { font-size:13px; line-height:1.6; color:var(--cp-text); word-break:break-word; cursor:text; user-select:text; }',
+    '.ca-result.has-tools { margin-top:10px; padding-top:10px; border-top:1px solid var(--cp-accent); border-top-style:dashed; }',
     '.ca-result p { margin:0 0 8px; } .ca-result p:last-child { margin-bottom:0; }',
     '.ca-result h1,.ca-result h2,.ca-result h3,.ca-result h4 { margin:16px 0 8px; font-weight:600; color:var(--cp-heading); }',
     '.ca-result h1 { font-size:1.3em; } .ca-result h2 { font-size:1.15em; } .ca-result h3 { font-size:1.05em; }',
@@ -458,13 +464,21 @@
         if (m.thinking) {
           var view = sr.createView({ container: turnContainer, prefix: 'ca' });
           view.processChunk({ type: 'thinking_done', thinking: m.thinking });
-          view.processChunk({ type: 'text', text: m.text });
+          if (m.text) view.processChunk({ type: 'text', text: m.text });
           view.finalize();
-        } else {
+        } else if (m.text) {
           var resultDiv = document.createElement('div');
           resultDiv.className = 'ca-result';
           resultDiv.innerHTML = sr.renderMarkdown(m.text);
           turnContainer.appendChild(resultDiv);
+        }
+        if (m.toolSummary && m.toolSummary.length > 0) {
+          var toolDiv = document.createElement('div');
+          toolDiv.className = 'ca-tool-call';
+          toolDiv.style.cssText = 'font-size:11px;color:var(--cp-text-dim);padding:6px 8px;margin-bottom:4px;';
+          toolDiv.innerHTML = '<div style="font-size:10px;color:var(--cp-text-dim2);margin-bottom:2px">执行了 ' + m.toolSummary.length + ' 个工具:</div>' + m.toolSummary.map(function(s){ return '<div>' + escapeHtml(s) + '</div>'; }).join('');
+          if (m.text || m.thinking) turnContainer.insertBefore(toolDiv, turnContainer.querySelector('.ca-result'));
+          else turnContainer.appendChild(toolDiv);
         }
         container.appendChild(turnContainer);
       }
@@ -501,8 +515,19 @@
   function endTurn(stopReason) {
     if (!turnView && !isProcessing) return; // already ended, ignore duplicate
     if (turnView) turnView.finalize();
-    if (turnFullText) {
-      messages.push({ role: 'assistant', text: turnFullText, thinking: turnFullThinking || undefined });
+    var finalText = turnFullText ? turnFullText.replace(/^\n+/, '') : '';
+    // Build tool call summary for history
+    var toolSummaries = [];
+    for (var tcKey in turnToolCalls) {
+      var tc = turnToolCalls[tcKey];
+      var tcName = tc.name || 'Tool';
+      var tcStatus = tc.status === 'completed' ? '✅' : tc.status === 'error' ? '❌' : '⏳';
+      toolSummaries.push(tcStatus + ' ' + tcName);
+    }
+    var savedMsg = { role: 'assistant', text: finalText, thinking: turnFullThinking || undefined };
+    if (toolSummaries.length > 0) savedMsg.toolSummary = toolSummaries;
+    if (finalText || turnFullThinking || toolSummaries.length > 0) {
+      messages.push(savedMsg);
     }
     if (stopReason && stopReason !== 'end_turn' && messagesEl) {
       var cls = stopReason === 'cancelled' ? 'cancelled' : 'error';
@@ -513,10 +538,20 @@
       el.textContent = icon + ' ' + (labels[stopReason] || stopReason);
       messagesEl.appendChild(el);
     }
+    // Visually separate final result from tool calls, and scroll to it
+    if (turnEl && messagesEl) {
+      var finalResult = turnEl.querySelector('.ca-result');
+      var hasToolCalls = turnEl.querySelector('[id^="ca-tc-"]');
+      if (finalResult && finalResult.textContent.trim() && hasToolCalls) {
+        finalResult.classList.add('has-tools');
+        setTimeout(function () { finalResult.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 100);
+      } else {
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+      }
+    }
     turnView = null; turnEl = null;
     setProcessingState(false);
     saveCurrentConv();
-    if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight;
   }
 
   // ── Image helpers ──
@@ -871,9 +906,11 @@
       } else if (d.type === 'tool_start') {
         if (!turnView) startTurn();
         // Clear intermediate explanation text when a new tool call starts
-        if (turnFullText) {
+        if (turnFullText && turnFullText.replace(/\s/g, '').length > 0) {
           turnFullText = '';
           turnView.clearResult();
+        } else {
+          turnFullText = '';
         }
         var tcId = d.toolCallId || ('tc-' + Date.now());
         var existing = turnToolCalls[tcId];

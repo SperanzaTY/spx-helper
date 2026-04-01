@@ -282,14 +282,13 @@
     // Close
     function close() {
       if (isDocked) {
-        // Move back to layer before removing so SeaTalk layout restores
-        panel.style.position = 'fixed';
-        panel.style.flexShrink = '';
-        layer.appendChild(panel);
         isDocked = false;
+        panel.classList.remove('docked');
+        if (panel.parentNode) panel.parentNode.removeChild(panel);
+      } else {
+        panel.classList.remove('show');
+        setTimeout(function () { if (panel.parentNode) panel.parentNode.removeChild(panel); }, 200);
       }
-      panel.classList.remove('show');
-      setTimeout(function () { if (panel.parentNode) panel.parentNode.removeChild(panel); }, 200);
       for (var i = 0; i < cleanupFns.length; i++) cleanupFns[i]();
       if (closeDocHandler) document.removeEventListener('mousedown', closeDocHandler, true);
       if (typeof opts.onClose === 'function') opts.onClose();
