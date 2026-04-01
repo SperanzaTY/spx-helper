@@ -32,6 +32,8 @@
   var imgPreviewEl = null, imgFileInput = null;
   var MAX_IMAGES = 4, MAX_IMAGE_BYTES = 5 * 1024 * 1024;
   var ACCEPTED_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
+  var cachedUpdate = { available: false, local: '', remote: '', behind: 0, changelog: '' };
+  var verBadgeEl = null, updateOverlay = null;
 
   // ── Persistence ──
   function loadConvs() { try { var r = localStorage.getItem(STORE_KEY); return r ? JSON.parse(r) : []; } catch (_) { return []; } }
@@ -362,6 +364,36 @@
 
     // Light theme docked border override
     '#cursor-panel.theme-light.docked { border-left:1px solid var(--cp-border) !important; }',
+
+    // Version badge in status bar
+    '.cursor-ver-badge { display:inline-flex; align-items:center; gap:3px; padding:1px 6px; border-radius:3px; font-size:9px; cursor:pointer; transition:all .12s; white-space:nowrap; color:var(--cp-text-dim2); }',
+    '.cursor-ver-badge:hover { color:var(--cp-text2); }',
+    '.cursor-ver-badge.has-update { color:var(--cp-warn); font-weight:600; }',
+    '.cursor-ver-badge.has-update:hover { color:#e0a030; }',
+    '.cursor-ver-badge .ver-dot { display:none; width:6px; height:6px; border-radius:50%; background:var(--cp-warn); flex-shrink:0; animation:ca-pulse 2s infinite; }',
+    '.cursor-ver-badge.has-update .ver-dot { display:inline-block; }',
+    '@keyframes ca-pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }',
+
+    // Update overlay
+    '.cursor-update { position:absolute; top:0; left:0; right:0; bottom:0; background:var(--cp-bg); z-index:15; display:none; flex-direction:column; }',
+    '.cursor-update.show { display:flex; }',
+    '.cursor-update-hd { display:flex; align-items:center; padding:8px 12px; border-bottom:1px solid var(--cp-border); gap:8px; }',
+    '.cursor-update-back { border:none; background:none; color:var(--cp-text-dim); font-size:14px; cursor:pointer; padding:4px 8px; border-radius:4px; }',
+    '.cursor-update-back:hover { background:var(--cp-bg3); color:var(--cp-text2); }',
+    '.cursor-update-title { font-size:12px; font-weight:600; flex:1; color:var(--cp-text2); }',
+    '.cursor-update-body { flex:1; overflow-y:auto; padding:16px; }',
+    '.cursor-update-info { font-size:12px; color:var(--cp-text2); line-height:1.6; }',
+    '.cursor-update-info .ver-current { color:var(--cp-text-dim); }',
+    '.cursor-update-info .ver-new { color:var(--cp-ok); font-weight:600; }',
+    '.cursor-update-info .ver-behind { color:var(--cp-warn); }',
+    '.cursor-update-changelog { margin-top:12px; padding:8px 10px; background:var(--cp-pre-bg); border:1px solid var(--cp-border3); border-radius:6px; font-size:11px; font-family:"Menlo","Consolas","Courier New",monospace; line-height:1.6; color:var(--cp-text-dim); max-height:200px; overflow-y:auto; white-space:pre-wrap; }',
+    '.cursor-update-actions { display:flex; gap:8px; margin-top:16px; }',
+    '.cursor-update-btn { padding:6px 16px; border-radius:6px; border:none; font-size:12px; cursor:pointer; font-family:inherit; transition:all .15s; }',
+    '.cursor-update-btn.primary { background:var(--cp-accent); color:#fff; } .cursor-update-btn.primary:hover { background:var(--cp-accent-hover); }',
+    '.cursor-update-btn.secondary { background:var(--cp-bg3); color:var(--cp-text2); border:1px solid var(--cp-border2); } .cursor-update-btn.secondary:hover { border-color:var(--cp-accent); }',
+    '.cursor-update-btn:disabled { opacity:0.5; cursor:not-allowed; }',
+    '.cursor-update-progress { margin-top:12px; padding:8px 10px; background:var(--cp-bg3); border-radius:6px; font-size:11px; color:var(--cp-text2); line-height:1.8; white-space:pre-wrap; }',
+    '.cursor-update-noup { text-align:center; padding:40px 20px; color:var(--cp-text-dim2); font-size:12px; }',
   ].join('\n'));
 
   // ── Model grouping ──
@@ -942,6 +974,17 @@
           renderAllMessages(messagesEl);
           if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: 'set_workspace', path: fp }));
         }
+      } else if (d.type === 'update_available') {
+        cachedUpdate = { available: !!d.available, local: d.local || '', remote: d.remote || '', behind: d.behind || 0, changelog: d.changelog || '', error: d.error };
+        updateVerBadge();
+        if (updateOverlay && updateOverlay.classList.contains('show')) renderUpdateOverlay();
+      } else if (d.type === 'update_progress') {
+        appendUpdateProgress(d.text || '');
+      } else if (d.type === 'update_done') {
+        appendUpdateProgress(d.success ? '✅ 更新完成，Agent 即将重启...' : '❌ 更新失败');
+        if (d.success) {
+          setTimeout(function () { appendUpdateProgress('🔄 正在等待 Agent 重新连接...'); }, 2000);
+        }
       }
     } catch (err) { console.error('[cursor-acp] __agentReceive error:', err); }
   };
@@ -960,6 +1003,46 @@
       btn.style.opacity = '';
     } else {
       btn.style.opacity = '0.6';
+    }
+  }
+
+  function showUpdateOverlay() {
+    if (!panelHandle || !panelHandle.el) return;
+    var existing = panelHandle.el.querySelector('.cursor-update');
+    if (existing) {
+      existing.classList.add('show');
+      renderUpdateOverlay();
+      return;
+    }
+    updateOverlay = document.createElement('div');
+    updateOverlay.className = 'cursor-update show';
+    updateOverlay.innerHTML =
+      '<div class="cursor-update-hd">' +
+        '<button class="cursor-update-back">←</button>' +
+        '<span class="cursor-update-title">版本更新</span>' +
+      '</div>' +
+      '<div class="cursor-update-body"></div>';
+    updateOverlay.querySelector('.cursor-update-back').addEventListener('click', function () { updateOverlay.classList.remove('show'); });
+    updateOverlay.querySelector('.cursor-update-body').addEventListener('click', function (e) {
+      var btn = e.target.closest('.cursor-update-btn');
+      if (!btn) return;
+      var act = btn.dataset.act;
+      if (act === 'apply') {
+        btn.disabled = true;
+        btn.textContent = '更新中...';
+        if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: 'update_apply' }));
+      } else if (act === 'check') {
+        btn.textContent = '检查中...';
+        btn.disabled = true;
+        if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: 'update_check' }));
+        setTimeout(function () { btn.disabled = false; btn.textContent = '检查更新'; }, 5000);
+      }
+    });
+    panelHandle.el.appendChild(updateOverlay);
+    renderUpdateOverlay();
+    // Auto-trigger check if no data yet
+    if (!cachedUpdate.local) {
+      if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: 'update_check' }));
     }
   }
 
@@ -1093,6 +1176,62 @@
     badge.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10" opacity="0.25"/><path d="M12 2a10 10 0 0 1 0 20" style="stroke-dasharray:' + (pct * 0.628) + ' 62.8;stroke-dashoffset:0;transform-origin:center;transform:rotate(-90deg)"/></svg> ' + pct + '%';
   }
 
+  // ── Update helpers ──
+  function updateVerBadge() {
+    if (!verBadgeEl) return;
+    if (cachedUpdate.available) {
+      verBadgeEl.classList.add('has-update');
+      var behind = cachedUpdate.behind > 9 ? '9+' : String(cachedUpdate.behind);
+      verBadgeEl.innerHTML = '<span class="ver-dot"></span>v' + escapeHtml(cachedUpdate.local) + ' → v' + escapeHtml(cachedUpdate.remote);
+      verBadgeEl.title = '有新版本可用 (落后 ' + cachedUpdate.behind + ' 个提交)，点击查看';
+    } else {
+      verBadgeEl.classList.remove('has-update');
+      verBadgeEl.innerHTML = 'v' + escapeHtml(cachedUpdate.local || '...');
+      verBadgeEl.title = '当前版本';
+    }
+  }
+
+  function renderUpdateOverlay() {
+    if (!updateOverlay) return;
+    var body = updateOverlay.querySelector('.cursor-update-body');
+    if (!body) return;
+    if (cachedUpdate.available) {
+      var html = '<div class="cursor-update-info">' +
+        '<div>当前版本: <span class="ver-current">v' + escapeHtml(cachedUpdate.local) + '</span></div>' +
+        '<div>最新版本: <span class="ver-new">v' + escapeHtml(cachedUpdate.remote) + '</span></div>' +
+        '<div>落后: <span class="ver-behind">' + cachedUpdate.behind + ' 个提交</span></div>' +
+        '</div>';
+      if (cachedUpdate.changelog) {
+        html += '<div style="margin-top:12px;font-size:11px;color:var(--cp-text-dim)">最近更新:</div>';
+        html += '<div class="cursor-update-changelog">' + escapeHtml(cachedUpdate.changelog) + '</div>';
+      }
+      html += '<div class="cursor-update-actions">' +
+        '<button class="cursor-update-btn primary" data-act="apply">更新</button>' +
+        '<button class="cursor-update-btn secondary" data-act="check">重新检查</button>' +
+        '</div>';
+      html += '<div class="cursor-update-progress" style="display:none"></div>';
+      body.innerHTML = html;
+    } else {
+      var msg = cachedUpdate.error ? '检查失败: ' + escapeHtml(cachedUpdate.error) : '已是最新版本 (v' + escapeHtml(cachedUpdate.local || '...') + ')';
+      body.innerHTML = '<div class="cursor-update-noup">' + msg + '</div>' +
+        '<div class="cursor-update-actions" style="justify-content:center">' +
+        '<button class="cursor-update-btn secondary" data-act="check">检查更新</button>' +
+        '</div>';
+    }
+  }
+
+  function appendUpdateProgress(text) {
+    if (!updateOverlay) return;
+    var prog = updateOverlay.querySelector('.cursor-update-progress');
+    if (!prog) return;
+    prog.style.display = 'block';
+    prog.textContent += (prog.textContent ? '\n' : '') + text;
+    prog.scrollTop = prog.scrollHeight;
+    // Disable apply button during update
+    var applyBtn = updateOverlay.querySelector('[data-act="apply"]');
+    if (applyBtn) applyBtn.disabled = true;
+  }
+
   // ── Show panel ──
   function showPanel() {
     if (panelHandle) { try { panelHandle.close(); } catch (_) {} }
@@ -1114,6 +1253,7 @@
       onClose: function () {
         panelHandle = null; messagesEl = null; modelBadgeEl = null; modelDropdown = null;
         statusDot = null; statusText = null; statusModelEl = null;
+        verBadgeEl = null; updateOverlay = null;
         wsLabel = null; modeTabEls = [];
         var btn = document.getElementById('cursor-sidebar-btn');
         if (btn) btn.classList.remove('active');
@@ -1430,6 +1570,7 @@
       '<span class="cursor-status-dot none"></span>' +
       '<span class="cursor-status-text">...</span>' +
       '<button class="cursor-status-reconnect">重连</button>' +
+      '<span class="cursor-ver-badge" title="当前版本">v...</span>' +
       '<span class="cursor-usage-badge" title="Context usage" style="display:none"></span>' +
       '<span class="cursor-status-model" style="flex:1;text-align:right"></span>' +
       '<span class="cursor-settings-wrap">' +
@@ -1441,12 +1582,15 @@
           '<div class="cursor-settings-dd-sep"></div>' +
           '<div class="cursor-settings-dd-item" data-action="show_logs"><span class="dd-icon">📋</span>查看后端日志</div>' +
           '<div class="cursor-settings-dd-item" data-action="show_diagnostics"><span class="dd-icon">ℹ</span>诊断信息</div>' +
+          '<div class="cursor-settings-dd-sep"></div>' +
+          '<div class="cursor-settings-dd-item" data-action="check_update"><span class="dd-icon">⬆</span>检查更新</div>' +
         '</div>' +
       '</span>';
     panelHandle.el.appendChild(statusBar);
     statusDot = statusBar.querySelector('.cursor-status-dot');
     statusText = statusBar.querySelector('.cursor-status-text');
     statusModelEl = statusBar.querySelector('.cursor-status-model');
+    verBadgeEl = statusBar.querySelector('.cursor-ver-badge');
     var reconnectBtn = statusBar.querySelector('.cursor-status-reconnect');
     var settingsBtn = statusBar.querySelector('.cursor-settings-btn');
     var settingsDd = statusBar.querySelector('.cursor-settings-dd');
@@ -1455,6 +1599,12 @@
     statusText.textContent = cachedStatus.text;
     if (!cachedStatus.connected) reconnectBtn.classList.add('show');
     updateStatusModel();
+    updateVerBadge();
+
+    // Version badge click → open update overlay
+    verBadgeEl.addEventListener('click', function () {
+      showUpdateOverlay();
+    });
 
     // Reconnect button click
     reconnectBtn.addEventListener('click', function () {
@@ -1480,6 +1630,9 @@
         if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: 'get_logs' }));
       } else if (action === 'show_diagnostics') {
         if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: 'get_diagnostics' }));
+      } else if (action === 'check_update') {
+        showUpdateOverlay();
+        if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: 'update_check' }));
       }
     });
 

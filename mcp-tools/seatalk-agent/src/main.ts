@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { execSync } from 'node:child_process';
+import { execSync, spawn as spawnChild } from 'node:child_process';
 import { connectMainPage, type CdpClient } from './cdp.js';
 import { Bridge } from './bridge.js';
 import { spawnAgent, killAgent, listModels, loadMcpServers, type AgentProcess } from './acp.js';
@@ -10,9 +10,119 @@ import { spawnAgent, killAgent, listModels, loadMcpServers, type AgentProcess } 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CDP_PORT = parseInt(process.env.CDP_PORT || '19222', 10);
 const WORKSPACE = process.env.WORKSPACE || path.resolve(__dirname, '../../..');
+const PROJECT_ROOT = path.resolve(__dirname, '../../..');
 
 const LOG_BUFFER_SIZE = 100;
 const logBuffer: string[] = [];
+
+// ── Updater ──
+
+interface UpdateCheckResult {
+  available: boolean;
+  local: string;
+  remote: string;
+  behind: number;
+  branch: string;
+  changelog: string;
+  error?: string;
+}
+
+function gitExec(cmd: string, cwd: string): string {
+  return execSync(cmd, { cwd, encoding: 'utf-8', timeout: 30_000 }).trim();
+}
+
+function checkUpdate(logFn: typeof log): UpdateCheckResult {
+  const branch = 'release';
+  const result: UpdateCheckResult = { available: false, local: '', remote: '', behind: 0, branch, changelog: '' };
+
+  try {
+    gitExec(`git fetch origin ${branch} --quiet`, PROJECT_ROOT);
+  } catch (e) {
+    result.error = `fetch failed: ${(e as Error).message}`;
+    logFn(`[updater] ${result.error}`);
+    return result;
+  }
+
+  try {
+    const localManifest = JSON.parse(fs.readFileSync(path.join(PROJECT_ROOT, 'manifest.json'), 'utf-8'));
+    result.local = localManifest.version || '0.0.0';
+  } catch {
+    result.local = '0.0.0';
+  }
+
+  try {
+    const remoteManifestStr = gitExec(`git show origin/${branch}:manifest.json`, PROJECT_ROOT);
+    const remoteManifest = JSON.parse(remoteManifestStr);
+    result.remote = remoteManifest.version || result.local;
+  } catch {
+    result.remote = result.local;
+  }
+
+  try {
+    result.behind = parseInt(gitExec(`git rev-list --count HEAD..origin/${branch}`, PROJECT_ROOT), 10) || 0;
+  } catch {
+    result.behind = 0;
+  }
+
+  result.available = result.behind > 0 && result.remote !== result.local;
+
+  if (result.available) {
+    try {
+      const commitLog = gitExec(`git log --oneline HEAD..origin/${branch} -10`, PROJECT_ROOT);
+      result.changelog = commitLog;
+    } catch {}
+  }
+
+  logFn(`[updater] check: local=${result.local}, remote=${result.remote}, behind=${result.behind}, available=${result.available}`);
+  return result;
+}
+
+async function applyUpdate(onProgress: (msg: string) => void, logFn: typeof log): Promise<boolean> {
+  const branch = 'release';
+
+  try {
+    onProgress('📡 检查工作区...');
+    let dirty = false;
+    try { gitExec('git diff --quiet && git diff --cached --quiet', PROJECT_ROOT); } catch { dirty = true; }
+
+    if (dirty) {
+      onProgress('❌ 工作区有未提交修改，无法更新');
+      onProgress('请先提交或撤销修改: git add . && git commit 或 git checkout .');
+      return false;
+    }
+    onProgress('✅ 工作区干净');
+
+    onProgress(`🔄 git rebase origin/${branch} ...`);
+    try {
+      gitExec(`git rebase origin/${branch}`, PROJECT_ROOT);
+      onProgress('🔄 rebase ✅');
+    } catch (e) {
+      onProgress('❌ rebase 失败: ' + (e as Error).message);
+      try { gitExec('git rebase --abort', PROJECT_ROOT); } catch {}
+      onProgress('已回滚 rebase。请手动执行: git pull --rebase origin ' + branch);
+      return false;
+    }
+
+    onProgress('📦 检查依赖变化...');
+    try {
+      const changed = gitExec('git diff HEAD~1 --name-only', PROJECT_ROOT);
+      if (changed.includes('package.json') || changed.includes('package-lock') || changed.includes('pnpm-lock')) {
+        onProgress('📦 npm install ...');
+        execSync('npm install', { cwd: path.join(PROJECT_ROOT, 'mcp-tools', 'seatalk-agent'), encoding: 'utf-8', timeout: 120_000 });
+        onProgress('📦 npm install ✅');
+      } else {
+        onProgress('📦 依赖无变化');
+      }
+    } catch { onProgress('📦 跳过依赖检查'); }
+
+    onProgress('✅ 更新完成，即将重启...');
+    logFn('[updater] update applied successfully');
+    return true;
+  } catch (e) {
+    onProgress('❌ 意外错误: ' + (e as Error).message);
+    return false;
+  }
+}
 
 const SESSION_FILE = path.join(__dirname, '..', '.last-session.json');
 
@@ -104,8 +214,30 @@ async function waitForSpaReady(
   return false;
 }
 
+function ensureSeaTalkRunning() {
+  if (process.platform !== 'darwin') return;
+  try {
+    const cdpCheck = execSync(`curl -s -o /dev/null -w "%{http_code}" http://localhost:${CDP_PORT}/json 2>/dev/null || echo "000"`, { encoding: 'utf-8' }).trim();
+    if (cdpCheck === '200') {
+      log('SeaTalk CDP already available');
+      return;
+    }
+  } catch { /* not reachable */ }
+
+  log('SeaTalk not running with CDP, attempting to launch...');
+  try {
+    execSync('pkill -f SeaTalk 2>/dev/null || true', { encoding: 'utf-8' });
+    const child = spawnChild('open', ['-a', 'SeaTalk', '--args', `--remote-debugging-port=${CDP_PORT}`], { detached: true, stdio: 'ignore' });
+    child.unref();
+    log(`SeaTalk launched with --remote-debugging-port=${CDP_PORT}`);
+  } catch (e) {
+    log(`failed to launch SeaTalk: ${(e as Error).message}`);
+  }
+}
+
 async function main() {
   killStaleCdpClients();
+  ensureSeaTalkRunning();
   log(`connecting to SeaTalk CDP on port ${CDP_PORT}...`);
 
   let client: CdpClient;
@@ -697,6 +829,24 @@ async function main() {
         } else {
           bridge.sendToPanel({ type: 'status', connected: false, text: '重启失败' }).catch(() => {});
         }
+      } else if (data.type === 'update_check') {
+        log('update_check requested by user');
+        try {
+          const result = checkUpdate(log);
+          bridge.sendToPanel({ type: 'update_available', ...result }).catch(() => {});
+        } catch (e) {
+          log('update_check failed:', (e as Error).message);
+          bridge.sendToPanel({ type: 'update_available', available: false, error: (e as Error).message }).catch(() => {});
+        }
+      } else if (data.type === 'update_apply') {
+        log('update_apply requested by user');
+        const ok = await applyUpdate((msg) => {
+          bridge.sendToPanel({ type: 'update_progress', text: msg }).catch(() => {});
+        }, log);
+        bridge.sendToPanel({ type: 'update_done', success: ok }).catch(() => {});
+        if (ok) {
+          setTimeout(() => { process.exit(42); }, 500);
+        }
       } else if (data.type === 'get_logs') {
         bridge.sendToPanel({ type: 'logs', lines: logBuffer.slice() }).catch(() => {});
       } else if (data.type === 'get_diagnostics') {
@@ -723,14 +873,16 @@ async function main() {
 
   // ── UI Injection ──
 
-  async function injectUI() {
+  async function injectScripts() {
     log('injecting cursor-ui...');
     await client.evaluate(readScript('cursor-ui.js'));
     log('injecting sidebar panel...');
     await client.evaluate(readScript('sidebar-app.js'));
     log('injection complete!');
-    // small delay to ensure frontend IIFE has fully executed
     await new Promise((r) => setTimeout(r, 200));
+  }
+
+  function pushInitState() {
     bridge
       .sendToPanel({
         type: 'status',
@@ -753,13 +905,34 @@ async function main() {
     }
   }
 
-  await injectUI();
+  let injecting = false;
 
-  // ── CDP reconnection & page reload ──
+  async function doInject() {
+    if (injecting) return;
+    injecting = true;
+    try {
+      const hasAgent = await client.evaluate('!!window.__agentReceive') as boolean;
+      if (hasAgent) {
+        log('skipping injection (agent UI already present), rebinding bridge only');
+        bridge = new Bridge(client);
+        await bridge.setup();
+        setupMessageHandler(bridge);
+        pushInitState();
+        return;
+      }
+      const ok = await waitForSpaReady((c) => client.evaluate(c));
+      log(ok ? 'SPA ready' : 'SPA not ready, injecting anyway');
+      await injectScripts();
+      pushInitState();
+    } finally {
+      injecting = false;
+    }
+  }
+
+  // ── CDP client setup (binding + events + injection) ──
 
   let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   let reconnecting = false;
-  let reinjecting = false;
 
   function stopHeartbeat() {
     if (heartbeatTimer) {
@@ -767,6 +940,40 @@ async function main() {
       heartbeatTimer = null;
     }
   }
+
+  async function setupCdpClient() {
+    bridge = new Bridge(client);
+    await bridge.setup();
+    setupMessageHandler(bridge);
+
+    await client.send('Page.enable').catch(() => {});
+    client.off('Page.loadEventFired');
+    client.on('Page.loadEventFired', async () => {
+      log('page loaded, re-injecting...');
+      await doInject();
+    });
+
+    await doInject();
+    startHeartbeat();
+  }
+
+  await setupCdpClient();
+
+  // ── Silent update check (30s after start, then every 10 min) ──
+
+  function silentUpdateCheck() {
+    try {
+      const result = checkUpdate(log);
+      if (result.available) {
+        bridge.sendToPanel({ type: 'update_available', ...result }).catch(() => {});
+      }
+    } catch {}
+  }
+
+  setTimeout(silentUpdateCheck, 30_000);
+  setInterval(silentUpdateCheck, 10 * 60 * 1000);
+
+  // ── CDP reconnection ──
 
   async function cdpReconnectLoop() {
     if (reconnecting) return;
@@ -779,16 +986,8 @@ async function main() {
       try {
         client = await connectMainPage(CDP_PORT);
         log(`reconnected: ${client.page.title}`);
-        const ok = await waitForSpaReady((c) => client.evaluate(c));
-        log(ok ? 'SPA ready after reconnect' : 'SPA not ready, injecting anyway');
-
-        bridge = new Bridge(client);
-        await bridge.setup();
-        setupMessageHandler(bridge);
-        await injectUI();
         reconnecting = false;
-        setupPageReload();
-        startHeartbeat();
+        await setupCdpClient();
         break;
       } catch (e) {
         log('CDP reconnect failed, retrying in 3s...', (e as Error).message);
@@ -808,37 +1007,6 @@ async function main() {
       }
     }, 5000);
   }
-
-  async function handlePageReload() {
-    if (reinjecting) return;
-    reinjecting = true;
-    log('page reloaded, waiting for SPA and re-injecting...');
-    try {
-      const ok = await waitForSpaReady((c) => client.evaluate(c));
-      log(ok ? 'SPA ready after reload' : 'SPA not ready, injecting anyway');
-      bridge = new Bridge(client);
-      await bridge.setup();
-      setupMessageHandler(bridge);
-      await injectUI();
-      log('re-injection after reload complete');
-    } catch (e) {
-      log('re-injection failed:', (e as Error).message);
-    }
-    reinjecting = false;
-  }
-
-  function setupPageReload() {
-    client.off('Page.frameNavigated');
-    client.send('Page.enable').catch(() => {});
-    client.on('Page.frameNavigated', (params: any) => {
-      if (!params.frame?.parentId) {
-        handlePageReload();
-      }
-    });
-  }
-
-  setupPageReload();
-  startHeartbeat();
 
   process.on('SIGINT', () => {
     log('shutting down...');

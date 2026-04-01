@@ -1,5 +1,37 @@
 # SPX Helper 项目开发规则
 
+## 📌 版本管理规范（重要！）
+
+### 唯一版本源
+- **`manifest.json` 的 `version` 字段是项目的唯一版本号来源**
+- 所有 `package.json` 的 `version` 必须与 `manifest.json` 保持一致
+
+### 版本文件清单
+| 文件 | 用途 | 规则 |
+|------|------|------|
+| `manifest.json` | Chrome 扩展版本声明 | **主版本源**，发版时只改这里 |
+| `package.json`（根） | npm 包元数据 | 跟随 `manifest.json` 同步 |
+| `mcp-tools/seatalk-agent/package.json` | seatalk-agent 子模块 | 跟随 `manifest.json` 同步 |
+
+### 发版流程
+```
+1. 修改 manifest.json 的 version（如 2.18.4 → 2.19.0）
+2. 同步更新 package.json（根）的 version
+3. 同步更新 mcp-tools/seatalk-agent/package.json 的 version
+4. 更新 README.md 的版本号和 Changelog
+5. 提交时三个文件的 version 必须一致
+```
+
+### 禁止行为
+- ❌ 只改其中一个文件的版本号
+- ❌ 让各文件版本号不一致
+- ❌ 使用 package.json 作为版本判断来源（应使用 manifest.json）
+
+### 更新检查机制
+- seatalk-agent 的自动更新检查基于 `manifest.json` 的 version
+- `git fetch origin release` → 对比本地 vs 远程 `manifest.json` 的 version
+- 版本不一致 + commit 落后 → 触发更新通知
+
 ## 常用命令
 
 ```bash

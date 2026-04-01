@@ -1,10 +1,11 @@
 {
   "name": "seatalk-agent",
-  "version": "0.1.0",
+  "version": "3.0.0",
   "description": "SeaTalk + Cursor Agent 侧边栏增强工具",
   "type": "module",
   "scripts": {
-    "start": "tsx src/main.ts",
+    "start": "bash launch.sh",
+    "start:direct": "tsx src/main.ts",
     "dev": "tsx watch src/main.ts"
   },
   "dependencies": {
