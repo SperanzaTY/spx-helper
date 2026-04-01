@@ -1,6 +1,6 @@
 ---
 description: SeaTalk Agent 前端注入代码修改后必须通过 CDP 模拟测试验证
-globs: mcp-tools/seatalk-agent/src/inject/*.js
+globs: seatalk-agent/src/inject/*.js
 alwaysApply: false
 ---
 

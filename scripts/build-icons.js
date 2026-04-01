@@ -8,7 +8,7 @@ const path = require('path');
 const { Resvg } = require('@resvg/resvg-js');
 
 const ROOT = path.join(__dirname, '..');
-const ICONS_DIR = path.join(ROOT, 'images');
+const ICONS_DIR = path.join(ROOT, 'chrome-extension', 'images');
 
 async function main() {
   const svgPath = path.join(ICONS_DIR, 'icon.svg');

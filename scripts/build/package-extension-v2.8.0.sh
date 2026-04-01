@@ -18,15 +18,16 @@ echo "🧹 清理旧构建..."
 rm -rf build/
 mkdir -p "${BUILD_DIR}"
 
+EXT_DIR="chrome-extension"
+
 # 2. 复制扩展核心文件
 echo "📦 复制扩展文件..."
-cp manifest.json "${BUILD_DIR}/"
-cp popup.html "${BUILD_DIR}/"
-cp popup.js "${BUILD_DIR}/"
-cp background.js "${BUILD_DIR}/"
-cp styles.css "${BUILD_DIR}/"
-cp -r icons/ "${BUILD_DIR}/" 2>/dev/null || echo "  (icons 目录不存在，跳过)"
-cp -r images/ "${BUILD_DIR}/" 2>/dev/null || echo "  (images 目录不存在，跳过)"
+cp "${EXT_DIR}/manifest.json" "${BUILD_DIR}/"
+cp "${EXT_DIR}/popup.html" "${BUILD_DIR}/"
+cp "${EXT_DIR}/popup.js" "${BUILD_DIR}/"
+cp "${EXT_DIR}/background.js" "${BUILD_DIR}/"
+cp "${EXT_DIR}/styles.css" "${BUILD_DIR}/"
+cp -r "${EXT_DIR}/images/" "${BUILD_DIR}/" 2>/dev/null || echo "  (images 目录不存在，跳过)"
 
 # 3. 复制文档（可选）
 echo "📚 复制文档..."

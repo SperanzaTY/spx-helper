@@ -39,7 +39,7 @@ git clone https://github.com/SperanzaTY/spx-helper.git
 1. 打开 Chrome，访问 `chrome://extensions/`
 2. 开启右上角 **"开发者模式"**
 3. 点击 **"加载已解压的扩展程序"**
-4. 选择仓库根目录 `spx-helper/`
+4. 选择仓库中的 `spx-helper/chrome-extension/` 目录
 5. 点击工具栏图标即可使用
 
 ### 2. MCP 工具安装（Cursor AI 集成）
@@ -245,7 +245,7 @@ npm --version        # 随 Node.js 一起安装
 #### 步骤 1：安装依赖
 
 ```bash
-cd spx-helper/mcp-tools/seatalk-agent
+cd spx-helper/seatalk-agent
 npm install
 ```
 
@@ -383,13 +383,27 @@ npm start
 
 ```
 spx-helper/
-├── manifest.json                 # Chrome 扩展配置（MV3）
-├── background.js                 # Service Worker（消息中枢）
-├── content.js                    # 内容脚本（API 拦截 UI）
-├── injected.js                   # 注入脚本（fetch/XHR Hook）
-├── popup.html / popup.js         # 扩展主界面
-├── styles.css                    # 扩展样式
-├── images/                       # 扩展图标
+├── chrome-extension/             # Chrome 扩展（独立可加载目录）
+│   ├── manifest.json             # Chrome 扩展配置（MV3）
+│   ├── background.js             # Service Worker（消息中枢）
+│   ├── content.js                # 内容脚本（API 拦截 UI）
+│   ├── injected.js               # 注入脚本（fetch/XHR Hook）
+│   ├── popup.html / popup.js     # 扩展主界面
+│   ├── styles.css                # 扩展样式
+│   ├── images/                   # 扩展图标
+│   ├── station_query/            # 站点查询工具（Python 后端）
+│   └── ck_sync/                  # ClickHouse DDL 同步工具
+│
+├── seatalk-agent/                # SeaTalk AI Agent（Node + TypeScript）
+│   ├── install.sh                # 一键安装脚本（seatalk 命令 + 自动启动）
+│   ├── launch.sh                 # 启动器（支持自动重启）
+│   ├── src/main.ts               # 主入口（CDP + ACP 编排）
+│   ├── src/acp.ts                # Cursor ACP 客户端
+│   ├── src/bridge.ts             # CDP ↔ 注入脚本通信桥
+│   ├── src/cdp.ts                # Chrome DevTools Protocol 客户端
+│   └── src/inject/               # 注入到 SeaTalk 的 UI 脚本
+│       ├── cursor-ui.js          # 基础 UI 层（面板、Markdown 渲染）
+│       └── sidebar-app.js        # 聊天面板（对话、工具调用、主题）
 │
 ├── mcp-tools/                    # MCP 工具套件
 │   ├── presto-query/             # Presto 查询（Python, FastMCP）
@@ -398,22 +412,14 @@ spx-helper/
 │   ├── api-trace/                # API 血缘溯源
 │   ├── seatalk-reader/           # SeaTalk 消息读取（CDP）
 │   ├── seatalk-group/            # SeaTalk 群组管理
-│   └── seatalk-agent/            # SeaTalk AI Agent（Node + TypeScript）
-│       ├── install.sh            # 一键安装脚本（seatalk 命令 + 自动启动）
-│       ├── src/main.ts           # 主入口（CDP + ACP 编排）
-│       ├── src/acp.ts            # Cursor ACP 客户端
-│       ├── src/bridge.ts         # CDP ↔ 注入脚本通信桥
-│       ├── src/cdp.ts            # Chrome DevTools Protocol 客户端
-│       └── src/inject/           # 注入到 SeaTalk 的 UI 脚本
-│           ├── cursor-ui.js      # 基础 UI 层（面板、Markdown 渲染）
-│           └── sidebar-app.js    # 聊天面板（对话、工具调用、主题）
+│   ├── scheduler-query/          # DataSuite Scheduler 查询 + Presto History Server
+│   └── share-package/            # 可分发的 Presto 查询工具包
 │
 ├── .cursor/skills/               # Cursor Skills
 │   └── spx-bug-trace/            # Bug 排查技能（API 溯源 + 数据验证流程）
 │
 ├── scripts/                      # 构建/发布/测试脚本
-├── docs/                         # 文档（安装、使用、架构、变更日志）
-└── share-package/                # 可分发的 Presto 查询工具包
+└── docs/                         # 文档（安装、使用、架构、变更日志）
 ```
 
 ---
@@ -499,7 +505,7 @@ spx-helper/
 ### SeaTalk Agent 开发
 
 ```bash
-cd mcp-tools/seatalk-agent
+cd seatalk-agent
 npm run dev    # tsx watch 模式，代码修改自动重启
 ```
 

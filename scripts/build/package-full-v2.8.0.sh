@@ -18,24 +18,25 @@ echo "🧹 清理..."
 rm -rf "build/${FULL_PACKAGE}"
 mkdir -p "${BUILD_DIR}"
 
+EXT_DIR="chrome-extension"
+
 # 2. 复制扩展文件
 echo "📦 复制 Chrome Extension..."
-cp manifest.json "${BUILD_DIR}/"
-cp popup.html "${BUILD_DIR}/"
-cp popup.js "${BUILD_DIR}/"
-cp background.js "${BUILD_DIR}/"
-cp styles.css "${BUILD_DIR}/"
-cp -r icons/ "${BUILD_DIR}/" 2>/dev/null || true
-cp -r images/ "${BUILD_DIR}/" 2>/dev/null || true
+cp "${EXT_DIR}/manifest.json" "${BUILD_DIR}/"
+cp "${EXT_DIR}/popup.html" "${BUILD_DIR}/"
+cp "${EXT_DIR}/popup.js" "${BUILD_DIR}/"
+cp "${EXT_DIR}/background.js" "${BUILD_DIR}/"
+cp "${EXT_DIR}/styles.css" "${BUILD_DIR}/"
+cp -r "${EXT_DIR}/images/" "${BUILD_DIR}/" 2>/dev/null || true
 
 # 3. 复制站点查询工具
 echo "📍 复制站点查询工具..."
 mkdir -p "${BUILD_DIR}/station_query"
-cp -r station_query/*.py "${BUILD_DIR}/station_query/" 2>/dev/null || true
-cp -r station_query/*.sh "${BUILD_DIR}/station_query/" 2>/dev/null || true
-cp -r station_query/*.md "${BUILD_DIR}/station_query/" 2>/dev/null || true
-cp -r station_query/requirements.txt "${BUILD_DIR}/station_query/" 2>/dev/null || true
-cp -r station_query/config/ "${BUILD_DIR}/station_query/" 2>/dev/null || true
+cp -r "${EXT_DIR}/station_query"/*.py "${BUILD_DIR}/station_query/" 2>/dev/null || true
+cp -r "${EXT_DIR}/station_query"/*.sh "${BUILD_DIR}/station_query/" 2>/dev/null || true
+cp -r "${EXT_DIR}/station_query"/*.md "${BUILD_DIR}/station_query/" 2>/dev/null || true
+cp -r "${EXT_DIR}/station_query"/requirements.txt "${BUILD_DIR}/station_query/" 2>/dev/null || true
+cp -r "${EXT_DIR}/station_query"/config/ "${BUILD_DIR}/station_query/" 2>/dev/null || true
 
 # 4. 复制文档
 echo "📚 复制文档..."

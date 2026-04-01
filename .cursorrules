@@ -9,15 +9,15 @@
 ### 版本文件清单
 | 文件 | 用途 | 规则 |
 |------|------|------|
-| `manifest.json` | Chrome 扩展版本声明 | **主版本源**，发版时只改这里 |
+| `chrome-extension/manifest.json` | Chrome 扩展版本声明 | **主版本源**，发版时只改这里 |
 | `package.json`（根） | npm 包元数据 | 跟随 `manifest.json` 同步 |
-| `mcp-tools/seatalk-agent/package.json` | seatalk-agent 子模块 | 跟随 `manifest.json` 同步 |
+| `seatalk-agent/package.json` | seatalk-agent 子模块 | 跟随 `manifest.json` 同步 |
 
 ### 发版流程
 ```
-1. 修改 manifest.json 的 version（如 2.18.4 → 2.19.0）
+1. 修改 chrome-extension/manifest.json 的 version（如 2.18.4 → 2.19.0）
 2. 同步更新 package.json（根）的 version
-3. 同步更新 mcp-tools/seatalk-agent/package.json 的 version
+3. 同步更新 seatalk-agent/package.json 的 version
 4. 更新 README.md 的版本号和 Changelog
 5. 更新用户指南 docs/guides/SEATALK_AGENT_USER_GUIDE.md（见下方规则）
 6. 提交时三个文件的 version 必须一致
@@ -64,19 +64,26 @@ git diff                           # 查看未提交变更
 SPX Helper = Chrome 扩展 + MCP 工具集，用于 Shopee SPX 数据开发与问题排查。
 
 ```
-Chrome 扩展 (manifest v3)
+Chrome 扩展 (chrome-extension/)
+  ├── manifest.json        → 扩展配置 (MV3)
   ├── background.js        → Service Worker, 消息中枢, 数据存储
   ├── content.js           → 页面注入, DOM 操作, UI 渲染
   ├── injected.js          → API 拦截 (XHR/Fetch hook)
   ├── popup.html/js        → 扩展弹出页, 配置管理, JWT 生成
   └── styles.css           → 全局样式
 
+SeaTalk Agent (seatalk-agent/)
+  ├── src/main.ts          → CDP + ACP 编排
+  ├── src/inject/          → 注入 SeaTalk 的 UI 脚本
+  └── install.sh           → 一键安装
+
 MCP 工具集 (mcp-tools/)
   ├── presto-query/        → Presto SQL 查询 (DataSuite API)
   ├── spark-query/         → Spark SQL 查询 (Livy REST API)
   ├── ck-query/            → ClickHouse 查询 (CK2/CK6)
   ├── api-trace/           → API 血缘溯源 (spx_mart.api_lineage)
-  └── seatalk-reader/      → SeaTalk 消息读取 (CDP 直连)
+  ├── seatalk-reader/      → SeaTalk 消息读取 (CDP 直连)
+  └── scheduler-query/     → DataSuite Scheduler + Presto History Server
 
 Skill (.cursor/skills/)
   └── spx-bug-trace/       → 数据问题定位技能
@@ -110,17 +117,45 @@ Skill (.cursor/skills/)
 
 | 文件 | 影响范围 | 修改后必须 |
 |------|----------|-----------|
-| `background.js` | 全局消息中枢、存储 | 重新加载扩展 + 全功能测试 |
-| `content.js` | 页面注入、UI 渲染 | 刷新页面 + UI 测试 |
-| `injected.js` | API 拦截 | 刷新页面 + API 拦截测试 |
-| `manifest.json` | 扩展权限、配置 | 重新加载扩展 + 权限验证 |
-| `popup.js` | 弹出页逻辑、JWT | 打开 popup + 配置功能测试 |
+| `chrome-extension/background.js` | 全局消息中枢、存储 | 重新加载扩展 + 全功能测试 |
+| `chrome-extension/content.js` | 页面注入、UI 渲染 | 刷新页面 + UI 测试 |
+| `chrome-extension/injected.js` | API 拦截 | 刷新页面 + API 拦截测试 |
+| `chrome-extension/manifest.json` | 扩展权限、配置 | 重新加载扩展 + 权限验证 |
+| `chrome-extension/popup.js` | 弹出页逻辑、JWT | 打开 popup + 配置功能测试 |
+| `seatalk-agent/src/main.ts` | Agent 核心逻辑 | 重启 Agent |
 
 MCP 工具修改后: Cursor Settings → MCP 中关闭再开启对应服务以刷新。
 
+## 内部平台文档查阅规则（重要！）
+
+本项目开发的工具大多对接公司内部平台（DataSuite Scheduler、DataStudio、SeaTalk 等），这些平台通常在 Confluence 上有 API 文档和技术设计文档。
+
+### 开发前必须做
+- **在开发对接内部平台的功能前，先用 Confluence MCP 搜索相关文档**
+- 搜索关键词示例：`"DataSuite Scheduler API"`、`"DataStudio Open API"`、`"SeaTalk Bot API"` 等
+- 优先查找 `DI`（Space DI）空间下的文档，这是数据基础设施团队的主空间
+
+### 如何使用
+```
+1. 搜索: confluence_search(query="平台名 + API/设计文档关键词")
+2. 阅读: confluence_get_page(page_id="搜到的页面ID")
+3. 从文档中提取：API 路径、参数格式、认证方式、环境区分规则等
+```
+
+### 已知的重要文档
+| 平台 | Confluence 页面 | Page ID |
+|------|----------------|---------|
+| Scheduler Open API | [External] Scheduler Open API | 1382956585 |
+| Scheduler Data-Dependency API | [Scheduler System V2] Data-Dependency Service API Design | 507548038 |
+
+### 为什么重要
+- 避免通过浏览器抓包逆向 API（耗时、不稳定、可能遗漏参数）
+- 文档中通常包含环境区分规则（dev/staging/prod）、认证方式、参数枚举值等关键信息
+- 减少反复试错，提高开发效率
+
 ## 新功能开发原则
 
-- **Chrome 扩展侧**:
+- **Chrome 扩展侧** (`chrome-extension/`):
   - 页面 DOM 操作 / UI → `content.js`
   - API 拦截 → `injected.js`
   - 后台逻辑 / 存储 / 消息转发 → `background.js`

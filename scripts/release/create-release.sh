@@ -20,23 +20,25 @@ echo "🧹 清理旧的构建文件..."
 rm -rf "${RELEASE_DIR}"
 mkdir -p "${BUILD_DIR}"
 
+EXT_DIR="chrome-extension"
+
 # 复制必需文件
 echo "📄 复制扩展文件..."
-cp manifest.json "${BUILD_DIR}/"
-cp popup.html "${BUILD_DIR}/"
-cp popup.js "${BUILD_DIR}/"
-cp background.js "${BUILD_DIR}/"
-cp styles.css "${BUILD_DIR}/"
+cp "${EXT_DIR}/manifest.json" "${BUILD_DIR}/"
+cp "${EXT_DIR}/popup.html" "${BUILD_DIR}/"
+cp "${EXT_DIR}/popup.js" "${BUILD_DIR}/"
+cp "${EXT_DIR}/background.js" "${BUILD_DIR}/"
+cp "${EXT_DIR}/styles.css" "${BUILD_DIR}/"
 
 # 复制文档
 echo "📚 复制文档文件..."
 cp README.md "${BUILD_DIR}/"
-cp INSTALL.md "${BUILD_DIR}/"
+cp INSTALL.md "${BUILD_DIR}/" 2>/dev/null || true
 
 # 复制图标
 echo "🎨 复制图标文件..."
 mkdir -p "${BUILD_DIR}/images"
-cp -r images/* "${BUILD_DIR}/images/" 2>/dev/null || echo "   ⚠️  警告: 图标文件夹为空或不存在"
+cp -r "${EXT_DIR}/images"/* "${BUILD_DIR}/images/" 2>/dev/null || echo "   ⚠️  警告: 图标文件夹为空或不存在"
 
 # 创建zip包
 echo "🗜️  创建压缩包..."
