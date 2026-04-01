@@ -1093,21 +1093,43 @@ async def query_messages_sqlite(
                 }}
                 // c.m[] 嵌套多段消息（转发、富消息）
                 if (!text && parsed.m && Array.isArray(parsed.m)) {{
+                    // Build uid->name map from parsed.u[] (forwarded message participant list)
+                    var fwdUsers = {{}};
+                    if (parsed.u && Array.isArray(parsed.u)) {{
+                        for (var fu = 0; fu < parsed.u.length; fu++) {{
+                            if (parsed.u[fu].uid) fwdUsers[parsed.u[fu].uid] = parsed.u[fu].n || parsed.u[fu].nk || ('user-' + parsed.u[fu].uid);
+                        }}
+                    }}
                     var mParts = [];
+                    var lastUid = null;
                     for (var mi2 = 0; mi2 < parsed.m.length; mi2++) {{
                         var seg = parsed.m[mi2];
                         var segTag = seg.tag || '';
                         var segC = seg.c || {{}};
-                        if (segTag === 'text' && segC && typeof segC.c === 'string') mParts.push(segC.c);
-                        else if (segTag === 'image') mParts.push('[图片]');
-                        else if (segTag === 'video') mParts.push('[视频]');
-                        else if (segTag === 'file') mParts.push('[文件' + (segC.n ? ': ' + segC.n : '') + ']');
-                        else if (segTag === 'sticker') mParts.push('[表情]');
-                        else if (segTag === 'link') mParts.push('[链接' + (segC.t ? ': ' + segC.t : (segC.u ? ': ' + segC.u : '')) + ']');
-                        else if (segTag === 'history' && segC.m) mParts.push('[转发消息]');
-                        else if (segC && typeof segC.c === 'string') mParts.push(segC.c);
+                        var segUid = seg.uid;
+                        var segSender = fwdUsers[segUid] || info[segUid] && info[segUid].name || '';
+                        var segText = '';
+                        if (segTag === 'text' && segC && typeof segC.c === 'string') segText = segC.c;
+                        else if (segTag === 'image') segText = '[图片]';
+                        else if (segTag === 'video') segText = '[视频]';
+                        else if (segTag === 'file') segText = '[文件' + (segC.n ? ': ' + segC.n : '') + ']';
+                        else if (segTag === 'sticker') segText = '[表情]';
+                        else if (segTag === 'link') segText = '[链接' + (segC.t ? ': ' + segC.t : (segC.u ? ': ' + segC.u : '')) + ']';
+                        else if (segTag === 'history' && segC.m) segText = '[嵌套转发消息]';
+                        else if (segC && typeof segC.c === 'string') segText = segC.c;
+                        if (segText) {{
+                            if (segSender && segUid !== lastUid) {{
+                                mParts.push(segSender + ': ' + segText);
+                            }} else {{
+                                mParts.push(segText);
+                            }}
+                            lastUid = segUid;
+                        }}
                     }}
-                    if (mParts.length) text = mParts.join('\\n');
+                    if (mParts.length) {{
+                        var fwdTitle = '[转发聊天记录 (' + parsed.m.length + '条)]';
+                        text = fwdTitle + '\\n' + mParts.join('\\n');
+                    }}
                 }}
                 // c.es[] 富文本结构
                 if (!text && parsed.es && Array.isArray(parsed.es)) {{
