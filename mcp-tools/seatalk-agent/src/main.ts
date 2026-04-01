@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
@@ -403,6 +404,7 @@ async function main() {
         const text = data.text as string;
         const context = data.context as Record<string, unknown> | undefined;
         const history = data.history as Array<{ role: string; text: string }> | undefined;
+        const images = data.images as Array<{ data: string; mimeType: string }> | undefined;
 
         if (!agent) {
           await bridge.sendToPanel({
@@ -436,7 +438,7 @@ async function main() {
         switchPending = '';
         if (switchFlushTimer) { clearTimeout(switchFlushTimer); switchFlushTimer = null; }
 
-        const promptBlocks: Array<{ type: string; text: string }> = [];
+        const promptBlocks: Array<{ type: string; text?: string; data?: string; mimeType?: string }> = [];
         promptBlocks.push({ type: 'text', text: buildWorkspaceContext() });
 
         // Inject conversation history for context recovery (first prompt in new session)
@@ -455,7 +457,40 @@ async function main() {
         if (contextStr) {
           promptBlocks.push({ type: 'text', text: `[SeaTalk 聊天上下文]\n${contextStr}` });
         }
-        promptBlocks.push({ type: 'text', text });
+        if (text) {
+          promptBlocks.push({ type: 'text', text });
+        }
+
+        // Save images to temp files and instruct Agent to read them
+        if (images && images.length > 0) {
+          const imgDir = path.join(os.tmpdir(), 'seatalk-agent-images');
+          fs.mkdirSync(imgDir, { recursive: true });
+          const savedPaths: string[] = [];
+
+          for (const img of images) {
+            const sizeBytes = Math.ceil((img.data.length * 3) / 4);
+            if (sizeBytes > 5 * 1024 * 1024) {
+              log(`skipping oversized image (${(sizeBytes / 1024 / 1024).toFixed(1)}MB)`);
+              continue;
+            }
+            const ext = img.mimeType === 'image/png' ? '.png' : img.mimeType === 'image/gif' ? '.gif' : img.mimeType === 'image/webp' ? '.webp' : '.jpg';
+            const imgPath = path.join(imgDir, `img_${Date.now()}_${Math.random().toString(36).slice(2, 6)}${ext}`);
+            fs.writeFileSync(imgPath, Buffer.from(img.data, 'base64'));
+            savedPaths.push(imgPath);
+          }
+
+          if (savedPaths.length > 0) {
+            const fileRef = savedPaths.map((p) => `- ${p}`).join('\n');
+            promptBlocks.push({
+              type: 'text',
+              text: `[用户发送了 ${savedPaths.length} 张图片，已保存到以下路径。请使用 Read 工具读取这些图片文件来查看内容]\n${fileRef}`,
+            });
+          }
+          if (!text) {
+            promptBlocks.push({ type: 'text', text: '请分析用户发送的图片。' });
+          }
+          log(`saved ${images.length} image(s) to: ${savedPaths.join(', ')}`);
+        }
 
         try {
           log(`sending prompt to ACP (sessionId=${agent.sessionId}, promptCount=${sessionPromptCount})...`);

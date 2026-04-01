@@ -267,6 +267,7 @@ export interface AgentProcess {
   availableModels: ModelInfo[];
   currentModelId: string;
   resumed: boolean;
+  supportsImage: boolean;
 }
 
 export async function spawnAgent(opts: {
@@ -319,13 +320,16 @@ export async function spawnAgent(opts: {
   const race = <T>(p: Promise<T>) => Promise.race([p, earlyExit]);
 
   log('initializing ACP connection...');
-  await race(connection.initialize({
+  const initResult = await race(connection.initialize({
     protocolVersion: acp.PROTOCOL_VERSION,
     clientInfo: { name: 'seatalk-agent', title: 'SeaTalk Agent', version: '0.2.0' },
     clientCapabilities: {
       fs: { readTextFile: true, writeTextFile: true },
     },
   }));
+  const agentCaps = (initResult as any)?.agentCapabilities || {};
+  const supportsImage = !!(agentCaps.promptCapabilities?.image);
+  log(`agent capabilities — image: ${supportsImage}`);
 
   log('authenticating...');
   await race(connection.authenticate({ methodId: 'cursor_login' }));
@@ -379,7 +383,7 @@ export async function spawnAgent(opts: {
     log('set_mode not supported, skipping');
   }
 
-  return { connection, sessionId, proc, client, availableModels: [], currentModelId: '', resumed };
+  return { connection, sessionId, proc, client, availableModels: [], currentModelId: '', resumed, supportsImage };
 }
 
 export async function listModels(log: (msg: string) => void): Promise<{ models: ModelInfo[]; currentModelId: string }> {
@@ -398,11 +402,12 @@ export async function listModels(log: (msg: string) => void): Promise<{ models: 
       let currentModelId = '';
       const lines = out.split('\n');
       for (const line of lines) {
-        const m = line.match(/^(\S+)\s+-\s+(.+?)(?:\s+\((current|default)\))?$/);
+        const m = line.match(/^(\S+)\s+-\s+(.+?)(?:\s+\(([^)]+)\))?$/);
         if (m) {
           models.push({ modelId: m[1], name: m[2].trim() });
-          if (m[3] === 'current') currentModelId = m[1];
-          if (m[3] === 'default' && !currentModelId) currentModelId = m[1];
+          const flags = m[3] || '';
+          if (flags.includes('current')) currentModelId = m[1];
+          if (flags.includes('default') && !currentModelId) currentModelId = m[1];
         }
       }
       log(`listed ${models.length} models (current: ${currentModelId})`);

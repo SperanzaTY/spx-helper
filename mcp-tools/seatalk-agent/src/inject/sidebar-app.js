@@ -28,6 +28,10 @@
   var wsLabel = null;
   var turnView = null, turnEl = null, turnFullText = '', turnFullThinking = '';
   var turnToolCalls = {}; // accumulate tool call state across tool_start / tool_update
+  var pendingImages = []; // [{data: base64String, mimeType, name}]
+  var imgPreviewEl = null, imgFileInput = null;
+  var MAX_IMAGES = 4, MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+  var ACCEPTED_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
 
   // ── Persistence ──
   function loadConvs() { try { var r = localStorage.getItem(STORE_KEY); return r ? JSON.parse(r) : []; } catch (_) { return []; } }
@@ -221,6 +225,26 @@
     '.cursor-stopbtn { width:30px; height:30px; border-radius:6px; border:none; background:var(--cp-stopbtn-bg); color:var(--cp-stopbtn-color); cursor:pointer; display:flex; align-items:center; justify-content:center; flex-shrink:0; transition:background .15s; }',
     '.cursor-stopbtn:hover { background:var(--cp-stopbtn-hover); }',
 
+    // Image upload button
+    '.cursor-imgbtn { width:30px; height:30px; border-radius:6px; border:none; background:transparent; color:var(--cp-text-dim); cursor:pointer; display:flex; align-items:center; justify-content:center; flex-shrink:0; transition:all .15s; }',
+    '.cursor-imgbtn:hover { background:var(--cp-bg3); color:var(--cp-accent); }',
+
+    // Image preview area (pending images above textarea)
+    '.cursor-img-preview { display:none; padding:6px 12px 2px; gap:6px; flex-wrap:wrap; align-items:center; }',
+    '.cursor-img-preview.show { display:flex; }',
+    '.cursor-img-preview-item { position:relative; width:60px; height:60px; border-radius:6px; overflow:hidden; border:1px solid var(--cp-border2); flex-shrink:0; }',
+    '.cursor-img-preview-item img { width:100%; height:100%; object-fit:cover; display:block; }',
+    '.cursor-img-preview-item .rm { position:absolute; top:1px; right:1px; width:16px; height:16px; border-radius:50%; background:rgba(0,0,0,0.6); color:#fff; font-size:10px; line-height:16px; text-align:center; cursor:pointer; opacity:0; transition:opacity .15s; }',
+    '.cursor-img-preview-item:hover .rm { opacity:1; }',
+
+    // Drag-over highlight on input area
+    '.cursor-input-area.dragover { outline:2px dashed var(--cp-accent); outline-offset:-2px; background:var(--cp-accent-bg); }',
+
+    // Images in user messages
+    '.cursor-msg-images { display:flex; gap:4px; flex-wrap:wrap; margin-top:6px; }',
+    '.cursor-msg-images img { max-width:120px; max-height:120px; border-radius:6px; border:1px solid var(--cp-border2); object-fit:cover; cursor:pointer; transition:transform .15s; }',
+    '.cursor-msg-images img:hover { transform:scale(1.05); }',
+
     // Context bar (above input area)
     '.cursor-ctx { display:none; margin:0 12px 4px; padding:6px 10px; font-size:11px; background:var(--cp-bg3); color:var(--cp-text-dim); border-radius:6px; border:1px solid var(--cp-border); align-items:center; gap:6px; flex-shrink:0; line-height:1.4; max-height:60px; overflow:hidden; }',
     '.cursor-ctx.show { display:flex; }',
@@ -385,7 +409,16 @@
       if (m.role === 'user') {
         var el = document.createElement('div');
         el.className = 'cursor-msg-user';
-        el.innerHTML = '<div class="cursor-msg-user-label">You</div>' + escapeHtml(m.text);
+        var html = '<div class="cursor-msg-user-label">You</div>' + escapeHtml(m.text);
+        if (m.images && m.images.length > 0) {
+          html += '<div class="cursor-msg-images">';
+          m.images.forEach(function (img) {
+            var src = img.preview || ('data:' + img.mimeType + ';base64,' + img.data);
+            html += '<img src="' + src + '" title="' + escapeHtml(img.name || 'image') + '">';
+          });
+          html += '</div>';
+        }
+        el.innerHTML = html;
         container.appendChild(el);
       } else {
         var turnContainer = document.createElement('div');
@@ -454,20 +487,62 @@
     if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight;
   }
 
+  // ── Image helpers ──
+  function addPendingImage(file) {
+    if (pendingImages.length >= MAX_IMAGES) return;
+    if (ACCEPTED_TYPES.indexOf(file.type) < 0) return;
+    if (file.size > MAX_IMAGE_BYTES) { console.warn('[cursor-acp] image too large:', file.size); return; }
+    var reader = new FileReader();
+    reader.onload = function () {
+      var dataUrl = reader.result;
+      var base64 = dataUrl.split(',')[1];
+      pendingImages.push({ data: base64, mimeType: file.type, name: file.name || 'image', preview: dataUrl });
+      renderImagePreview();
+    };
+    reader.readAsDataURL(file);
+  }
+  function removePendingImage(idx) {
+    pendingImages.splice(idx, 1);
+    renderImagePreview();
+  }
+  function clearPendingImages() {
+    pendingImages = [];
+    renderImagePreview();
+  }
+  function renderImagePreview() {
+    if (!imgPreviewEl) return;
+    imgPreviewEl.innerHTML = '';
+    if (pendingImages.length === 0) { imgPreviewEl.classList.remove('show'); return; }
+    imgPreviewEl.classList.add('show');
+    pendingImages.forEach(function (img, i) {
+      var item = document.createElement('div');
+      item.className = 'cursor-img-preview-item';
+      item.innerHTML = '<img src="' + img.preview + '"><span class="rm">✕</span>';
+      item.querySelector('.rm').addEventListener('click', function () { removePendingImage(i); });
+      imgPreviewEl.appendChild(item);
+    });
+  }
+
   // ── Send ──
   function doSend() {
     if (!inputEl) return;
     var text = inputEl.value.trim();
-    if (!text || isProcessing) return;
+    var hasImages = pendingImages.length > 0;
+    if ((!text && !hasImages) || isProcessing) return;
     inputEl.value = ''; inputEl.style.height = '36px';
-    messages.push({ role: 'user', text: text });
+    var msgImages = hasImages ? pendingImages.slice() : undefined;
+    clearPendingImages();
+    messages.push({ role: 'user', text: text || (msgImages ? '[图片]' : ''), images: msgImages });
     renderAllMessages(messagesEl);
     var typing = document.createElement('div');
     typing.className = 'ca-typing';
     typing.innerHTML = '<span></span><span></span><span></span>';
     messagesEl.appendChild(typing);
     messagesEl.scrollTop = messagesEl.scrollHeight;
-    var payload = { type: 'user_message', text: text };
+    var payload = { type: 'user_message', text: text || '' };
+    if (msgImages) {
+      payload.images = msgImages.map(function (img) { return { data: img.data, mimeType: img.mimeType }; });
+    }
     if (contextData) { payload.context = contextData; contextData = null; if (ctxBar) ctxBar.classList.remove('show'); }
     // Attach conversation history for context recovery after restart
     if (messages.length > 1) {
@@ -500,6 +575,27 @@
       ? row.querySelector('.messages-message-list-item-text-content')
       : (row.querySelector('.content') || row.querySelector('.messages-message-list-item-text-content'));
     var text = textEl ? textEl.textContent.trim() : '';
+
+    if (!text) {
+      var imgEl = row.querySelector('img.image-content, img.chat-image, img[class*="image"]');
+      var videoEl = row.querySelector('video, [class*="video-message"]');
+      var fileEl = row.querySelector('[class*="file-message"], [class*="file-content"]');
+      var stickerEl = row.querySelector('[class*="sticker"]');
+      if (imgEl) {
+        var src = imgEl.getAttribute('src') || '';
+        var alt = imgEl.getAttribute('alt') || '';
+        text = '[图片]';
+        if (alt) text = '[图片: ' + alt + ']';
+        if (src && src.indexOf('f.haiserve.com') >= 0) text += ' ' + src.split('?')[0];
+      } else if (videoEl) {
+        text = '[视频]';
+      } else if (fileEl) {
+        var fnameEl = fileEl.querySelector('[class*="file-name"], .name');
+        text = '[文件' + (fnameEl ? ': ' + fnameEl.textContent.trim() : '') + ']';
+      } else if (stickerEl) {
+        text = '[表情]';
+      }
+    }
     if (!text) return null;
 
     var nameEl = isThread ? row.querySelector('.thread-message-header-box .name') : row.querySelector('.name');
@@ -1209,8 +1305,11 @@
     inputArea.className = 'cursor-input-area';
     inputArea.innerHTML =
       '<div class="cursor-input-meta"><span class="cursor-model-badge"><span class="dot"></span>Model</span><div class="cursor-model-dd"></div></div>' +
+      '<div class="cursor-img-preview"></div>' +
       '<div class="cursor-input-wrap">' +
       '<textarea class="cursor-input" placeholder="Ask anything..." rows="1"></textarea>' +
+      '<button class="cursor-imgbtn" title="添加图片"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg></button>' +
+      '<input type="file" class="cursor-img-file" accept="image/png,image/jpeg,image/gif,image/webp" multiple style="display:none">' +
       '<button class="cursor-sendbtn"><svg width="14" height="14" viewBox="0 0 24 24" fill="white"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg></button>' +
       '<button class="cursor-stopbtn" style="display:none"><svg width="12" height="12" viewBox="0 0 24 24" fill="white"><rect x="6" y="6" width="12" height="12" rx="2"/></svg></button>' +
       '</div>';
@@ -1222,13 +1321,24 @@
     ctxBar.innerHTML = '<svg class="cursor-ctx-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21c3-3 6.5-7 8-10a4 4 0 1 0-4-4"/><path d="M12.5 8c1.5 3 5 7 8 10"/></svg><span class="cursor-ctx-label"></span><span class="rm">✕</span>';
     ctxLabel = ctxBar.querySelector('.cursor-ctx-label');
     ctxBar.querySelector('.rm').addEventListener('click', function () { contextData = null; ctxBar.classList.remove('show'); });
-    inputArea.insertBefore(ctxBar, inputArea.querySelector('.cursor-input-wrap'));
+    inputArea.insertBefore(ctxBar, inputArea.querySelector('.cursor-img-preview'));
 
     inputEl = inputArea.querySelector('.cursor-input');
     sendBtn = inputArea.querySelector('.cursor-sendbtn');
     stopBtn = inputArea.querySelector('.cursor-stopbtn');
+    imgPreviewEl = inputArea.querySelector('.cursor-img-preview');
+    imgFileInput = inputArea.querySelector('.cursor-img-file');
     modelBadgeEl = inputArea.querySelector('.cursor-model-badge');
     modelDropdown = inputArea.querySelector('.cursor-model-dd');
+
+    // Image button click → trigger file input
+    var imgBtn = inputArea.querySelector('.cursor-imgbtn');
+    imgBtn.addEventListener('click', function () { if (imgFileInput) imgFileInput.click(); });
+    imgFileInput.addEventListener('change', function () {
+      var files = imgFileInput.files;
+      for (var fi = 0; fi < files.length; fi++) addPendingImage(files[fi]);
+      imgFileInput.value = '';
+    });
 
     updateModelBadge();
     buildModelDropdown();
@@ -1266,6 +1376,42 @@
       if (e.key === 'Enter') composing = false;
     });
     sendBtn.addEventListener('click', doSend);
+
+    // Paste image from clipboard
+    inputEl.addEventListener('paste', function (e) {
+      var items = (e.clipboardData || e.originalEvent.clipboardData || {}).items;
+      if (!items) return;
+      for (var pi = 0; pi < items.length; pi++) {
+        if (items[pi].type.indexOf('image/') === 0) {
+          e.preventDefault();
+          var file = items[pi].getAsFile();
+          if (file) addPendingImage(file);
+        }
+      }
+    });
+
+    // Drag & drop images
+    inputArea.addEventListener('dragover', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      inputArea.classList.add('dragover');
+    });
+    inputArea.addEventListener('dragleave', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      inputArea.classList.remove('dragover');
+    });
+    inputArea.addEventListener('drop', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      inputArea.classList.remove('dragover');
+      var files = e.dataTransfer && e.dataTransfer.files;
+      if (!files) return;
+      for (var di = 0; di < files.length; di++) {
+        if (files[di].type.indexOf('image/') === 0) addPendingImage(files[di]);
+      }
+    });
+
     stopBtn.addEventListener('click', function () {
       if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: 'cancel' }));
       // Don't setProcessingState(false) here — wait for turn_end from backend.

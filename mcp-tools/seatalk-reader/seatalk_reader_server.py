@@ -1033,7 +1033,22 @@ async def query_messages_sqlite(
         sql += ' ORDER BY ts DESC LIMIT ?';
         sqlArgs.push(args.limit);
 
-        return window.sqlite.all(sql, sqlArgs).then(function(rows) {{
+        // Thread 元数据查询（异步）
+        var threadSql = args.crossSession
+            ? 'SELECT sid, mid, totalReplyCount, latestReplyTime FROM thread_info WHERE latestReplyTime > ' + args.minTs
+            : (args.sid ? "SELECT sid, mid, totalReplyCount, latestReplyTime FROM thread_info WHERE sid = '" + args.sid + "'" : '');
+        var threadPromise = threadSql ? window.sqlite.all(threadSql).catch(function() {{ return []; }}) : Promise.resolve([]);
+
+        return Promise.all([window.sqlite.all(sql, sqlArgs), threadPromise]).then(function(results) {{
+        var rows = results[0];
+        var threadRows = results[1] || [];
+        var threadMap = {{}};
+        for (var ti = 0; ti < threadRows.length; ti++) {{
+            threadMap[threadRows[ti].mid] = {{
+                replyCount: threadRows[ti].totalReplyCount || 0,
+                lastReply: threadRows[ti].latestReplyTime || 0
+            }};
+        }}
             var st = window.store.getState();
             var info = st.contact.userInfo;
             var groups = st.contact.groupInfo;
@@ -1065,26 +1080,76 @@ async def query_messages_sqlite(
                 var m = rows[i];
                 var parsed;
                 try {{ parsed = JSON.parse(m.c); }} catch(_) {{ continue; }}
+                var tag = m.t || 'text';
+
+                // --- 内容提取（增强版，覆盖 c.c / c.m[] / c.es / c.f） ---
                 var text = '';
-                if (typeof parsed.c === 'string') text = parsed.c;
-                else if (typeof parsed.text === 'string') text = parsed.text;
-                else if (parsed.c && typeof parsed.c === 'object' && parsed.c.text) text = String(parsed.c.text);
+                if (typeof parsed.c === 'string') {{
+                    text = parsed.c;
+                }} else if (typeof parsed.text === 'string') {{
+                    text = parsed.text;
+                }} else if (parsed.c && typeof parsed.c === 'object' && parsed.c.text) {{
+                    text = String(parsed.c.text);
+                }}
+                // c.m[] 嵌套多段消息（转发、富消息）
+                if (!text && parsed.m && Array.isArray(parsed.m)) {{
+                    var mParts = [];
+                    for (var mi2 = 0; mi2 < parsed.m.length; mi2++) {{
+                        var seg = parsed.m[mi2];
+                        var segTag = seg.tag || '';
+                        var segC = seg.c || {{}};
+                        if (segTag === 'text' && segC && typeof segC.c === 'string') mParts.push(segC.c);
+                        else if (segTag === 'image') mParts.push('[图片]');
+                        else if (segTag === 'video') mParts.push('[视频]');
+                        else if (segTag === 'file') mParts.push('[文件' + (segC.n ? ': ' + segC.n : '') + ']');
+                        else if (segTag === 'sticker') mParts.push('[表情]');
+                        else if (segTag === 'link') mParts.push('[链接' + (segC.t ? ': ' + segC.t : (segC.u ? ': ' + segC.u : '')) + ']');
+                        else if (segTag === 'history' && segC.m) mParts.push('[转发消息]');
+                        else if (segC && typeof segC.c === 'string') mParts.push(segC.c);
+                    }}
+                    if (mParts.length) text = mParts.join('\\n');
+                }}
+                // c.es[] 富文本结构
+                if (!text && parsed.es && Array.isArray(parsed.es)) {{
+                    var esParts = [];
+                    for (var ei = 0; ei < parsed.es.length; ei++) {{
+                        var esEl = parsed.es[ei];
+                        var esC = esEl.c || {{}};
+                        var esText = esC.t || esC.c || '';
+                        if (esText) esParts.push(esText);
+                    }}
+                    if (esParts.length) text = esParts.join('\\n');
+                }}
+                // c.e[] fallback
                 if (!text && parsed.e && Array.isArray(parsed.e)) {{
                     text = parsed.e.map(function(el) {{ return el.tx || ''; }}).filter(Boolean).join('\\n');
                 }}
-                text = String(text || '');
+                // 按消息类型给占位符
+                if (!text) {{
+                    var typeLabels = {{image:'[图片]', 'image.gif':'[GIF]', gif:'[GIF]', video:'[视频]', file:'[文件]', sticker:'[表情]', 'sticker.gif':'[表情]', audio:'[语音]', interactive:'[卡片]', history:'[转发]', article:'[链接]'}};
+                    text = typeLabels[tag] || '[' + tag + ']';
+                }}
+                text = String(text);
+
                 var sender = info[m.u];
                 var name = sender ? sender.name : String(m.u);
-                var tag = m.t || 'text';
+
+                // --- 媒体 URL + 元数据（增强版） ---
                 var mediaUrl = null;
-                if ((tag === 'image' || tag === 'gif' || tag === 'video' || tag === 'file') && parsed.url && userId && gfsToken) {{
+                if ((tag === 'image' || tag === 'image.gif' || tag === 'gif' || tag === 'video' || tag === 'file') && parsed.url && userId && gfsToken) {{
                     mediaUrl = 'https://f.haiserve.com/download/' + parsed.url + '?userid=' + userId + '&token=' + gfsToken + '&exact=true';
                 }}
                 var mediaInfo = null;
-                if (tag === 'image' || tag === 'gif') {{
+                if (tag === 'image' || tag === 'image.gif' || tag === 'gif') {{
                     mediaInfo = {{w: parsed.w, h: parsed.h, size: parsed.s}};
+                    if (parsed.turl) mediaInfo.thumb = parsed.turl;
                 }} else if (tag === 'file') {{
                     mediaInfo = {{name: parsed.n || parsed.name || '', size: parsed.s}};
+                }} else if (tag === 'video') {{
+                    mediaInfo = {{w: parsed.w, h: parsed.h, size: parsed.s, duration: parsed.d}};
+                }} else if (tag === 'article') {{
+                    var artUrl = (typeof parsed.c === 'string' && parsed.c.indexOf('http') === 0) ? parsed.c : '';
+                    if (artUrl || parsed.t) mediaInfo = {{title: parsed.t || '', url: artUrl}};
                 }}
                 var quote = null;
                 if (m.q) {{
@@ -1102,6 +1167,7 @@ async def query_messages_sqlite(
                     }} catch(_) {{}}
                 }}
                 var msgSessName = args.crossSession ? resolveSessName(m.sid) : sessName;
+                var threadInfo = threadMap[m.mid];
                 messages.push({{
                     mid: m.mid,
                     session: msgSessName,
@@ -1110,6 +1176,8 @@ async def query_messages_sqlite(
                     tag: tag,
                     ts: m.ts,
                     isThread: m.rtmid && m.rtmid !== '0',
+                    threadRoot: threadInfo ? true : undefined,
+                    threadReplies: threadInfo ? threadInfo.replyCount : undefined,
                     mediaUrl: mediaUrl,
                     mediaInfo: mediaInfo,
                     quote: quote
@@ -1166,7 +1234,12 @@ async def query_messages_sqlite(
             sender = msg.get("sender", "?")
             tag = msg.get("tag", "text")
             tag_label = (TAG_MAP.get(tag, f"[{tag}]") + " ") if tag != "text" else ""
-            thread_mark = " [Thread]" if msg.get("isThread") else ""
+            thread_mark = ""
+            if msg.get("isThread"):
+                thread_mark = " [Thread回复]"
+            elif msg.get("threadRoot"):
+                rc = msg.get("threadReplies", 0)
+                thread_mark = f" [Thread·{rc}条回复]" if rc else " [Thread]"
             session_mark = f" [{msg.get('session', '')}]" if is_cross and msg.get("session") else ""
 
             quote_line = ""
@@ -1175,9 +1248,9 @@ async def query_messages_sqlite(
                 quote_line = f"  (回复 {q['sender']}: \"{q['text'][:50]}\")"
 
             media_line = ""
+            mi = msg.get("mediaInfo") or {}
             if msg.get("mediaUrl"):
-                mi = msg.get("mediaInfo") or {}
-                if tag in ("image", "gif"):
+                if tag in ("image", "image.gif", "gif"):
                     dim = f" ({mi.get('w', '?')}x{mi.get('h', '?')}, {_fmt_size(mi.get('size', 0))})" if mi else ""
                     media_line = f"  ↳ 图片{dim}: {msg['mediaUrl']}"
                 elif tag == "file":
@@ -1185,7 +1258,13 @@ async def query_messages_sqlite(
                     fsize = f" ({_fmt_size(mi.get('size', 0))})" if mi and mi.get("size") else ""
                     media_line = f"  ↳ 文件 {fname}{fsize}: {msg['mediaUrl']}"
                 elif tag == "video":
-                    media_line = f"  ↳ 视频: {msg['mediaUrl']}"
+                    dur = f" {mi.get('duration', '?')}s" if mi.get("duration") else ""
+                    dim = f" {mi.get('w', '?')}x{mi.get('h', '?')}" if mi.get("w") else ""
+                    sz = f" {_fmt_size(mi.get('size', 0))}" if mi.get("size") else ""
+                    media_line = f"  ↳ 视频{dur}{dim}{sz}: {msg['mediaUrl']}"
+            elif tag == "article" and mi.get("url"):
+                title = mi.get("title", "")
+                media_line = f"  ↳ 链接: {title + ' — ' if title else ''}{mi['url']}"
 
             text = msg.get("text", "").replace("\n", "\n    ")
             lines.append(f"{ts_str}{session_mark} {sender}: {tag_label}{text}{thread_mark}")
