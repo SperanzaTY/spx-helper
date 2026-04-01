@@ -88,6 +88,9 @@ SPX Helper 配套的 Cursor MCP 工具，用于 API 溯源、Presto/Spark/CK 查
 | spark-query | Spark SQL 查询（Livy） | [README](spark-query/README.md) |
 | ck-query | ClickHouse 查询 | 见 `ck_mcp_server.py` 注释 |
 | api-trace | API 血缘溯源 | 见 `api_trace_server.py` 注释 |
+| seatalk-reader | 读取 SeaTalk 消息（通过 CDP） | 需先安装 [SeaTalk Agent](../docs/guides/SEATALK_AGENT_USER_GUIDE.md) |
+| scheduler-query | DataSuite Scheduler 任务查询 | 自动从 Chrome 读 Cookie 认证 |
+| seatalk-group | SeaTalk 批量拉群（InfraBot API） | 需 `INFRABOT_TOKEN` 环境变量 |
 
 ## 配置位置
 

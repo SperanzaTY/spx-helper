@@ -18,6 +18,12 @@ MCP 配置在 `~/.cursor/mcp.json`，新增或修改后需在 Cursor 设置中**
 | **presto-query** | Presto 查询 | 同上 |
 | **api-trace** | API 血缘溯源 | 同上 |
 | **spark-query** | Spark SQL（Livy）查询 | 同上 |
+| **seatalk-reader** | 读取 SeaTalk 消息（通过 CDP） | 本地路径 |
+| **scheduler-query** | DataSuite Scheduler 任务查询 | 本地路径 |
+| **seatalk-group** | SeaTalk 批量拉群（InfraBot API） | 本地路径 |
+| **seatalk-reader** | 读取 SeaTalk 消息（CDP） | 本地路径 |
+| **scheduler-query** | DataSuite Scheduler 任务查询 | 本地路径 |
+| **seatalk-group** | SeaTalk 批量拉群（InfraBot） | 本地路径 |
 
 ### 凭证获取
 
@@ -26,6 +32,9 @@ MCP 配置在 `~/.cursor/mcp.json`，新增或修改后需在 Cursor 设置中**
 | presto-query / api-trace | PRESTO_PERSONAL_TOKEN, PRESTO_USERNAME | [DataSuite API 管理](https://datasuite.shopee.io/dataservice/ds_api_management) → ☰ → 获取 Personal Token |
 | spark-query | LIVY_USERNAME, LIVY_PASSWORD | [Data Suite](https://datasuite.shopee.io) → 个人中心 → Profile → BigData Account |
 | ck-query | 团队统一配置 | 见 `ck_mcp_server.py` |
+| seatalk-reader | CDP_PORT | 默认 `19222`，需先安装 [SeaTalk Agent](../docs/guides/SEATALK_AGENT_USER_GUIDE.md)（含 CDP 守护进程） |
+| scheduler-query | 无需凭证 | 自动从 Chrome 读取 datasuite.shopee.io 的 Cookie，需先在浏览器登录 DataSuite |
+| seatalk-group | INFRABOT_TOKEN | [InfraBot API Playground](https://space.shopee.io/utility/seatalkbot/api-playground) → Get API Token |
 
 ---
 
@@ -217,6 +226,24 @@ AI 直接读写 Google Sheets。spx-bug-trace 用于 app问题整理、坑点、
         "SERVICE_ACCOUNT_PATH": "/Users/你的用户名/.google-credentials/spx-helper-mcp-sheets.json",
         "DRIVE_FOLDER_ID": "1USyHneT0j17IMEpm0AW5LeVJ6mop511W"
       }
+    },
+    "seatalk-reader": {
+      "command": "python3",
+      "args": ["spx-helper/mcp-tools/seatalk-reader/seatalk_reader_server.py"],
+      "env": {
+        "CDP_PORT": "19222"
+      }
+    },
+    "scheduler-query": {
+      "command": "python3",
+      "args": ["spx-helper/mcp-tools/scheduler-query/scheduler_mcp_server.py"]
+    },
+    "seatalk-group": {
+      "command": "python3",
+      "args": ["spx-helper/mcp-tools/seatalk-group/seatalk_group_server.py"],
+      "env": {
+        "INFRABOT_TOKEN": "你的InfraBot_Token"
+      }
     }
   }
 }
@@ -238,6 +265,7 @@ AI 直接读写 Google Sheets。spx-bug-trace 用于 app问题整理、坑点、
 
 | 日期 | 变更 |
 |------|------|
+| 2026-04 | 新增 seatalk-reader、scheduler-query、seatalk-group MCP 说明及配置示例 |
 | 2026-03 | Google Sheets MCP：改为团队统一配置（向团队获取 JSON、固定 DRIVE_FOLDER_ID、SERVICE_ACCOUNT_PATH 路径规范） |
 | 2026-03 | 移除 worklens (im-context)：SeaTalk CDP 采集不可用，项目内删除 |
 | 2026-03 | DrawIO MCP 安装说明：修正 npx ENOENT / node 找不到问题，改用绝对路径 + env.PATH；更正能力描述为 start_session/create_new_diagram 等 |
