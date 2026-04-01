@@ -946,16 +946,16 @@ async def query_messages_sqlite(
 ) -> str:
     """通过 SQLite 数据库直接查询 SeaTalk 消息（最强大的消息读取方式）。
 
-    直接查询 SeaTalk 本地 SQLite 数据库，可以读取所有历史消息，
-    不依赖会话是否在当前界面打开，也不依赖 Redux store 内存。
-
-    优先使用此工具而非 read_seatalk_messages，因为 SQLite 包含完整的历史消息。
+    直接查询 SeaTalk 本地 SQLite 数据库，可以读取所有历史消息。
+    支持两种查询模式:
+    1. 指定会话: 给 session_name 或 session_id，查该会话的消息（可选 keyword 过滤）
+    2. 跨群搜索: 只给 keyword 不给 session_name/session_id，跨所有群聊搜索包含关键词的消息
 
     Args:
         session_type: 会话类型 - "group"(群聊) 或 "buddy"(私聊)
-        session_id: 会话 ID
-        session_name: 会话名称（模糊匹配，优先于 session_id）
-        keyword: 搜索关键词（可选，在消息内容中搜索）
+        session_id: 会话 ID（可选）
+        session_name: 会话名称（模糊匹配，可选）
+        keyword: 搜索关键词（可选，在消息内容中搜索。单独使用时变为跨群搜索）
         limit: 返回消息数量上限，默认30
         hours: 搜索时间范围（小时），默认168（7天）
     """
@@ -996,12 +996,13 @@ async def query_messages_sqlite(
         session_type = matches[0]["type"]
         session_id = matches[0]["id"]
 
-    if not session_id:
-        return "请提供 session_id 或 session_name"
+    if not session_id and not keyword:
+        return "请提供 session_name/session_id 或 keyword（至少一个）"
 
     import time
     min_ts = int(time.time()) - hours * 3600
-    sid = f"{session_type}-{session_id}"
+    cross_session = not session_id
+    sid = f"{session_type}-{session_id}" if session_id else ""
     safe_keyword = json.dumps(f"%{keyword}%") if keyword else '""'
 
     js_code = f"""(function(){{
@@ -1012,11 +1013,17 @@ async def query_messages_sqlite(
             sid: {json.dumps(sid)},
             limit: {limit},
             minTs: {min_ts},
-            keyword: {safe_keyword}
+            keyword: {safe_keyword},
+            crossSession: {'true' if cross_session else 'false'}
         }};
 
-        var sql = 'SELECT mid, u, c, t, ts, rtmid, q FROM chat_message WHERE sid = ? AND ts > ?';
-        var sqlArgs = [args.sid, args.minTs];
+        var sql = 'SELECT mid, sid, u, c, t, ts, rtmid, q FROM chat_message WHERE ts > ?';
+        var sqlArgs = [args.minTs];
+
+        if (!args.crossSession && args.sid) {{
+            sql += ' AND sid = ?';
+            sqlArgs.push(args.sid);
+        }}
 
         if (args.keyword) {{
             sql += ' AND c LIKE ?';
@@ -1039,15 +1046,19 @@ async def query_messages_sqlite(
                 if (tm) {{ gfsToken = tm[1]; break; }}
             }}
 
-            var sessName = '';
-            var parts = args.sid.split('-');
-            if (parts[0] === 'group') {{
-                var g = groups[parts[1]];
-                sessName = g ? g.name : args.sid;
-            }} else {{
-                var u = info[parts[1]];
-                sessName = u ? u.name : args.sid;
+            function resolveSessName(sid) {{
+                var parts = sid.split('-');
+                if (parts[0] === 'group') {{
+                    var g = groups[parts[1]];
+                    return g ? g.name : sid;
+                }} else if (parts[0] === 'buddy') {{
+                    var u = info[parts[1]];
+                    return u ? ('[PM] ' + u.name) : sid;
+                }}
+                return sid;
             }}
+
+            var sessName = args.sid ? resolveSessName(args.sid) : '(跨群搜索)';
 
             var messages = [];
             for (var i = rows.length - 1; i >= 0; i--) {{
@@ -1090,8 +1101,10 @@ async def query_messages_sqlite(
                         quote = {{sender: qSender ? qSender.name : '', text: String(qText).substring(0, 100)}};
                     }} catch(_) {{}}
                 }}
+                var msgSessName = args.crossSession ? resolveSessName(m.sid) : sessName;
                 messages.push({{
                     mid: m.mid,
+                    session: msgSessName,
                     sender: name,
                     text: text.substring(0, 2000),
                     tag: tag,
@@ -1105,6 +1118,7 @@ async def query_messages_sqlite(
             return JSON.stringify({{
                 sessionName: sessName,
                 sid: args.sid,
+                crossSession: args.crossSession,
                 total: rows.length,
                 messages: messages
             }});
@@ -1123,6 +1137,7 @@ async def query_messages_sqlite(
                 )
             return f"查询失败: {data['error']}"
 
+        is_cross = data.get("crossSession", False)
         session_label = data.get("sessionName", sid)
         prefix = "[群]" if session_type == "group" else "[私]"
 
@@ -1132,11 +1147,19 @@ async def query_messages_sqlite(
             "interactive": "[卡片]", "history": "[转发]",
         }
 
-        lines = [
-            f"{prefix} {session_label} (id={session_id})",
-            f"共 {data.get('total', 0)} 条消息 (SQLite 查询，最近 {hours}h)\n",
-            "─" * 50,
-        ]
+        if is_cross:
+            kw_display = keyword or "?"
+            lines = [
+                f"跨群搜索: \"{kw_display}\"",
+                f"共 {data.get('total', 0)} 条消息 (最近 {hours}h)\n",
+                "─" * 55,
+            ]
+        else:
+            lines = [
+                f"{prefix} {session_label} (id={session_id})",
+                f"共 {data.get('total', 0)} 条消息 (SQLite 查询，最近 {hours}h)\n",
+                "─" * 50,
+            ]
 
         for msg in data.get("messages", []):
             ts_str = datetime.fromtimestamp(msg["ts"], tz=TZ8).strftime("%m-%d %H:%M:%S") if msg.get("ts") else ""
@@ -1144,6 +1167,7 @@ async def query_messages_sqlite(
             tag = msg.get("tag", "text")
             tag_label = (TAG_MAP.get(tag, f"[{tag}]") + " ") if tag != "text" else ""
             thread_mark = " [Thread]" if msg.get("isThread") else ""
+            session_mark = f" [{msg.get('session', '')}]" if is_cross and msg.get("session") else ""
 
             quote_line = ""
             if msg.get("quote"):
@@ -1164,7 +1188,7 @@ async def query_messages_sqlite(
                     media_line = f"  ↳ 视频: {msg['mediaUrl']}"
 
             text = msg.get("text", "").replace("\n", "\n    ")
-            lines.append(f"{ts_str} {sender}: {tag_label}{text}{thread_mark}")
+            lines.append(f"{ts_str}{session_mark} {sender}: {tag_label}{text}{thread_mark}")
             if quote_line:
                 lines.append(quote_line)
             if media_line:
@@ -1174,6 +1198,134 @@ async def query_messages_sqlite(
 
     except Exception as e:
         return f"SQLite 查询失败: {e}"
+
+
+@mcp.tool()
+async def query_mentions(
+    hours: int = 72,
+    limit: int = 50,
+) -> str:
+    """查询最近 @我 的消息（跨所有群聊和私聊）。
+
+    自动获取当前登录用户 ID，查询 SQLite 中所有在消息内容中提及该用户的消息。
+    包括 @提及、直接回复等场景。
+
+    Args:
+        hours: 搜索时间范围（小时），默认72（3天）
+        limit: 返回消息数量上限，默认50
+    """
+    err = _check_cdp_available()
+    if err:
+        return err
+
+    import time
+    min_ts = int(time.time()) - hours * 3600
+
+    js_code = f"""(function(){{
+        if (!window.sqlite || typeof window.sqlite.all !== 'function')
+            return JSON.stringify({{error: 'sqlite not available'}});
+
+        var st = window.store.getState();
+        var myUid = st.login && st.login.userid;
+        if (!myUid) return JSON.stringify({{error: 'cannot determine current user id'}});
+
+        var uidStr = String(myUid);
+        var info = st.contact.userInfo || {{}};
+        var groups = st.contact.groupInfo || {{}};
+
+        return window.sqlite.all(
+            "SELECT mid, sid, u, c, t, ts, q FROM chat_message WHERE ts > ? AND c LIKE ? AND u != ? ORDER BY ts DESC LIMIT ?",
+            [{min_ts}, '%' + uidStr + '%', myUid, {limit}]
+        ).then(function(rows) {{
+            var results = [];
+            for (var i = 0; i < rows.length; i++) {{
+                var r = rows[i];
+                var senderName = String(r.u);
+                if (info[r.u]) senderName = info[r.u].name || info[r.u].nick || senderName;
+
+                var parts = r.sid.split('-');
+                var sessionLabel = r.sid;
+                if (parts[0] === 'group' && groups[parts[1]]) sessionLabel = groups[parts[1]].name;
+                else if (parts[0] === 'buddy' && info[parts[1]]) sessionLabel = '[PM] ' + (info[parts[1]].name || parts[1]);
+
+                var text = '';
+                try {{
+                    var parsed = JSON.parse(r.c);
+                    if (typeof parsed.c === 'string') text = parsed.c;
+                    else if (typeof parsed.text === 'string') text = parsed.text;
+                    else if (parsed.e && Array.isArray(parsed.e)) {{
+                        text = parsed.e.map(function(el) {{ return el.tx || ''; }}).filter(Boolean).join('');
+                    }}
+                }} catch(e) {{ text = r.c || ''; }}
+
+                var quote = null;
+                if (r.q) {{
+                    try {{
+                        var qp = JSON.parse(r.q);
+                        var qSender = info[qp.u || qp.senderId];
+                        var qText = '';
+                        if (qp.c) {{
+                            try {{
+                                var qParsed = JSON.parse(qp.c);
+                                qText = typeof qParsed.c === 'string' ? qParsed.c : '';
+                            }} catch(_) {{ qText = String(qp.c); }}
+                        }}
+                        quote = {{sender: qSender ? qSender.name : '', text: String(qText).substring(0, 100)}};
+                    }} catch(_) {{}}
+                }}
+
+                results.push({{
+                    session: sessionLabel,
+                    sid: r.sid,
+                    sender: senderName,
+                    text: text.substring(0, 500),
+                    tag: r.t || 'text',
+                    ts: r.ts,
+                    quote: quote
+                }});
+            }}
+            return JSON.stringify({{myUid: myUid, total: results.length, results: results}});
+        }});
+    }})()"""
+
+    try:
+        raw = await _eval_js(js_code)
+        data = json.loads(raw) if isinstance(raw, str) else raw
+
+        if isinstance(data, dict) and data.get("error"):
+            return f"查询失败: {data['error']}"
+
+        total = data.get("total", 0)
+        my_uid = data.get("myUid", "?")
+
+        lines = [
+            f"最近 {hours} 小时内 @你(uid={my_uid}) 的消息: {total} 条\n",
+            "─" * 55,
+        ]
+
+        seen_sessions = set()
+        for msg in data.get("results", []):
+            ts_str = datetime.fromtimestamp(msg["ts"], tz=TZ8).strftime("%m-%d %H:%M") if msg.get("ts") else ""
+            session = msg.get("session", "?")
+            sender = msg.get("sender", "?")
+            text = msg.get("text", "").replace("\n", " ")[:300]
+
+            lines.append(f"[{ts_str}] [{session}]")
+            lines.append(f"  From: {sender}")
+            lines.append(f"  {text}")
+            if msg.get("quote"):
+                q = msg["quote"]
+                lines.append(f"  (回复 {q['sender']}: \"{q['text'][:80]}\")")
+            lines.append("─" * 55)
+            seen_sessions.add(session)
+
+        if total > 0:
+            lines.append(f"\n涉及 {len(seen_sessions)} 个会话: {', '.join(sorted(seen_sessions))}")
+
+        return "\n".join(lines)
+
+    except Exception as e:
+        return f"查询 @提及 失败: {e}"
 
 
 @mcp.tool()

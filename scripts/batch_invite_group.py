@@ -95,6 +95,36 @@ def load_emails(file_path: str | None, cli_emails: list[str] | None) -> list[str
     return unique
 
 
+def normalize_task_owners(names: list[str] | None) -> list[str]:
+    """将表格中的 task_owner（无 @ 后缀）转为 shopee 邮箱并去重。"""
+    if not names:
+        return []
+    seen: set[str] = set()
+    out: list[str] = []
+    for raw in names:
+        s = raw.strip().lower()
+        if not s:
+            continue
+        if "@" not in s:
+            s = f"{s}@shopee.com"
+        if s not in seen:
+            seen.add(s)
+            out.append(s)
+    return out
+
+
+def merge_unique_email_lists(*lists: list[str]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for lst in lists:
+        for e in lst:
+            el = e.lower().strip()
+            if el and el not in seen:
+                seen.add(el)
+                out.append(el)
+    return out
+
+
 def check_setup(token: str, group_id: str) -> None:
     """验证 token 和 group_id 是否可用。"""
     headers = {
@@ -212,6 +242,8 @@ def main():
                         help="邮箱列表文件（每行一个，支持逗号/分号/制表符分隔）")
     parser.add_argument("--emails", "-e", nargs="+",
                         help="直接传入邮箱列表")
+    parser.add_argument("--task-owners", nargs="+", metavar="OWNER",
+                        help="task_owner 用户名（无 @ 时自动补全为 OWNER@shopee.com），可与 --emails 混用")
     parser.add_argument("--token", "-t",
                         help="InfraBot API Token（或通过 INFRABOT_TOKEN 环境变量）")
     parser.add_argument("--dry-run", action="store_true",
@@ -227,10 +259,13 @@ def main():
         check_setup(token, args.group_id)
         return
 
-    if not args.file and not args.emails:
-        parser.error("请提供 --file 或 --emails（或使用 --check 检查配置）")
+    if not args.file and not args.emails and not args.task_owners:
+        parser.error("请提供 --file、--emails 或 --task-owners（或使用 --check 检查配置）")
 
-    emails = load_emails(args.file, args.emails)
+    emails = merge_unique_email_lists(
+        load_emails(args.file, args.emails),
+        normalize_task_owners(args.task_owners),
+    )
 
     if not emails:
         print("[ERROR] 未找到有效的邮箱地址")

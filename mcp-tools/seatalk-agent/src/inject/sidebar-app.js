@@ -239,6 +239,8 @@
     '.cursor-status-reconnect:hover { background:var(--cp-bg2); border-color:var(--cp-accent); }',
     '.cursor-status-reconnect.show { display:inline-block; }',
     '.cursor-status-model { flex:1; text-align:right; color:var(--cp-text-dim2); }',
+    '.cursor-usage-badge { font-size:9px; color:var(--cp-text-dim2); display:flex; align-items:center; gap:2px; cursor:default; white-space:nowrap; }',
+    '.cursor-turn-usage { font-size:10px; color:var(--cp-text-dim2); padding:4px 0 0; opacity:0.7; text-align:right; }',
 
     // Settings dropdown
     '.cursor-settings-wrap { position:relative; }',
@@ -777,6 +779,18 @@
         if (d.output) tc.result = d.output;
         turnView.processChunk({ type: 'tool_call', toolCall: tc });
         if (turnEl) { var r2 = turnEl.querySelector('.ca-result'); if (r2) turnEl.appendChild(r2); }
+      } else if (d.type === 'turn_usage') {
+        if (turnEl) {
+          var uEl = document.createElement('div');
+          uEl.className = 'cursor-turn-usage';
+          var parts = [];
+          if (d.inputTokens) parts.push('In: ' + formatTokens(d.inputTokens));
+          if (d.outputTokens) parts.push('Out: ' + formatTokens(d.outputTokens));
+          if (d.cachedReadTokens) parts.push('Cache: ' + formatTokens(d.cachedReadTokens));
+          if (d.thoughtTokens) parts.push('Think: ' + formatTokens(d.thoughtTokens));
+          uEl.textContent = parts.join(' · ');
+          turnEl.appendChild(uEl);
+        }
       } else if (d.type === 'turn_end') {
         if (!turnView && !turnEl) return;
         endTurn(d.stopReason);
@@ -821,6 +835,8 @@
           updateWsLabel();
           if (cachedWorkspace) { try { localStorage.setItem(WS_KEY, cachedWorkspace); } catch (_) {} }
         }
+      } else if (d.type === 'usage') {
+        updateUsageBadge(d);
       } else if (d.type === 'folder_selected') {
         var fp = d.path || '';
         if (fp && fp !== cachedWorkspace) {
@@ -959,6 +975,26 @@
 
   function updateWsLabel() {
     if (wsLabel) wsLabel.textContent = wsDisplayName(cachedWorkspace);
+  }
+
+  function formatTokens(n) {
+    if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+    if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
+    return String(n);
+  }
+  function updateUsageBadge(d) {
+    if (!panelHandle || !panelHandle.el) return;
+    var badge = panelHandle.el.querySelector('.cursor-usage-badge');
+    if (!badge) return;
+    var used = d.contextUsed || 0;
+    var size = d.contextSize || 0;
+    if (size === 0) { badge.style.display = 'none'; return; }
+    var pct = Math.round((used / size) * 100);
+    var color = pct > 80 ? '#e74c3c' : pct > 50 ? '#f39c12' : 'var(--hp-fg-muted, #888)';
+    badge.style.display = '';
+    badge.style.color = color;
+    badge.title = 'Context: ' + formatTokens(used) + ' / ' + formatTokens(size) + ' tokens (' + pct + '%)';
+    badge.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10" opacity="0.25"/><path d="M12 2a10 10 0 0 1 0 20" style="stroke-dasharray:' + (pct * 0.628) + ' 62.8;stroke-dashoffset:0;transform-origin:center;transform:rotate(-90deg)"/></svg> ' + pct + '%';
   }
 
   // ── Show panel ──
@@ -1248,6 +1284,7 @@
       '<span class="cursor-status-dot none"></span>' +
       '<span class="cursor-status-text">...</span>' +
       '<button class="cursor-status-reconnect">重连</button>' +
+      '<span class="cursor-usage-badge" title="Context usage" style="display:none"></span>' +
       '<span class="cursor-status-model" style="flex:1;text-align:right"></span>' +
       '<span class="cursor-settings-wrap">' +
         '<button class="cursor-topbar-btn cursor-settings-btn" title="Settings"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>' +

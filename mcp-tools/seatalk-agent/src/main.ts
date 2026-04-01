@@ -190,29 +190,33 @@ async function main() {
 
     sections.push('');
     sections.push(
-      `SEATALK 消息读取（重要 — 必须使用 MCP 工具）:\n` +
-      `你可以通过已注册的 seatalk-reader MCP Server 读取 SeaTalk 消息。\n` +
-      `⚠ 必须使用 MCP 工具调用，不要用 Shell 命令调用 Python 脚本。\n` +
-      `⚠ 绝对不要写 CDP/WebSocket 脚本，不要打开 seatalk:// URL — 会导致 SeaTalk 崩溃。\n` +
+      `SEATALK 消息读取:\n` +
+      `你已连接 seatalk-reader MCP Server。操作 SeaTalk 数据时，优先使用这些 MCP 工具。\n` +
+      `不要自己写 CDP/WebSocket 脚本连接 localhost:19222，MCP 工具内部已经封装了所有底层操作。\n` +
       `\n` +
-      `可用 MCP 工具（seatalk-reader 服务）:\n` +
-      `  open_seatalk_link(url) — 打开 SeaTalk 消息链接，自动跳转到对应会话\n` +
-      `  query_messages_sqlite(session_name, session_id, keyword, limit, hours) — SQLite 直接查历史消息（最强大）\n` +
-      `  read_current_chat(limit) — 读取当前打开的会话消息\n` +
+      `核心工具:\n` +
+      `  query_messages_sqlite(session_name?, keyword?, limit?, hours?) — 万能查询工具\n` +
+      `    这是最强大的工具，可以覆盖几乎所有消息查询需求:\n` +
+      `    - 查某个群的消息: session_name="群名"\n` +
+      `    - 搜索关键词: keyword="关键词"\n` +
+      `    - 组合使用: session_name="XX群" + keyword="某任务"\n` +
+      `    - 调大时间范围: hours=720 (30天)\n` +
+      `    - 调大数量: limit=100\n` +
+      `  query_mentions(hours?, limit?) — 查所有 @我 的消息（跨所有群聊）\n` +
+      `\n` +
+      `辅助工具:\n` +
+      `  list_seatalk_chats() — 列出所有会话（找不到群名时先用这个）\n` +
+      `  read_current_chat(limit?) — 读取当前正在查看的会话\n` +
       `  navigate_to_chat(session_name) — 切换到指定群聊\n` +
-      `  search_seatalk_messages(keyword) — 搜索消息\n` +
-      `  list_seatalk_chats() — 列出所有会话\n` +
-      `  download_seatalk_image(image_url, session_type, session_id, limit) — 下载聊天图片到本地\n` +
+      `  search_seatalk_messages(keyword) — 全局搜索消息\n` +
+      `  open_seatalk_link(url) — 打开 SeaTalk 消息链接\n` +
+      `  download_seatalk_image(...) — 下载聊天图片，然后用 Read 工具查看\n` +
       `\n` +
-      `SeaTalk 链接处理流程:\n` +
-      `当用户给出 SeaTalk 消息链接 (link.seatalk.io/message/open?message_id=...):\n` +
-      `1. 调用 MCP 工具 open_seatalk_link(url=链接) 跳转到对应会话\n` +
-      `2. 调用 MCP 工具 query_messages_sqlite(session_name=跳转后的群名) 读取消息\n` +
-      `\n` +
-      `图片理解:\n` +
-      `当消息包含 [图片] 且需要理解内容时:\n` +
-      `1. 调用 MCP 工具 download_seatalk_image 下载图片到 ~/.seatalk-mcp-images/\n` +
-      `2. 用 Read 工具读取下载的图片文件（支持 png/jpg/gif/webp）\n` +
+      `使用策略:\n` +
+      `  1. 任何 SeaTalk 消息查询，先想想能否用 query_messages_sqlite 的 keyword 参数解决\n` +
+      `  2. 如果第一次查询结果不够，调整参数重试（扩大 hours、增加 limit、换 keyword）\n` +
+      `  3. 如果需要跨群搜索，用 search_seatalk_messages 或不指定 session_name 的 query_messages_sqlite\n` +
+      `  4. 只有 MCP 工具确实无法满足需求时，才考虑用 seatalk_eval 执行自定义 JS\n` +
       `\n` +
       `如果有 spx-bug-trace skill，先读取 SKILL.md 再按流程执行。\n` +
       `Always respond in Chinese.`
@@ -321,6 +325,9 @@ async function main() {
     onModeUpdate: (modeId: string) => {
       bridge.sendToPanel({ type: 'mode', mode: modeId }).catch(() => {});
     },
+    onUsageUpdate: (info: import('./acp.js').UsageInfo) => {
+      bridge.sendToPanel({ type: 'usage', contextSize: info.contextSize, contextUsed: info.contextUsed, costAmount: info.costAmount, costCurrency: info.costCurrency }).catch(() => {});
+    },
   };
 
   async function startAcp(): Promise<boolean> {
@@ -340,7 +347,6 @@ async function main() {
         workspacePath: currentWorkspace,
         callbacks: acpCallbacks,
         log,
-        modelId: currentModelId || undefined,
         previousSessionId: lastSessionId || undefined,
       });
 
@@ -353,7 +359,6 @@ async function main() {
         setTimeout(() => startAcp(), 3000);
       });
 
-      // If session was resumed, keep the prompt count so history injection is skipped
       sessionPromptCount = agent.resumed ? 1 : 0;
       log(`ACP agent connected (resumed=${agent.resumed})`);
 
@@ -363,6 +368,20 @@ async function main() {
         agent!.currentModelId = modelResult.currentModelId;
       } catch (e) {
         log('failed to list models:', (e as Error).message);
+      }
+
+      if (currentModelId) {
+        try {
+          await agent!.connection.unstable_setSessionModel({
+            sessionId: agent!.sessionId,
+            modelId: currentModelId,
+          });
+          agent!.currentModelId = currentModelId;
+          log(`restored model: ${currentModelId}`);
+        } catch (e) {
+          log(`restore model failed: ${(e as Error).message}, using default`);
+          currentModelId = '';
+        }
       }
 
       return true;
@@ -449,6 +468,10 @@ async function main() {
           await bridge.sendAssistantDone();
 
           const stopReason = result.stopReason || 'end_turn';
+          const turnUsage = (result as any).usage as { inputTokens?: number; outputTokens?: number; totalTokens?: number; cachedReadTokens?: number; thoughtTokens?: number } | null;
+          if (turnUsage) {
+            bridge.sendToPanel({ type: 'turn_usage', inputTokens: turnUsage.inputTokens || 0, outputTokens: turnUsage.outputTokens || 0, totalTokens: turnUsage.totalTokens || 0, cachedReadTokens: turnUsage.cachedReadTokens || 0, thoughtTokens: turnUsage.thoughtTokens || 0 }).catch(() => {});
+          }
           if (stopReason === 'cancelled' && userCancelled) {
             log('prompt returned after user cancel (turn_end already sent)');
           } else {
@@ -491,48 +514,21 @@ async function main() {
         }
       } else if (data.type === 'set_model') {
         const modelId = data.modelId as string;
-        if (!modelId) return;
+        if (!modelId || !agent) return;
         log(`switching model to: ${modelId}`);
 
-        // Kill current agent and respawn with --model flag
-        if (agent) {
-          agent.proc.removeAllListeners('exit');
-          try { agent.proc.kill('SIGTERM'); } catch {}
-          agent = null;
-        }
-        currentModelId = modelId;
         try {
-          agent = await spawnAgent({
-            workspacePath: currentWorkspace,
-            callbacks: acpCallbacks,
-            log,
+          await agent.connection.unstable_setSessionModel({
+            sessionId: agent.sessionId,
             modelId,
           });
+          currentModelId = modelId;
           agent.currentModelId = modelId;
-          agent.proc.on('exit', () => {
-            log('ACP agent process exited, will respawn in 3s...');
-            agent = null;
-            setTimeout(() => startAcp(), 3000);
-          });
-
-          try {
-            const modelResult = await listModels(log);
-            agent.availableModels = modelResult.models;
-          } catch {}
-
-          try {
-            await agent.connection.setSessionMode({ sessionId: agent.sessionId, modeId: defaultMode });
-          } catch {}
-
-          lastSessionId = agent.sessionId;
-          saveSession(lastSessionId, currentWorkspace);
-          sessionPromptCount = 0;
           bridge.sendToPanel({ type: 'status', connected: true, text: 'Connected' }).catch(() => {});
-          log(`model switched to ${modelId}, new session: ${agent.sessionId}`);
+          log(`model switched to ${modelId} (session preserved: ${agent.sessionId})`);
         } catch (e) {
-          log(`model switch failed: ${(e as Error).message}`);
-          bridge.sendToPanel({ type: 'status', connected: false, text: 'Model switch failed' }).catch(() => {});
-          setTimeout(() => startAcp(), 2000);
+          log(`setSessionModel failed: ${(e as Error).message}, will not change model`);
+          bridge.sendToPanel({ type: 'error', text: `模型切换失败: ${(e as Error).message}` }).catch(() => {});
         }
       } else if (data.type === 'browse_folder') {
         try {

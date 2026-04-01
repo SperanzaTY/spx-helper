@@ -30,6 +30,13 @@ export interface ToolCallInfo {
 }
 export type OnToolCall = (info: ToolCallInfo) => void;
 export type OnModeUpdate = (modeId: string) => void;
+export interface UsageInfo {
+  contextSize: number;
+  contextUsed: number;
+  costAmount?: number;
+  costCurrency?: string;
+}
+export type OnUsageUpdate = (info: UsageInfo) => void;
 
 export interface AcpCallbacks {
   onTurnStart?: OnTurnStart;
@@ -37,6 +44,7 @@ export interface AcpCallbacks {
   onThoughtChunk?: OnThoughtChunk;
   onToolCall?: OnToolCall;
   onModeUpdate?: OnModeUpdate;
+  onUsageUpdate?: OnUsageUpdate;
 }
 
 // ── SeaTalkAcpClient — implements acp.Client ──
@@ -148,6 +156,18 @@ class SeaTalkAcpClient implements acp.Client {
       case 'current_mode_update': {
         const modeId = (update as any).currentModeId || (update as any).currentMode || (update as any).id || '';
         if (modeId) this.cb.onModeUpdate?.(modeId);
+        break;
+      }
+      case 'usage_update': {
+        const size = (update as any).size as number ?? 0;
+        const used = (update as any).used as number ?? 0;
+        const cost = (update as any).cost as { amount?: number; currency?: string } | undefined;
+        this.cb.onUsageUpdate?.({
+          contextSize: size,
+          contextUsed: used,
+          costAmount: cost?.amount,
+          costCurrency: cost?.currency,
+        });
         break;
       }
     }
@@ -269,10 +289,19 @@ export async function spawnAgent(opts: {
     shell: useShell,
   });
 
+  let stderrBuf = '';
   proc.stderr?.on('data', (d: Buffer) => {
-    for (const l of d.toString().split('\n').filter(Boolean)) {
+    const text = d.toString();
+    stderrBuf += text;
+    for (const l of text.split('\n').filter(Boolean)) {
       console.log(`[acp:stderr] ${l}`);
     }
+  });
+
+  const earlyExit = new Promise<never>((_, reject) => {
+    proc.on('exit', (code) => {
+      reject(new Error(`agent exited early (code=${code}): ${stderrBuf.trim().slice(0, 200)}`));
+    });
   });
 
   if (!proc.stdin || !proc.stdout) {
@@ -287,17 +316,19 @@ export async function spawnAgent(opts: {
   const stream = acp.ndJsonStream(input, output);
   const connection = new acp.ClientSideConnection(() => client, stream);
 
+  const race = <T>(p: Promise<T>) => Promise.race([p, earlyExit]);
+
   log('initializing ACP connection...');
-  await connection.initialize({
+  await race(connection.initialize({
     protocolVersion: acp.PROTOCOL_VERSION,
     clientInfo: { name: 'seatalk-agent', title: 'SeaTalk Agent', version: '0.2.0' },
     clientCapabilities: {
       fs: { readTextFile: true, writeTextFile: true },
     },
-  });
+  }));
 
   log('authenticating...');
-  await connection.authenticate({ methodId: 'cursor_login' });
+  await race(connection.authenticate({ methodId: 'cursor_login' }));
 
   const mcpServers = loadMcpServers(log);
   let sessionId = '';
@@ -305,26 +336,24 @@ export async function spawnAgent(opts: {
 
   const prevSessionId = opts.previousSessionId;
   if (prevSessionId) {
-    // Try loadSession first (loads session + replays history via notifications)
     try {
       log(`attempting to load session: ${prevSessionId}...`);
-      await connection.loadSession({
+      await race(connection.loadSession({
         sessionId: prevSessionId,
         cwd: workspacePath,
         mcpServers,
-      });
+      }));
       sessionId = prevSessionId;
       resumed = true;
       log(`session loaded: ${sessionId}`);
     } catch (e) {
       log(`loadSession failed (${(e as Error).message}), trying resumeSession...`);
-      // Fallback to unstable_resumeSession
       try {
-        await connection.unstable_resumeSession({
+        await race(connection.unstable_resumeSession({
           sessionId: prevSessionId,
           cwd: workspacePath,
           mcpServers,
-        });
+        }));
         sessionId = prevSessionId;
         resumed = true;
         log(`session resumed: ${sessionId}`);
@@ -336,16 +365,16 @@ export async function spawnAgent(opts: {
 
   if (!resumed) {
     log('creating session...');
-    const sessionResult = await connection.newSession({
+    const sessionResult = await race(connection.newSession({
       cwd: workspacePath,
       mcpServers,
-    });
+    }));
     sessionId = sessionResult.sessionId;
     log(`session created: ${sessionId}`);
   }
 
   try {
-    await connection.setSessionMode({ sessionId, modeId: 'ask' });
+    await race(connection.setSessionMode({ sessionId, modeId: 'ask' }));
   } catch {
     log('set_mode not supported, skipping');
   }
