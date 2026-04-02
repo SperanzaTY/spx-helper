@@ -1,15 +1,15 @@
 # SPX Helper 发版日志
 
-> 每次提交到 `release` 分支前，**Agent 会自动生成**本版本的测试记录并追加到此文件。
-> 开发者只需在 Agent 展示提交摘要时**确认记录内容正确**即可。
-> Git pre-push hook 会检查本文件是否有对应版本的记录，作为兜底校验。
+> **每次提交**到 `release` 分支前，Agent 会自动在此文件追加一条记录。
+> 不管是 `feat`/`fix` 还是 `docs`/`chore`，**所有 commit type 都必须记录**。
+> pre-push hook 检查最新 commit 是否修改了此文件，未修改则阻止推送。
 
 ---
 
 ## 记录格式
 
 ```
-## vX.Y.Z — YYYY-MM-DD
+## vX.Y.Z — YYYY-MM-DD — `<commit-hash>` <commit-message>
 
 **提交者**: @用户名
 **Commit Type**: feat / fix / refactor / docs / chore
@@ -38,13 +38,62 @@
 - ✅ = 通过（Agent 根据测试结果自动填写，用户确认）
 - ⬜ = 未通过（必须修复后才能发版）
 - N/A = 本次修改不涉及该模块，无需测试（Agent 自动判断）
-
-> Agent 根据 `git diff` 自动判断涉及哪些模块，未涉及的标记 N/A，已测试的标记 ✅。
-> 用户审核时主要关注"变更说明"和"特别注意"是否准确。
+- 标题中建议包含 commit hash 便于追溯，但 hook 不依赖 hash 匹配
 
 ---
 
-## v3.1.4 — 2026-04-02
+## v3.1.4 — 2026-04-02 — `afa3c8c` docs: 清理垃圾文件 + 强化 RELEASE_LOG
+
+**提交者**: @tianyi.liang
+**Commit Type**: docs
+**修改模块**: 文档 / 构建工具
+
+### 变更说明
+- 删除 docs/diagrams/、docs/investigations/、SEATALK_AGENT_UPDATE_REPRO（选错工程区域产生的垃圾文件）
+- 删除 mcp-tools/share-package/（旧分发包，已被 uvx 替代）
+- pre-push hook 改为按 commit hash 检查 RELEASE_LOG（解决 docs 类型提交不触发检查的问题）
+- git-workflow.mdc 明确所有 commit type 都必须写 release log
+- RELEASE_LOG 标题格式增加 commit hash
+
+### 测试情况
+
+| 测试项 | 结果 | 备注 |
+|--------|------|------|
+| Chrome 扩展加载正常 | N/A | 纯文档/工具链变更 |
+| MCP 工具连接正常 | N/A | |
+| SeaTalk Agent 启动+注入正常 | N/A | |
+| SeaTalk Agent 重启后 UI 恢复 | N/A | |
+| 修改的功能正常工作 | ✅ | pre-push hook 按 hash 检查逻辑正确 |
+| 已有功能未被破坏 | ✅ | |
+| 控制台无新增错误 | N/A | |
+
+---
+
+## v3.1.4 — 2026-04-02 — `8b3f647` docs: 清理过时文档
+
+**提交者**: @tianyi.liang
+**Commit Type**: docs
+**修改模块**: 文档
+
+### 变更说明
+- docs/ 从 106 个文件精简到 9 个，删除所有 v2.x "值班助手" 时代文档
+- 修正 README.md 中指向已删除文件的链接
+
+### 测试情况
+
+| 测试项 | 结果 | 备注 |
+|--------|------|------|
+| Chrome 扩展加载正常 | N/A | 纯文档变更 |
+| MCP 工具连接正常 | N/A | |
+| SeaTalk Agent 启动+注入正常 | N/A | |
+| SeaTalk Agent 重启后 UI 恢复 | N/A | |
+| 修改的功能正常工作 | N/A | |
+| 已有功能未被破坏 | ✅ | |
+| 控制台无新增错误 | N/A | |
+
+---
+
+## v3.1.4 — 2026-04-02 — `ecc6cfc` fix: v3.1.4
 
 **提交者**: @tianyi.liang
 **Commit Type**: fix
@@ -69,7 +118,7 @@
 
 ---
 
-## v3.1.3 — 2026-04-02
+## v3.1.3 — 2026-04-02 — `00a7681` fix: v3.1.3
 
 **提交者**: @tianyi.liang
 **Commit Type**: fix
@@ -94,7 +143,7 @@
 
 ---
 
-## v3.1.2 — 2026-04-02
+## v3.1.2 — 2026-04-02 — `c108aa3` fix: v3.1.2
 
 **提交者**: @tianyi.liang
 **Commit Type**: fix
@@ -118,7 +167,7 @@
 
 ---
 
-## v3.1.1 — 2026-04-01
+## v3.1.1 — 2026-04-01 — `15be88e` docs: seatalk-troubleshoot Skill
 
 **提交者**: @tianyi.liang
 **Commit Type**: chore
@@ -140,7 +189,7 @@
 
 ---
 
-## v3.1.0 — 2026-04-01
+## v3.1.0 — 2026-04-01 — `ea4f005` feat: v3.1.0
 
 **提交者**: @tianyi.liang
 **Commit Type**: feat

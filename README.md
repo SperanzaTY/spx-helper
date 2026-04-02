@@ -491,7 +491,7 @@ spx-helper/
 │   └── seatalk-troubleshoot/     # SeaTalk Agent 故障排查工作流
 │
 ├── scripts/                      # 构建/发布/测试脚本
-└── docs/                         # 文档（发版日志、架构图、排查案例）
+└── docs/                         # 文档（发版日志、Skill 安装指南、用户指南）
 ```
 
 ---
@@ -622,7 +622,7 @@ npm run dev    # tsx watch 模式，代码修改自动重启
 
 ### v3.1.1 (2026-04)
 
-- **SeaTalk Agent（空发版 / 协作复现）**：基于 **v3.1.0** 仅递增版本号与说明文档，**无任何业务代码或注入脚本变更**，用于同事复现 **内置更新检查卡顿 / 更新流程体验** 等问题。见 [docs/SEATALK_AGENT_UPDATE_REPRO_v3.1.1.md](docs/SEATALK_AGENT_UPDATE_REPRO_v3.1.1.md)。
+- **SeaTalk Agent（空发版 / 协作复现）**：基于 **v3.1.0** 仅递增版本号与说明文档，**无任何业务代码或注入脚本变更**，用于同事复现 **内置更新检查卡顿 / 更新流程体验** 等问题。
 
 ### v3.1.0 (2026-04)
 

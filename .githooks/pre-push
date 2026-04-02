@@ -12,27 +12,33 @@ fi
 
 RELEASE_LOG="docs/RELEASE_LOG.md"
 VERSION=$(grep '"version"' chrome-extension/manifest.json | head -1 | sed 's/.*"\([0-9.]*\)".*/\1/')
+COMMIT_SHORT=$(git log -1 --format='%h')
+COMMIT_MSG=$(git log -1 --format='%s')
 
 echo ""
 echo "╔══════════════════════════════════════════════════════════╗"
 echo "║  SPX Helper — Release 分支推送检查                      ║"
 echo "╠══════════════════════════════════════════════════════════╣"
 echo "║  当前版本: v${VERSION}"
+echo "║  最新提交: ${COMMIT_SHORT} ${COMMIT_MSG}"
 echo "╚══════════════════════════════════════════════════════════╝"
 echo ""
 
 HAS_ERRORS=0
 
-# 1. 检查 RELEASE_LOG 中是否有当前版本的记录
+# 1. 检查 RELEASE_LOG 在最新一次提交中是否被修改
 if [ -f "$RELEASE_LOG" ]; then
-  if ! grep -q "## v${VERSION}" "$RELEASE_LOG"; then
-    echo "❌ 发版日志缺失！"
-    echo "   docs/RELEASE_LOG.md 中没有 v${VERSION} 的测试记录。"
-    echo "   请先测试功能，然后在 RELEASE_LOG.md 中记录测试结果。"
+  LOG_CHANGED=$(git diff-tree --no-commit-id --name-only -r HEAD | grep -c "^docs/RELEASE_LOG.md$" || true)
+  if [ "$LOG_CHANGED" -eq 0 ]; then
+    echo "❌ 发版日志未更新！"
+    echo "   本次提交未修改 docs/RELEASE_LOG.md。"
+    echo "   每次提交都必须在 RELEASE_LOG.md 中追加记录（包括 docs/chore 类型）。"
+    echo ""
+    echo "   请让 Agent 自动生成记录，或手动追加后再推送。"
     echo ""
     HAS_ERRORS=1
   else
-    echo "✅ 发版日志已记录 v${VERSION}"
+    echo "✅ 发版日志已更新"
   fi
 else
   echo "❌ 发版日志文件不存在！"
