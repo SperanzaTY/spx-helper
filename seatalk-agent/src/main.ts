@@ -9,8 +9,8 @@ import { spawnAgent, killAgent, listModels, loadMcpServers, type AgentProcess } 
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CDP_PORT = parseInt(process.env.CDP_PORT || '19222', 10);
-const WORKSPACE = process.env.WORKSPACE || path.resolve(__dirname, '../../..');
-const PROJECT_ROOT = path.resolve(__dirname, '../../..');
+const WORKSPACE = process.env.WORKSPACE || path.resolve(__dirname, '../..');
+const PROJECT_ROOT = path.resolve(__dirname, '../..');
 
 const LOG_BUFFER_SIZE = 100;
 const logBuffer: string[] = [];
@@ -44,14 +44,14 @@ function checkUpdate(logFn: typeof log): UpdateCheckResult {
   }
 
   try {
-    const localManifest = JSON.parse(fs.readFileSync(path.join(PROJECT_ROOT, 'manifest.json'), 'utf-8'));
+    const localManifest = JSON.parse(fs.readFileSync(path.join(PROJECT_ROOT, 'chrome-extension', 'manifest.json'), 'utf-8'));
     result.local = localManifest.version || '0.0.0';
   } catch {
     result.local = '0.0.0';
   }
 
   try {
-    const remoteManifestStr = gitExec(`git show origin/${branch}:manifest.json`, PROJECT_ROOT);
+    const remoteManifestStr = gitExec(`git show origin/${branch}:chrome-extension/manifest.json`, PROJECT_ROOT);
     const remoteManifest = JSON.parse(remoteManifestStr);
     result.remote = remoteManifest.version || result.local;
   } catch {
@@ -108,7 +108,7 @@ async function applyUpdate(onProgress: (msg: string) => void, logFn: typeof log)
       const changed = gitExec('git diff HEAD~1 --name-only', PROJECT_ROOT);
       if (changed.includes('package.json') || changed.includes('package-lock') || changed.includes('pnpm-lock')) {
         onProgress('📦 npm install ...');
-        execSync('npm install', { cwd: path.join(PROJECT_ROOT, 'mcp-tools', 'seatalk-agent'), encoding: 'utf-8', timeout: 120_000 });
+        execSync('npm install', { cwd: path.join(PROJECT_ROOT, 'seatalk-agent'), encoding: 'utf-8', timeout: 120_000 });
         onProgress('📦 npm install ✅');
       } else {
         onProgress('📦 依赖无变化');
@@ -989,9 +989,7 @@ async function main() {
   function silentUpdateCheck() {
     try {
       const result = checkUpdate(log);
-      if (result.available) {
-        bridge.sendToPanel({ type: 'update_available', ...result }).catch(() => {});
-      }
+      bridge.sendToPanel({ type: 'update_available', ...result }).catch(() => {});
     } catch {}
   }
 
