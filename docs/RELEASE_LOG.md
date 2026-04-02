@@ -42,6 +42,32 @@
 
 ---
 
+## v3.1.5 — 2026-04-02
+
+**提交者**: @tianyi.liang
+**Commit Type**: fix
+**修改模块**: SeaTalk Agent / 构建工具
+
+### 变更说明
+- CDP 页面选择修复：排除 mediaViewer/serviceWorker 等子页面，只连接 SeaTalk 主聊天页
+- 孤儿进程清理：启动时自动 kill 残留的 `agent --approve-mcps` 进程，退出时 SIGTERM/SIGKILL 确保子进程被回收
+- main 分支保护：pre-push hook 阻止直接推送到 main/master
+- RELEASE_LOG 强制记录：hook 改为检查最新 commit 是否修改了 RELEASE_LOG.md
+
+### 测试情况
+
+| 测试项 | 结果 | 备注 |
+|--------|------|------|
+| Chrome 扩展加载正常 | N/A | |
+| MCP 工具连接正常 | N/A | |
+| SeaTalk Agent 启动+注入正常 | ✅ | 多媒体预览页打开时重启，正确连接主页面 |
+| SeaTalk Agent 重启后 UI 恢复 | ✅ | 面板自动恢复 |
+| 修改的功能正常工作 | ✅ | 孤儿进程清理、CDP 页面过滤均验证通过 |
+| 已有功能未被破坏 | ✅ | |
+| 控制台无新增错误 | ✅ | |
+
+---
+
 ## v3.1.4 — 2026-04-02 — `afa3c8c` docs: 清理垃圾文件 + 强化 RELEASE_LOG
 
 **提交者**: @tianyi.liang

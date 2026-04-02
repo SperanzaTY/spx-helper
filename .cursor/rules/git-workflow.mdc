@@ -106,7 +106,7 @@ type: `feat` | `fix` | `docs` | `style` | `refactor` | `perf` | `test` | `chore`
 | `feature/*` | 新功能，从 release 拉出 |
 | `bugfix/*` | Bug 修复，从 release 拉出 |
 | `release` | 开发主分支，可直接 push |
-| `main` | 稳定版本，从 release 合并 |
+| `main` | 稳定版本，**只能通过 MR 从 release 合入**，pre-push hook 会阻止直接推送 |
 
 流程: 日常开发直接在 `release` 上提交推送；大功能可用 `feature/bugfix` 分支开发后合入 `release`
 

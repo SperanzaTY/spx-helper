@@ -2,7 +2,7 @@
 
 > **Shopee 大数据开发助手** — Chrome 扩展 + MCP 工具套件 + SeaTalk AI Agent
 
-[![Version](https://img.shields.io/badge/version-3.1.4-blue.svg)](https://github.com/SperanzaTY/spx-helper/releases)
+[![Version](https://img.shields.io/badge/version-3.1.5-blue.svg)](https://github.com/SperanzaTY/spx-helper/releases)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 SPX Helper 是一套为 Shopee 大数据开发工程师打造的效率工具集，包含三个核心模块：
@@ -602,6 +602,13 @@ npm run dev    # tsx watch 模式，代码修改自动重启
 ---
 
 ## 更新日志
+
+### v3.1.5 (2026-04)
+
+- **CDP 页面选择修复**：修复 SeaTalk 打开多媒体预览时 Agent 连接到错误页面导致面板无响应的问题
+- **孤儿进程清理**：启动时自动清理残留的 Cursor CLI agent 进程，退出时确保子进程被回收（SIGTERM/SIGKILL）
+- **main 分支保护**：pre-push hook 阻止直接推送到 main，只能通过 MR 从 release 合入
+- **RELEASE_LOG 强制记录**：所有 commit type（含 docs/chore）都必须更新 RELEASE_LOG，hook 检查最新 commit 是否修改了该文件
 
 ### v3.1.4 (2026-04)
 

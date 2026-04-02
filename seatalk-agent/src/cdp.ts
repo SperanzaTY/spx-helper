@@ -120,7 +120,8 @@ export class CdpClient {
   }
 }
 
-const MAIN_PAGE_URL = 'web.haiserve.com';
+const MAIN_PAGE_HOST = 'web.haiserve.com';
+const EXCLUDED_PATHS = ['mediaViewer', 'serviceWorker', 'devtools'];
 
 export function listPages(cdpPort: number): Promise<CdpPage[]> {
   return new Promise((resolve, reject) => {
@@ -143,8 +144,12 @@ export function listPages(cdpPort: number): Promise<CdpPage[]> {
 
 export async function connectMainPage(cdpPort: number): Promise<CdpClient> {
   const pages = await listPages(cdpPort);
-  const main = pages.find((p) => p.url.includes(MAIN_PAGE_URL));
-  if (!main) throw new Error(`SeaTalk main page (${MAIN_PAGE_URL}) not found on port ${cdpPort}`);
+  const main = pages.find((p) => {
+    if (!p.url.includes(MAIN_PAGE_HOST)) return false;
+    const urlPath = p.url.replace(/^https?:\/\/[^/]+/, '');
+    return !EXCLUDED_PATHS.some((ex) => urlPath.includes(ex));
+  });
+  if (!main) throw new Error(`SeaTalk main page (${MAIN_PAGE_HOST}) not found on port ${cdpPort}`);
   const client = new CdpClient(main.webSocketDebuggerUrl, main);
   await client.connect();
   return client;

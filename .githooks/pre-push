@@ -6,6 +6,17 @@ set -e
 
 BRANCH=$(git rev-parse --abbrev-ref HEAD)
 
+# 完全阻止向 main 分支推送 — main 只能通过 MR 从 release 合入
+if [ "$BRANCH" = "main" ] || [ "$BRANCH" = "master" ]; then
+  echo ""
+  echo "  🛑 禁止直接推送到 ${BRANCH} 分支！"
+  echo "  ${BRANCH} 分支只能通过 MR (Merge Request) 从 release 合入。"
+  echo ""
+  echo "  请在 GitLab 上创建 MR: release → ${BRANCH}"
+  echo ""
+  exit 1
+fi
+
 if [ "$BRANCH" != "release" ]; then
   exit 0
 fi

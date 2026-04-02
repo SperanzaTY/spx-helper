@@ -170,6 +170,23 @@ function killStaleCdpClients() {
   } catch { /* lsof not available or other error */ }
 }
 
+function killOrphanAgentProcesses() {
+  try {
+    const myPid = process.pid;
+    const output = execSync(`pgrep -f 'agent.*--approve-mcps.*acp' 2>/dev/null || true`, { encoding: 'utf-8' });
+    const pids = output.split('\n').map((l) => parseInt(l.trim(), 10)).filter((p) => p > 0 && p !== myPid);
+    if (pids.length > 0) {
+      log(`found ${pids.length} orphan agent process(es), cleaning up...`);
+      for (const pid of pids) {
+        try {
+          process.kill(pid, 'SIGTERM');
+          log(`killed orphan agent process ${pid}`);
+        } catch { /* already gone */ }
+      }
+    }
+  } catch { /* pgrep not available */ }
+}
+
 function readScript(name: string): string {
   return fs.readFileSync(path.join(__dirname, 'inject', name), 'utf-8');
 }
@@ -262,6 +279,7 @@ function ensureSeaTalkRunning() {
 
 async function main() {
   killStaleCdpClients();
+  killOrphanAgentProcesses();
   ensureSeaTalkRunning();
   log(`connecting to SeaTalk CDP on port ${CDP_PORT}...`);
 
@@ -511,10 +529,13 @@ async function main() {
       lastSessionId = agent.sessionId;
       saveSession(lastSessionId, currentWorkspace);
 
-      agent.proc.on('exit', () => {
-        log('ACP agent process exited, will respawn in 3s...');
+      agent.proc.on('exit', (code) => {
+        log(`ACP agent process exited (code=${code}), will respawn in 3s...`);
         agent = null;
-        setTimeout(() => startAcp(), 3000);
+        setTimeout(() => {
+          killOrphanAgentProcesses();
+          startAcp();
+        }, 3000);
       });
 
       sessionPromptCount = agent.resumed ? 1 : 0;
@@ -829,9 +850,10 @@ async function main() {
         bridge.sendToPanel({ type: 'status', connected: false, text: '重连中...' }).catch(() => {});
         if (agent) {
           agent.proc.removeAllListeners('exit');
-          try { agent.proc.kill('SIGTERM'); } catch {}
+          killAgent(agent.proc);
           agent = null;
         }
+        killOrphanAgentProcesses();
         const ok = await startAcp();
         if (ok) {
           bridge.sendToPanel({ type: 'status', connected: true, text: 'Connected' }).catch(() => {});
@@ -855,9 +877,10 @@ async function main() {
         bridge.sendToPanel({ type: 'status', connected: false, text: '重启中...' }).catch(() => {});
         if (agent) {
           agent.proc.removeAllListeners('exit');
-          try { agent.proc.kill('SIGTERM'); } catch {}
+          killAgent(agent.proc);
           agent = null;
         }
+        killOrphanAgentProcesses();
         await new Promise((r) => setTimeout(r, 500));
         const ok2 = await startAcp();
         if (ok2) {
@@ -1056,11 +1079,24 @@ async function main() {
     }, 5000);
   }
 
-  process.on('SIGINT', () => {
+  function cleanupAndExit(code = 0) {
     log('shutting down...');
-    if (agent) killAgent(agent.proc);
+    if (agent) {
+      agent.proc.removeAllListeners('exit');
+      killAgent(agent.proc);
+      agent = null;
+    }
     client.close();
-    process.exit(0);
+    process.exit(code);
+  }
+
+  process.on('SIGINT', () => cleanupAndExit(0));
+  process.on('SIGTERM', () => cleanupAndExit(0));
+
+  process.on('exit', () => {
+    if (agent) {
+      try { agent.proc.kill('SIGKILL'); } catch {}
+    }
   });
 
   process.on('uncaughtException', (err) => {
