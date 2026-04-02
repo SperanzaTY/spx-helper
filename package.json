@@ -1,10 +1,12 @@
 {
   "name": "spx-helper",
-  "version": "3.1.3",
+  "version": "3.1.4",
   "description": "SPX Helper - Shopee大数据开发助手",
   "author": "tianyi.liang",
   "license": "MIT",
   "scripts": {
+    "setup": "git config core.hooksPath .githooks && echo '✅ Git hooks 已启用'",
+    "postinstall": "git config core.hooksPath .githooks 2>/dev/null || true",
     "lint": "eslint *.js",
     "format": "prettier --write \"**/*.{js,html,css,json,md}\"",
     "build:icons": "node scripts/build-icons.js"

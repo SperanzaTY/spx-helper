@@ -1,0 +1,81 @@
+#!/bin/bash
+# pre-push hook — 推送到 release 分支前的检查
+# 安装：git config core.hooksPath .githooks
+
+set -e
+
+BRANCH=$(git rev-parse --abbrev-ref HEAD)
+
+if [ "$BRANCH" != "release" ]; then
+  exit 0
+fi
+
+RELEASE_LOG="docs/RELEASE_LOG.md"
+VERSION=$(grep '"version"' chrome-extension/manifest.json | head -1 | sed 's/.*"\([0-9.]*\)".*/\1/')
+
+echo ""
+echo "╔══════════════════════════════════════════════════════════╗"
+echo "║  SPX Helper — Release 分支推送检查                      ║"
+echo "╠══════════════════════════════════════════════════════════╣"
+echo "║  当前版本: v${VERSION}"
+echo "╚══════════════════════════════════════════════════════════╝"
+echo ""
+
+HAS_ERRORS=0
+
+# 1. 检查 RELEASE_LOG 中是否有当前版本的记录
+if [ -f "$RELEASE_LOG" ]; then
+  if ! grep -q "## v${VERSION}" "$RELEASE_LOG"; then
+    echo "❌ 发版日志缺失！"
+    echo "   docs/RELEASE_LOG.md 中没有 v${VERSION} 的测试记录。"
+    echo "   请先测试功能，然后在 RELEASE_LOG.md 中记录测试结果。"
+    echo ""
+    HAS_ERRORS=1
+  else
+    echo "✅ 发版日志已记录 v${VERSION}"
+  fi
+else
+  echo "❌ 发版日志文件不存在！"
+  echo "   请创建 docs/RELEASE_LOG.md 并记录测试情况。"
+  echo ""
+  HAS_ERRORS=1
+fi
+
+# 2. 检查三个版本号是否一致
+V_ROOT=$(grep '"version"' package.json | head -1 | sed 's/.*"\([0-9.]*\)".*/\1/')
+V_AGENT=$(grep '"version"' seatalk-agent/package.json | head -1 | sed 's/.*"\([0-9.]*\)".*/\1/')
+
+if [ "$VERSION" != "$V_ROOT" ] || [ "$VERSION" != "$V_AGENT" ]; then
+  echo "❌ 版本号不一致！"
+  echo "   manifest.json:              ${VERSION}"
+  echo "   package.json:               ${V_ROOT}"
+  echo "   seatalk-agent/package.json: ${V_AGENT}"
+  echo ""
+  HAS_ERRORS=1
+else
+  echo "✅ 版本号一致: v${VERSION}"
+fi
+
+# 3. 提醒：SeaTalk Agent 修改需要重启
+AGENT_CHANGED=$(git diff --name-only origin/release...HEAD 2>/dev/null | grep -c "^seatalk-agent/" || true)
+if [ "$AGENT_CHANGED" -gt 0 ]; then
+  echo ""
+  echo "⚠️  本次推送包含 SeaTalk Agent 修改（${AGENT_CHANGED} 个文件）"
+  echo "   提醒：其他团队成员需要重启 Agent 才能生效。"
+  echo "   使用 seatalk 命令内的更新功能，或终端运行 seatalk 重启。"
+fi
+
+echo ""
+
+if [ "$HAS_ERRORS" -eq 1 ]; then
+  echo "══════════════════════════════════════════════════════════"
+  echo "  🛑 推送被阻止！请先修复上述问题。"
+  echo "══════════════════════════════════════════════════════════"
+  echo ""
+  echo "  跳过检查（紧急情况）: git push --no-verify"
+  echo ""
+  exit 1
+fi
+
+echo "✅ 所有检查通过，正在推送..."
+echo ""

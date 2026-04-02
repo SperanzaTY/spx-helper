@@ -35,14 +35,18 @@ alwaysApply: true
 - MINOR: 新功能、重要修复（如 3.0.3 → 3.1.0）
 - PATCH: 小修复、小优化（如 3.1.0 → 3.1.1）
 
-### 发版流程
+### 发版流程（Agent 自动执行）
 ```
-1. 改 chrome-extension/manifest.json 的 version
-2. 同步更新 package.json（根）的 version
-3. 同步更新 seatalk-agent/package.json 的 version
-4. 更新 README.md 的 Changelog
-5. 提交（三个 version 必须一致）
+1. 🤖 改 chrome-extension/manifest.json 的 version（PATCH +1）
+2. 🤖 同步更新 package.json（根）的 version
+3. 🤖 同步更新 seatalk-agent/package.json 的 version
+4. 🤖 更新 README.md 的 Changelog
+5. 🤖 在 docs/RELEASE_LOG.md 中生成测试记录（pre-push hook 会检查）
+6. 🤖 提交（三个 version 必须一致）
 ```
+
+> ⚠️ 修改了 SeaTalk Agent 相关代码后，必须重启 Agent 测试（终端运行 `seatalk` 或用面板内更新功能）。
+> 其他团队成员拉取代码后也需要重启 Agent 才能生效。
 
 ### 禁止
 - ❌ feat/fix 提交不升版本号
@@ -59,25 +63,30 @@ alwaysApply: true
 - ❌ 只推送到单个远程仓库
 - ❌ 未经用户确认直接推送
 
-### 提交流程
+### 提交流程（Agent 执行，用户审核）
+
+Agent 在用户确认"可以提交"后，**自动依次执行**以下步骤（无需用户逐项操作）：
+
 ```
-接收需求 → 分析问题 → 修改代码 → 展示修改内容(git diff)
-  → 🛑 等待用户测试
-  → 🛑 等待用户确认"可以提交"
-  → ⚠️ 判断 commit type：
-      如果是 feat/fix/refactor → 必须先升版本号（三个文件同步）再 commit
-      如果是 docs/style/chore → 直接 commit
-  → git add + git commit
-  → git push gitlab <branch> && git push origin <branch>
+1. 🤖 判断 commit type → 如果是 feat/fix/refactor 自动升版本号（三个文件同步）
+2. 🤖 自动读取 git diff，生成 docs/RELEASE_LOG.md 中本版本的测试记录
+3. 🤖 检查三个文件版本号一致性
+4. 🤖 若涉及 SeaTalk Agent 修改，提醒用户需要重启 Agent 测试
+5. 🤖 展示所有变更摘要 → 🛑 等待用户最终确认
+6. 🤖 git add + git commit + git push gitlab + git push origin
 ```
 
-### ⚠️ 版本号自检（Agent 必须在每次 commit 前执行）
-在执行 `git commit` 之前，Agent **必须**自问：
-1. 本次 commit message 的 type 是什么？
-2. 如果是 `feat`/`fix`/`refactor`，当前版本号是否已经升级？
-3. 三个文件的版本号是否一致？
+> 用户只需在第 5 步做最终审核确认，其余均由 Agent 自动完成。
 
-**如果答案为"未升级"，必须先修改版本号再 commit，不得跳过。**
+### ⚠️ Agent 自动检查项（commit 前必须全部执行）
+
+Agent 在 `git commit` 前**必须自动验证**（不需要问用户，发现问题直接修复）：
+
+1. **版本号**：commit type 是 feat/fix/refactor？→ 自动升 PATCH 版本，三个文件同步
+2. **版本一致性**：读取三个文件的 version 字段，不一致则自动修正
+3. **发版日志**：自动在 `docs/RELEASE_LOG.md` 中追加本版本记录（基于 git diff 生成变更说明 + 测试项）
+4. **README Changelog**：如果是 feat/fix/refactor，自动在 README.md 更新日志中追加条目
+5. **SeaTalk Agent 重启提醒**：如果修改了 `seatalk-agent/` 下的文件，在提交摘要中提醒用户重启 Agent
 
 ### Commit Message 格式
 ```
@@ -109,10 +118,32 @@ GitHub: origin  https://github.com/SperanzaTY/spx-helper.git
 git push gitlab <branch> && git push origin <branch>
 ```
 
+## Git Hooks（项目级）
+
+项目使用 `.githooks/` 目录存放 hook 脚本，通过 `core.hooksPath` 生效。
+
+| Hook | 作用 |
+|------|------|
+| `pre-push` | 推送到 release 前检查：发版日志是否记录、版本号是否一致、提醒 Agent 重启 |
+
+### 首次使用
+```bash
+git config core.hooksPath .githooks
+# 或运行 npm run setup
+```
+
+> `npm install`（根目录）的 postinstall 会自动配置。
+
 ## 提交前检查清单
 
-- [ ] **🔴 版本号（最高优先级）**：commit type 是 feat/fix/refactor？→ 三个文件版本号必须已升级且一致
-- [ ] commit message 符合规范
+### 🤖 Agent 自动执行（无需用户操作）
+- [ ] 版本号升级（feat/fix/refactor 时自动 PATCH +1，三个文件同步）
+- [ ] docs/RELEASE_LOG.md 中追加本版本测试记录
+- [ ] README.md Changelog 追加条目（feat/fix/refactor 时）
+- [ ] commit message 符合 `<type>: <subject>` 规范
+- [ ] 涉及 SeaTalk Agent 修改时，在提交摘要中提醒重启
+
+### 👤 用户辅助确认（Agent 展示后用户过目即可）
 - [ ] 修改的功能正常工作
 - [ ] 已有功能未被破坏
-- [ ] 若涉及功能变更，对应模块 README 已更新
+- [ ] 版本号和发版日志内容正确

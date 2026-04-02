@@ -50,6 +50,13 @@ git checkout release
 git pull origin release
 ```
 
+克隆完成后，启用项目级 Git hooks（推送前自动检查版本号和发版日志）：
+
+```bash
+cd spx-helper
+git config core.hooksPath .githooks
+```
+
 ---
 
 ## 模块 A：MCP 工具套件
@@ -72,8 +79,11 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 | 凭证 | 获取方式 |
 |------|---------|
 | **Presto Personal Token** | https://datasuite.shopee.io/dataservice/ds_api_management → 左上角 ☰ → Personal Token |
-| **Shopee 用户名** | 你的 Shopee 账号名（如 `john.doe`） |
-| **DMP 用户名/密码**（可选，Spark 用） | https://datasuite.shopee.io → 右上角头像 → Profile → BigData Account |
+| **Shopee 用户名** | 你的 Shopee 用户名（**不是邮箱**），格式如 `john.doe`，即邮箱 `@shopee.com` 前面的部分 |
+| **DMP 用户名/密码**（可选，Spark 用） | https://datasuite.shopee.io → 右上角头像 → **RAM** → Profile → BigData Account（用户名和密码点 View 查看） |
+| **InfraBot Token**（可选，seatalk-group 用） | 找 @tianyi.liang 获取，或自行在 [InfraBot API Playground](https://space.shopee.io/utility/seatalkbot/api-playground) 申请 |
+
+> **注意**：Presto 的用户名和 DMP 的用户名可能不同。Presto 用的是 Shopee 用户名（如 `john.doe`），DMP 用的是 BigData Account 里显示的用户名。
 
 ### A.3 配置 MCP
 
@@ -84,7 +94,21 @@ mkdir -p ~/.cursor
 cursor ~/.cursor/mcp.json
 ```
 
-写入以下内容（**替换占位符**）：
+写入以下内容（**替换占位符**）。
+
+下面先给一个**已填写好的示例**（用代称 `john.doe` 代替真实信息），帮你理解每个字段应该填什么：
+
+```
+✅ 正确示例（供参考，不要直接复制）：
+
+  "PRESTO_PERSONAL_TOKEN": "eyJhbGciOiJS...很长的一串Token"    ← DataSuite 生成的 Token
+  "PRESTO_USERNAME":       "john.doe"                          ← Shopee 用户名，不是邮箱
+  "LIVY_USERNAME":         "john.doe_bigdata"                  ← DMP BigData Account 的用户名（RAM → Profile 查看）
+  "LIVY_PASSWORD":         "MyBigData@2026"                    ← DMP BigData Account 的密码（RAM → Profile → View）
+  "INFRABOT_TOKEN":        "infrabot.xxxxxxxxxxxxxxxx"         ← InfraBot Token（找 tianyi 要）
+```
+
+实际配置模板：
 
 ```json
 {
@@ -142,28 +166,39 @@ cursor ~/.cursor/mcp.json
       ]
     },
     "scheduler-query": {
-      "command": "python3",
+      "command": "uvx",
       "args": [
-        "替换为spx-helper绝对路径/mcp-tools/scheduler-query/scheduler_mcp_server.py"
+        "--from",
+        "git+https://git.garena.com/tianyi.liang/spx-helper@release#subdirectory=mcp-tools/scheduler-query",
+        "scheduler-mcp"
       ]
+    },
+    "seatalk-group": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://git.garena.com/tianyi.liang/spx-helper@release#subdirectory=mcp-tools/seatalk-group",
+        "seatalk-group-mcp"
+      ],
+      "env": {
+        "INFRABOT_TOKEN": "替换为InfraBot Token"
+      }
     }
   }
 }
 ```
 
 **需要替换的内容**：
-- `替换为你的Token` → 你的 Presto Personal Token
-- `替换为你的用户名` → 你的 Shopee 用户名
-- `替换为DMP用户名` / `替换为DMP密码` → DMP 凭证（不用 Spark 可以不填）
-- `替换为spx-helper绝对路径` → 项目的绝对路径，如 `/Users/john.doe/spx-helper`
 
-### A.4 安装 scheduler-query 依赖
+| 占位符 | 格式 | 获取位置 |
+|--------|------|----------|
+| `替换为你的Token` | `eyJhbGci...`（很长的字符串） | DataSuite → ☰ → Personal Token |
+| `替换为你的用户名` | `john.doe`（**不是邮箱**，不带 `@shopee.com`） | 你的 Shopee 用户名 |
+| `替换为DMP用户名` | `john.doe_bigdata` 或类似 | DataSuite → RAM → Profile → BigData Account |
+| `替换为DMP密码` | 密码字符串 | 同上，点 View 查看密码 |
+| `替换为InfraBot Token` | `infrabot.xxxx`（找 @tianyi.liang 获取） | 不用批量拉群可不填 |
 
-```bash
-pip3 install mcp requests browser-cookie3
-```
-
-### A.5 验证
+### A.4 验证
 
 1. 重启 Cursor
 2. `Cmd + Shift + J` → MCP → 检查各工具状态是否为绿点
@@ -182,10 +217,13 @@ pip3 install mcp requests browser-cookie3
 node --version
 # 如果没有或版本低：brew install node
 
-# Cursor Agent CLI
+# Cursor Agent CLI（必须！启动时会自动检测）
 agent --version
 # 如果没有：Cursor → Cmd+Shift+P → 输入 "Install 'agent' command" → 回车
+# 或手动安装：curl -fsSL https://cursor.sh/install-agent | bash
 ```
+
+> Agent 启动时会自动检测 `agent` 命令是否可用。如果未安装，会在 SeaTalk 面板中显示详细的安装指引，不需要手动排查。
 
 ### B.2 安装
 
@@ -221,6 +259,17 @@ seatalk
 
 - 终端输入 `seatalk` 一键启动
 - 或者直接打开 SeaTalk（CDP 守护进程会自动处理）
+
+### B.6 自动更新
+
+Agent 内置了版本检查和一键更新功能：
+
+1. 打开 AI 面板，状态栏会显示当前版本号
+2. 有新版本时，版本徽章旁会出现更新提示
+3. 点击"应用更新"，Agent 自动拉取最新代码并重启
+4. 通过 `seatalk` 命令或安装脚本启动时，更新后会自动重启（exit code 42 触发重启循环）
+
+> 如果用 `npm start` 或 `npx tsx src/main.ts` 开发模式启动，更新后需要手动重新运行。
 
 ---
 
@@ -330,7 +379,8 @@ spx-helper/
 │   ├── ck-query/          #   ClickHouse 查询
 │   ├── api-trace/         #   API 血缘追踪
 │   ├── seatalk-reader/    #   SeaTalk 消息读取
-│   └── scheduler-query/   #   DataSuite Scheduler 查询
+│   ├── scheduler-query/   #   DataSuite Scheduler 查询
+│   └── seatalk-group/     #   SeaTalk 批量拉群与群管理
 ├── docs/                  # 文档
 ├── scripts/               # 构建脚本
 ├── INSTALL.md             # ← 本文件

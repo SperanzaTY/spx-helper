@@ -2,7 +2,7 @@
 
 > **Shopee 大数据开发助手** — Chrome 扩展 + MCP 工具套件 + SeaTalk AI Agent
 
-[![Version](https://img.shields.io/badge/version-3.1.1-blue.svg)](https://github.com/SperanzaTY/spx-helper/releases)
+[![Version](https://img.shields.io/badge/version-3.1.4-blue.svg)](https://github.com/SperanzaTY/spx-helper/releases)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 SPX Helper 是一套为 Shopee 大数据开发工程师打造的效率工具集，包含三个核心模块：
@@ -145,6 +145,27 @@ cursor ~/.cursor/mcp.json
         "git+https://git.garena.com/tianyi.liang/spx-helper@release#subdirectory=mcp-tools/seatalk-reader",
         "seatalk-reader-mcp"
       ]
+    },
+    // DataSuite Scheduler 任务查询 + Presto History Server
+    "scheduler-query": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://git.garena.com/tianyi.liang/spx-helper@release#subdirectory=mcp-tools/scheduler-query",
+        "scheduler-mcp"
+      ]
+    },
+    // SeaTalk 批量拉群与群管理（需 InfraBot Token）
+    "seatalk-group": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://git.garena.com/tianyi.liang/spx-helper@release#subdirectory=mcp-tools/seatalk-group",
+        "seatalk-group-mcp"
+      ],
+      "env": {
+        "INFRABOT_TOKEN": "替换为InfraBot Token"
+      }
     }
   }
 }
@@ -154,13 +175,24 @@ cursor ~/.cursor/mcp.json
 
 #### 步骤 4：替换凭证
 
-将配置中的占位符替换为你自己的凭证（参见下方 [凭证获取](#凭证获取)）：
+将配置中的占位符替换为你自己的凭证。格式参考：
 
-| 占位符                                  | 获取方式                                  |
-| --------------------------------------- | ----------------------------------------- |
-| `替换为你的Token`                     | DataSuite → 左上角 ☰ → Personal Token  |
-| `替换为你的用户名`                    | 你的 Shopee 用户名（如 `tianyi.liang`） |
-| `替换为DMP用户名` / `替换为DMP密码` | DataSuite → Profile → BigData Account   |
+```
+✅ 正确格式示例（代称，请替换为你自己的值）：
+
+  "PRESTO_PERSONAL_TOKEN": "eyJhbGciOiJS...很长的一串Token"    ← DataSuite 生成的 Token
+  "PRESTO_USERNAME":       "john.doe"                          ← Shopee 用户名（不是邮箱，不带 @shopee.com）
+  "LIVY_USERNAME":         "john.doe_bigdata"                  ← DMP BigData Account 用户名
+  "LIVY_PASSWORD":         "MyBigData@2026"                    ← DMP BigData Account 密码
+  "INFRABOT_TOKEN":        "infrabot.xxxxxxxxxxxxxxxx"         ← InfraBot Token（找 tianyi 要）
+```
+
+| 占位符 | 格式 | 获取位置 |
+| ------ | ---- | -------- |
+| `替换为你的Token` | `eyJhbGci...` 长字符串 | DataSuite → ☰ → Personal Token |
+| `替换为你的用户名` | `john.doe`（**不是邮箱**） | 你的 Shopee 用户名 |
+| `替换为DMP用户名` / `替换为DMP密码` | 见 BigData Account | DataSuite → 头像 → **RAM** → Profile → BigData Account |
+| `替换为InfraBot Token` | `infrabot.xxxx` | 找 @tianyi.liang 获取 |
 
 #### 步骤 5：刷新 MCP
 
@@ -332,9 +364,10 @@ npm start
 <details>
 <summary>Agent 启动但面板没有出现？</summary>
 
-1. 检查终端输出是否有 `injection complete!`
-2. 如果显示 `skipping injection (agent UI already present)`，说明 UI 已注入但可能被隐藏了，点击 SeaTalk 窗口右侧的紫色图标
-3. 如果有错误，尝试完全退出 SeaTalk 和 Agent 后重新启动
+1. 检查终端输出是否有 `injection complete!`，这是 UI 注入成功的标志
+2. 如果已注入成功，点击 SeaTalk 窗口左侧的 ✦ 星形图标打开面板
+3. 如果没有 `injection complete!`，检查 CDP 是否正常：`curl -s http://127.0.0.1:19222/json`
+4. 尝试完全退出 SeaTalk（Cmd+Q）和 Agent 后重新启动
 
 </details>
 
@@ -383,6 +416,8 @@ npm start
 | **spark-query**    | 通过 Livy 提交 Spark SQL 任务                | DMP Username + Password   |
 | **api-trace**      | API 接口血缘分析，查找上下游依赖             | 同 presto-query           |
 | **seatalk-reader** | 读取 SeaTalk 聊天消息、打开消息链接          | 需 SeaTalk 开启 CDP       |
+| **scheduler-query** | DataSuite Scheduler 任务查询 + Presto History Server | 浏览器 Cookie 自动认证   |
+| **seatalk-group** | 通过 InfraBot API 批量邀请/移除 SeaTalk 群成员       | InfraBot API Token       |
 
 ### SeaTalk Agent
 
@@ -395,6 +430,8 @@ npm start
 - **MCP 工具调用** — 对话中自动调用 Presto/CK/Spark/API-Trace 等工具
 - **工作区切换** — 切换 Cursor 工作区，加载对应项目的 rules 和 skills
 - **会话持久化** — 重启后自动恢复上一次的对话上下文
+- **版本检查与一键更新** — 状态栏实时显示版本，检测到新版本可一键更新，更新后自动重启并恢复面板状态
+- **Cursor CLI 预检查** — 启动时自动检测 `agent` 命令是否可用，未安装时在面板中给出安装指引
 - **深色/浅色主题** — 跟随用户偏好
 - **面板可缩放** — 支持 8 方向拖拽调整大小
 
@@ -404,10 +441,12 @@ npm start
 
 | 工具                               | 凭证来源                 | 获取方式                                                                                                             |
 | ---------------------------------- | ------------------------ | -------------------------------------------------------------------------------------------------------------------- |
-| **presto-query / api-trace** | DataSuite Personal Token | 访问[DataSuite API 管理](https://datasuite.shopee.io/dataservice/ds_api_management) → 左上角 ☰ → 获取 Personal Token |
-| **spark-query**              | DMP BigData Account      | 访问[DataSuite 个人中心](https://datasuite.shopee.io) → Profile → BigData Account / Password（点击 View）             |
+| **presto-query / api-trace** | Personal Token + 用户名  | [DataSuite API 管理](https://datasuite.shopee.io/dataservice/ds_api_management) → ☰ → Personal Token；用户名格式 `john.doe`（不是邮箱） |
+| **spark-query**              | DMP BigData Account      | [DataSuite](https://datasuite.shopee.io) → 头像 → **RAM** → Profile → BigData Account / Password（点击 View）       |
 | **ck-query**                 | 团队统一配置             | 密码已配置在 `ck_mcp_server.py` 中                                                                                 |
 | **seatalk-reader**           | 无需凭证                 | 需 SeaTalk 开启 `--remote-debugging-port=19222`                                                                    |
+| **scheduler-query**          | 无需凭证                 | 通过浏览器 Cookie 自动认证 DataSuite                                                                               |
+| **seatalk-group**            | InfraBot API Token       | 找 @tianyi.liang 获取，或在 [InfraBot API Playground](https://space.shopee.io/utility/seatalkbot/api-playground) 申请 |
 
 ---
 
@@ -448,7 +487,8 @@ spx-helper/
 │   └── share-package/            # 可分发的 Presto 查询工具包
 │
 ├── .cursor/skills/               # Cursor Skills
-│   └── spx-bug-trace/            # Bug 排查技能（API 溯源 + 数据验证流程）
+│   ├── spx-bug-trace/            # Bug 排查技能（API 溯源 + 数据验证流程）
+│   └── seatalk-troubleshoot/     # SeaTalk Agent 故障排查工作流
 │
 ├── scripts/                      # 构建/发布/测试脚本
 └── docs/                         # 文档（安装、使用、架构、变更日志）
@@ -493,13 +533,28 @@ spx-helper/
 
 ## Skills（技能）
 
-项目内置了 `spx-bug-trace` 技能，提供标准化的 Bug 排查流程：
+项目内置了两个 Cursor Skill，提供标准化的工作流：
+
+### spx-bug-trace — Bug 排查
 
 1. 从 SeaTalk 消息中提取问题描述和相关 API 链接
 2. 通过 `seatalk-reader` 读取完整上下文
 3. 通过 `api-trace` 分析 API 血缘关系
 4. 通过 `presto-query` / `ck-query` 验证数据
 5. 生成排查报告
+
+### seatalk-troubleshoot — SeaTalk Agent 故障排查
+
+当 SeaTalk Agent 出现问题（无法启动、面板不显示、更新卡住、ACP 断连等）时触发，提供 8 阶段系统化排查流程：
+
+0. 环境检查（Agent 进程）
+1. CDP 连接（SeaTalk 调试端口）
+2. Agent 日志分析
+3. UI 注入检查
+4. 消息通信（Bridge）
+5. 更新机制排查
+6. ACP 连接（AI 对话能力）
+7. Heartbeat 与重连
 
 使用方式：在 Cursor 中打开 SPX Helper 项目后，直接描述问题即可自动触发。
 
@@ -509,16 +564,19 @@ spx-helper/
 
 要获得 SPX Helper 的**完整能力**，需要完成以下配置：
 
-| 步骤 | 组件                | 效果                                         |
-| ---- | ------------------- | -------------------------------------------- |
-| 1    | Chrome 扩展         | API 溯源、快速链接、日程、工具箱             |
-| 2    | presto-query MCP    | Cursor 中查询 Presto 数据                    |
-| 3    | ck-query MCP        | Cursor 中查询 ClickHouse                     |
-| 4    | spark-query MCP     | Cursor 中提交 Spark SQL                      |
-| 5    | api-trace MCP       | Cursor 中分析 API 血缘                       |
-| 6    | seatalk-reader MCP  | Cursor 中读取 SeaTalk 消息                   |
-| 7    | SeaTalk Agent       | 在 SeaTalk 中直接使用 AI（集成以上所有 MCP） |
-| 8    | spx-bug-trace Skill | 标准化 Bug 排查流程                          |
+| 步骤 | 组件                        | 效果                                         |
+| ---- | --------------------------- | -------------------------------------------- |
+| 1    | Chrome 扩展                 | API 溯源、快速链接、日程、工具箱             |
+| 2    | presto-query MCP            | Cursor 中查询 Presto 数据                    |
+| 3    | ck-query MCP                | Cursor 中查询 ClickHouse                     |
+| 4    | spark-query MCP             | Cursor 中提交 Spark SQL                      |
+| 5    | api-trace MCP               | Cursor 中分析 API 血缘                       |
+| 6    | seatalk-reader MCP          | Cursor 中读取 SeaTalk 消息                   |
+| 7    | scheduler-query MCP         | Cursor 中查询 Scheduler 任务状态             |
+| 8    | seatalk-group MCP           | Cursor 中批量管理 SeaTalk 群成员             |
+| 9    | SeaTalk Agent               | 在 SeaTalk 中直接使用 AI（集成以上所有 MCP） |
+| 10   | spx-bug-trace Skill         | 标准化 Bug 排查流程                          |
+| 11   | seatalk-troubleshoot Skill  | SeaTalk Agent 故障排查工作流                 |
 
 > 每个组件独立可用，按需安装即可。SeaTalk Agent 是最高级的集成形态，它会自动加载所有已配置的 MCP 工具。
 
@@ -544,6 +602,23 @@ npm run dev    # tsx watch 模式，代码修改自动重启
 ---
 
 ## 更新日志
+
+### v3.1.4 (2026-04)
+
+- **更新后 UI 自动恢复**：Agent 更新重启后自动恢复面板打开状态并显示成功通知（通过 localStorage 跨注入通信）
+- **发版流程规范化**：新增 `docs/RELEASE_LOG.md` 发版测试日志 + `.githooks/pre-push` 项目级 hook（推送前检查版本号和测试记录）
+- **文档全面更新**：README/INSTALL 补齐 scheduler-query 和 seatalk-group 配置、修正 DMP 凭证获取路径（RAM → Profile）、新增配置格式示例
+
+### v3.1.3 (2026-04)
+
+- **Cursor CLI 预检查**：启动时自动检测 `agent` 命令是否存在，未安装时在 SeaTalk 面板中显示详细安装指引
+- **ACP 启动失败前端提示**：区分 "Cursor CLI 未安装" 和 "ACP 连接失败" 两种错误，给出针对性提示
+- **seatalk-troubleshoot Skill**：新增 SeaTalk Agent 故障排查工作流，覆盖 8 阶段系统化排查
+
+### v3.1.2 (2026-04)
+
+- **更新流程修复**：解决更新后 UI 卡在"更新中"的问题（CDP 超时 + 前端选择器修复 + 强制 UI 重新注入）
+- **版本号自检规则**：`git-workflow.mdc` 强化提交流程，`feat`/`fix`/`refactor` 提交前强制版本号自检
 
 ### v3.1.1 (2026-04)
 

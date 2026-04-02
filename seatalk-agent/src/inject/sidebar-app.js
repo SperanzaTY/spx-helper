@@ -1033,6 +1033,7 @@
         appendUpdateProgress(d.text || '');
       } else if (d.type === 'update_done') {
         if (d.success) {
+          try { localStorage.setItem('__cursorUpdateState', JSON.stringify({ status: 'done', ts: Date.now() })); } catch (_) {}
           appendUpdateProgress('✅ 更新完成，Agent 即将重启...');
           setTimeout(function () { appendUpdateProgress('🔄 正在等待 Agent 重新连接...'); }, 2000);
           setTimeout(function () {
@@ -1090,6 +1091,7 @@
       if (act === 'apply') {
         btn.disabled = true;
         btn.textContent = '更新中...';
+        try { localStorage.setItem('__cursorUpdateState', JSON.stringify({ status: 'applying', ts: Date.now() })); } catch (_) {}
         if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: 'update_apply' }));
       } else if (act === 'check') {
         btn.textContent = '检查中...';
@@ -1295,6 +1297,7 @@
   // ── Show panel ──
   function showPanel() {
     if (panelHandle) { try { panelHandle.close(); } catch (_) {} }
+    try { localStorage.setItem('__cursorPanelOpen', '1'); } catch (_) {}
 
     panelHandle = UI.createPanel({
       id: 'cursor-panel',
@@ -1315,6 +1318,7 @@
         statusDot = null; statusText = null; statusModelEl = null;
         verBadgeEl = null; updateOverlay = null;
         wsLabel = null; modeTabEls = [];
+        try { localStorage.setItem('__cursorPanelOpen', '0'); } catch (_) {}
         var btn = document.getElementById('cursor-sidebar-btn');
         if (btn) btn.classList.remove('active');
       }
@@ -1773,5 +1777,37 @@
   updateSidebarBtnStatus();
 
   document.addEventListener('keydown', function (e) { if (e.ctrlKey && e.shiftKey && e.key === 'A') { e.preventDefault(); window.__agentToggle(); } });
+
+  // Restore panel open state after re-injection
+  try { if (localStorage.getItem('__cursorPanelOpen') === '1' && !panelHandle) showPanel(); } catch (_) {}
+
+  // Detect post-update restart: if update was applied recently, show success notification
+  (function checkPostUpdate() {
+    try {
+      var raw = localStorage.getItem('__cursorUpdateState');
+      if (!raw) return;
+      var state = JSON.parse(raw);
+      if ((state.status === 'done' || state.status === 'applying') && Date.now() - state.ts < 120000) {
+        localStorage.removeItem('__cursorUpdateState');
+        console.log('[cursor-acp] post-update restart detected, showing success notification');
+        setTimeout(function () {
+          if (!panelHandle) showPanel();
+          setTimeout(function () {
+            if (messagesEl) {
+              var notice = document.createElement('div');
+              notice.className = 'cursor-msg system';
+              notice.innerHTML = '<div class="cursor-msg-text" style="color:#4ec9b0;font-weight:500">✅ 更新成功！Agent 已自动重启到最新版本。</div>';
+              messagesEl.appendChild(notice);
+              messagesEl.scrollTop = messagesEl.scrollHeight;
+            }
+            if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: 'update_check' }));
+          }, 500);
+        }, 1000);
+      } else {
+        localStorage.removeItem('__cursorUpdateState');
+      }
+    } catch (_) {}
+  })();
+
   console.log('[cursor-acp] panel loaded (Cursor-native style)');
 })();
