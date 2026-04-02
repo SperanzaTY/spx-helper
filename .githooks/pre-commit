@@ -1,0 +1,170 @@
+#!/bin/bash
+# pre-commit hook — 提交前检查敏感文件、密钥泄露、垃圾文件、大文件
+# 安装：git config core.hooksPath .githooks
+
+HAS_ERRORS=0
+
+# 获取暂存的文件列表（只检查新增和修改的文件）
+STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null)
+
+if [ -z "$STAGED_FILES" ]; then
+  exit 0
+fi
+
+# ── 1. 禁止提交敏感文件 ──
+
+SENSITIVE_PATTERNS=(
+  '\.env$'
+  '\.env\.'
+  'credentials\.json$'
+  'service[-_]?account.*\.json$'
+  '\.key$'
+  '\.pem$'
+  '\.p12$'
+  '\.pfx$'
+  '\.keystore$'
+  'id_rsa'
+  'id_ed25519'
+  '\.secret$'
+)
+
+for FILE in $STAGED_FILES; do
+  for PATTERN in "${SENSITIVE_PATTERNS[@]}"; do
+    if echo "$FILE" | grep -qE "$PATTERN"; then
+      if [ "$HAS_ERRORS" -eq 0 ]; then
+        echo ""
+        echo "  ❌ 检测到敏感文件！"
+        echo ""
+      fi
+      echo "    🔒 $FILE"
+      HAS_ERRORS=1
+    fi
+  done
+done
+
+if [ "$HAS_ERRORS" -eq 1 ]; then
+  echo ""
+  echo "  这些文件可能包含密钥或凭据，不应提交到仓库。"
+  echo "  请将它们添加到 .gitignore 中。"
+  echo ""
+fi
+
+# ── 2. 禁止提交垃圾文件/目录 ──
+
+JUNK_PATTERNS=(
+  '^node_modules/'
+  '__pycache__/'
+  '\.pyc$'
+  '\.DS_Store$'
+  'Thumbs\.db$'
+  '\.swp$'
+  '\.swo$'
+  '~$'
+  '\.log$'
+)
+
+JUNK_FOUND=0
+for FILE in $STAGED_FILES; do
+  for PATTERN in "${JUNK_PATTERNS[@]}"; do
+    if echo "$FILE" | grep -qE "$PATTERN"; then
+      if [ "$JUNK_FOUND" -eq 0 ]; then
+        echo ""
+        echo "  ❌ 检测到不应提交的文件！"
+        echo ""
+        JUNK_FOUND=1
+      fi
+      echo "    🗑  $FILE"
+      HAS_ERRORS=1
+    fi
+  done
+done
+
+if [ "$JUNK_FOUND" -eq 1 ]; then
+  echo ""
+  echo "  请用 git reset HEAD <file> 取消暂存，并添加到 .gitignore。"
+  echo ""
+fi
+
+# ── 3. 禁止提交大文件 (>5MB) ──
+
+MAX_SIZE=$((5 * 1024 * 1024))
+LARGE_FOUND=0
+
+for FILE in $STAGED_FILES; do
+  if [ ! -f "$FILE" ]; then
+    continue
+  fi
+  FILE_SIZE=$(wc -c < "$FILE" 2>/dev/null | tr -d ' ')
+  if [ -n "$FILE_SIZE" ] && [ "$FILE_SIZE" -gt "$MAX_SIZE" ]; then
+    if [ "$LARGE_FOUND" -eq 0 ]; then
+      echo ""
+      echo "  ❌ 检测到超大文件（>5MB）！"
+      echo ""
+      LARGE_FOUND=1
+    fi
+    SIZE_MB=$(echo "scale=1; $FILE_SIZE / 1048576" | bc 2>/dev/null || echo "?")
+    echo "    📦 $FILE (${SIZE_MB}MB)"
+    HAS_ERRORS=1
+  fi
+done
+
+if [ "$LARGE_FOUND" -eq 1 ]; then
+  echo ""
+  echo "  大文件会增加仓库体积，请使用 .gitignore 排除或使用 Git LFS。"
+  echo ""
+fi
+
+# ── 4. 检测暂存文件中的疑似密钥/token ──
+
+SECRET_PATTERNS='(password|passwd|pwd|secret|api_key|apikey|api_secret|access_key|access_token|auth_token|private_key)\s*[=:]\s*["\x27][^\s"'\'']{8,}'
+
+SECRETS_FOUND=0
+for FILE in $STAGED_FILES; do
+  if [ ! -f "$FILE" ]; then
+    continue
+  fi
+  # 跳过二进制文件和 hook 脚本本身
+  if file "$FILE" 2>/dev/null | grep -q "binary\|executable"; then
+    continue
+  fi
+  # 跳过明显的非代码文件
+  if echo "$FILE" | grep -qE '\.(png|jpg|jpeg|gif|ico|woff|ttf|eot|svg|mp4|zip|tar|gz)$'; then
+    continue
+  fi
+
+  # 检查暂存内容（只查新增的行）
+  MATCHES=$(git diff --cached -U0 -- "$FILE" 2>/dev/null | grep '^+' | grep -v '^+++' | grep -iE "$SECRET_PATTERNS" | grep -viE '(example|sample|placeholder|your_|xxx|TODO|CHANGEME|<your|_here>|process\.env|os\.environ|getenv)' || true)
+  if [ -n "$MATCHES" ]; then
+    if [ "$SECRETS_FOUND" -eq 0 ]; then
+      echo ""
+      echo "  ⚠️  检测到疑似硬编码密钥/token！"
+      echo ""
+      SECRETS_FOUND=1
+    fi
+    echo "    🔑 $FILE:"
+    echo "$MATCHES" | head -3 | sed 's/^/       /'
+    if [ "$(echo "$MATCHES" | wc -l)" -gt 3 ]; then
+      echo "       ... (更多匹配)"
+    fi
+    HAS_ERRORS=1
+  fi
+done
+
+if [ "$SECRETS_FOUND" -eq 1 ]; then
+  echo ""
+  echo "  请使用环境变量（process.env / os.environ）替代硬编码密钥。"
+  echo "  如果这不是真实密钥，请在注释中标明（如 // example）。"
+  echo ""
+fi
+
+# ── 结果 ──
+
+if [ "$HAS_ERRORS" -eq 1 ]; then
+  echo "══════════════════════════════════════════════════════════"
+  echo "  🛑 提交被阻止！请先修复上述问题。"
+  echo "══════════════════════════════════════════════════════════"
+  echo ""
+  echo "  跳过检查（紧急情况）: git commit --no-verify"
+  echo ""
+  exit 1
+fi

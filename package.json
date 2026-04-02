@@ -5,8 +5,8 @@
   "author": "tianyi.liang",
   "license": "MIT",
   "scripts": {
-    "setup": "git config core.hooksPath .githooks && echo '✅ Git hooks 已启用'",
-    "postinstall": "git config core.hooksPath .githooks 2>/dev/null || true",
+    "prepare": "bash scripts/setup-hooks.sh",
+    "setup": "bash scripts/setup-hooks.sh",
     "lint": "eslint *.js",
     "format": "prettier --write \"**/*.{js,html,css,json,md}\"",
     "build:icons": "node scripts/build-icons.js"

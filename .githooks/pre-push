@@ -127,13 +127,68 @@ for REMOTE in $(git remote); do
   fi
 done
 
-# 3. 提醒：SeaTalk Agent 修改需要重启
+# 3. Commit message 格式复查（防止 --no-verify 跳过 commit-msg hook）
+VALID_TYPES="feat|fix|docs|style|refactor|perf|test|chore|build|ci|revert"
+CC_PATTERN="^(${VALID_TYPES})(\([a-zA-Z0-9_-]+\))?\!?:\ .+"
+MERGE_PATTERN="^(Merge |Revert |fixup! |squash! |amend! )"
+
+# 找到第一个 remote 的 release ref 作为基准
+BASE_REF=""
+for REMOTE in $(git remote); do
+  REF="$REMOTE/release"
+  if git rev-parse --verify "$REF" >/dev/null 2>&1; then
+    BASE_REF="$REF"
+    break
+  fi
+done
+
+if [ -n "$BASE_REF" ]; then
+  BAD_COMMITS=""
+  while IFS= read -r LINE; do
+    HASH=$(echo "$LINE" | cut -d' ' -f1)
+    MSG=$(echo "$LINE" | cut -d' ' -f2-)
+    # 跳过 merge/revert commits
+    if echo "$MSG" | grep -qE "$MERGE_PATTERN"; then
+      continue
+    fi
+    if ! echo "$MSG" | grep -qE "$CC_PATTERN"; then
+      BAD_COMMITS="${BAD_COMMITS}\n    ${HASH} ${MSG}"
+    fi
+  done < <(git log --oneline "$BASE_REF"..HEAD 2>/dev/null)
+
+  if [ -n "$BAD_COMMITS" ]; then
+    echo "❌ 以下提交不符合 Conventional Commit 格式："
+    echo -e "$BAD_COMMITS"
+    echo ""
+    echo "   要求格式: <type>: <description>"
+    echo "   type: feat / fix / docs / style / refactor / perf / test / chore / build / ci / revert"
+    echo ""
+    HAS_ERRORS=1
+  else
+    echo "✅ 所有提交符合 Conventional Commit 格式"
+  fi
+fi
+
+# 4. 提醒：SeaTalk Agent 修改需要重启
 AGENT_CHANGED=$(git diff --name-only origin/release...HEAD 2>/dev/null | grep -c "^seatalk-agent/" || true)
 if [ "$AGENT_CHANGED" -gt 0 ]; then
   echo ""
   echo "⚠️  本次推送包含 SeaTalk Agent 修改（${AGENT_CHANGED} 个文件）"
   echo "   提醒：其他团队成员需要重启 Agent 才能生效。"
   echo "   使用 seatalk 命令内的更新功能，或终端运行 seatalk 重启。"
+fi
+
+# 5. 双仓库推送提醒
+PUSH_REMOTE=$(echo "$@" | head -1)
+REMOTES=$(git remote)
+REMOTE_COUNT=$(echo "$REMOTES" | wc -l | tr -d ' ')
+if [ "$REMOTE_COUNT" -gt 1 ]; then
+  echo ""
+  echo "📌 提醒：本项目维护双仓库，请确保同时推送到两个 remote："
+  for R in $REMOTES; do
+    R_URL=$(git remote get-url "$R" 2>/dev/null || echo "?")
+    echo "     git push $R release  ($R_URL)"
+  done
 fi
 
 echo ""

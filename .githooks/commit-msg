@@ -1,0 +1,72 @@
+#!/bin/bash
+# commit-msg hook — 校验 commit message 是否符合 Conventional Commits 规范
+# 安装：git config core.hooksPath .githooks
+
+COMMIT_MSG_FILE="$1"
+COMMIT_MSG=$(head -1 "$COMMIT_MSG_FILE")
+
+# 允许 merge commits 和 rebase 操作
+if echo "$COMMIT_MSG" | grep -qE '^(Merge |Revert |fixup! |squash! |amend! )'; then
+  exit 0
+fi
+
+# Conventional Commit 格式: type[(scope)][!]: description
+VALID_TYPES="feat|fix|docs|style|refactor|perf|test|chore|build|ci|revert"
+PATTERN="^(${VALID_TYPES})(\([a-zA-Z0-9_-]+\))?\!?:\ .+"
+
+if ! echo "$COMMIT_MSG" | grep -qE "$PATTERN"; then
+  echo ""
+  echo "  ❌ Commit message 格式不符合规范！"
+  echo ""
+  echo "  当前: ${COMMIT_MSG}"
+  echo ""
+  echo "  要求格式: <type>[(scope)]: <description>"
+  echo ""
+  echo "  type 必须是以下之一:"
+  echo "    feat     — 新功能"
+  echo "    fix      — 修复 bug"
+  echo "    docs     — 文档更新"
+  echo "    style    — 代码格式（不影响功能）"
+  echo "    refactor — 重构"
+  echo "    perf     — 性能优化"
+  echo "    test     — 测试相关"
+  echo "    chore    — 构建/工具/依赖"
+  echo "    build    — 构建系统"
+  echo "    ci       — CI 配置"
+  echo "    revert   — 回滚提交"
+  echo ""
+  echo "  示例:"
+  echo "    feat: 添加 SeaTalk 发消息功能"
+  echo "    fix(agent): 修复 CDP 连接断开后重连失败"
+  echo "    docs: 更新安装文档"
+  echo ""
+  echo "  跳过检查（紧急情况）: git commit --no-verify"
+  echo ""
+  exit 1
+fi
+
+# 检查 description 是否太短或无意义
+DESC=$(echo "$COMMIT_MSG" | sed -E "s/^(${VALID_TYPES})(\([a-zA-Z0-9_-]+\))?\!?:\ //")
+DESC_LEN=${#DESC}
+
+if [ "$DESC_LEN" -lt 4 ]; then
+  echo ""
+  echo "  ❌ Commit message 描述太短！（至少 4 个字符）"
+  echo ""
+  echo "  当前: ${COMMIT_MSG}"
+  echo ""
+  exit 1
+fi
+
+# 检查常见的无意义 message
+DESC_LOWER=$(echo "$DESC" | tr '[:upper:]' '[:lower:]')
+LAZY_PATTERNS="^(update|fix|test|wip|tmp|temp|asdf|aaa|xxx|todo|changed|modified|edited)$"
+if echo "$DESC_LOWER" | grep -qE "$LAZY_PATTERNS"; then
+  echo ""
+  echo "  ❌ Commit message 描述缺乏意义！"
+  echo ""
+  echo "  当前: ${COMMIT_MSG}"
+  echo "  请写清楚改了什么、为什么改。"
+  echo ""
+  exit 1
+fi

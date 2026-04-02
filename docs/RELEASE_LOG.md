@@ -42,6 +42,31 @@
 
 ---
 
+## v3.2.0 — 2026-04-02 — chore: 全面 Git Hooks 规则化
+
+**提交者**: @tianyi.liang
+**Commit Type**: chore
+**修改模块**: Git Hooks / 构建工具
+
+### 变更说明
+- 新建 `.githooks/commit-msg` — 校验 Conventional Commit 格式（type + 有意义描述）
+- 新建 `.githooks/pre-commit` — 拦截敏感文件、密钥泄露、垃圾文件、大文件
+- 强化 `.githooks/pre-push` — 新增 commit message 格式复查（防 `--no-verify` 绕过）+ 双仓库推送提醒
+- 新建 `scripts/setup-hooks.sh` — 自动安装 hooks 脚本
+- `package.json` 添加 `prepare` 脚本，clone 后 `npm install` 自动安装 hooks
+
+### 测试清单
+
+| 测试项 | 结果 | 备注 |
+|--------|------|------|
+| commit-msg: 拒绝无格式消息 | ✅ | `update` 被拦截 |
+| commit-msg: 拒绝无意义描述 | ✅ | `feat: update` 被拦截 |
+| commit-msg: 通过正确格式 | ✅ | `feat(agent): 添加后台加好友功能` |
+| commit-msg: 放行 merge commit | ✅ | `Merge branch...` |
+| setup-hooks.sh 执行成功 | ✅ | 3 个 hooks 全部安装 |
+
+---
+
 ## v3.2.0 — 2026-04-02 — feat: SeaTalk 发消息 + 后台加好友能力
 
 **提交者**: @tianyi.liang
