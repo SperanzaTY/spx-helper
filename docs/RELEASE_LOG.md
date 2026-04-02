@@ -42,6 +42,27 @@
 
 ---
 
+## v3.2.8 — 2026-04-02 — fix: restart_agent 改为全进程重启
+
+**提交者**: @tianyi.liang
+**Commit Type**: fix
+**修改模块**: SeaTalk Agent
+
+### 变更说明
+- `restart_agent` 从"仅重启 ACP 子进程"改为"全进程重启"
+- 有 launcher（launch.sh）时 exit 42 触发自动重启循环
+- 无 launcher 时 spawn 新进程后 exit，确保 main.ts 代码变更被重新加载
+- 修复：之前重启 agent 后 main.ts 代码变更不生效的问题
+
+### 测试清单
+
+| 测试项 | 状态 | 备注 |
+|--------|------|------|
+| 设置中重启 Agent 后代码变更生效 | ⬜ | |
+| launch.sh 下重启正常 | ⬜ | |
+
+---
+
 ## v3.2.7 — 2026-04-02 — feat: 线程回复 + 撤回消息 + 添加好友免确认
 
 **提交者**: @tianyi.liang

@@ -1040,29 +1040,28 @@ async function main() {
         if (acpStarting) { log('restart_agent ignored: already starting'); return; }
         log('restart_agent requested by user');
         bridge.sendToPanel({ type: 'status', connected: false, text: '重启中...' }).catch(() => {});
+
+        // Full process restart to reload main.ts code changes
         if (agent) {
           agent.proc.removeAllListeners('exit');
           killAgent(agent.proc);
           agent = null;
         }
-        killOrphanAgentProcesses();
-        await new Promise((r) => setTimeout(r, 500));
-        acpStarting = true;
-        try {
-          const ok2 = await startAcp();
-          if (ok2) {
-            try { await doInject(); log('restart_agent: UI re-injected'); } catch (e) { log('restart_agent: UI reinject failed:', (e as Error).message); }
-            bridge.sendToPanel({ type: 'status', connected: true, text: 'Connected' }).catch(() => {});
-            bridge.sendToPanel({ type: 'mode', mode: defaultMode }).catch(() => {});
-            const ag2 = agent as AgentProcess | null;
-            if (ag2 && ag2.availableModels.length) {
-              bridge.sendToPanel({ type: 'models', models: ag2.availableModels, currentModelId: ag2.currentModelId }).catch(() => {});
-            }
-          } else {
-            try { await doInject(); } catch {}
-            bridge.sendToPanel({ type: 'status', connected: false, text: '重启失败' }).catch(() => {});
-          }
-        } finally { acpStarting = false; }
+
+        if (process.env.SEATALK_LAUNCHER) {
+          log('restart_agent: launcher detected, exiting with code 42 for auto-restart');
+          setTimeout(() => { process.exit(42); }, 500);
+        } else {
+          log('restart_agent: no launcher, spawning new process and exiting');
+          const child = spawnChild(process.execPath, process.argv.slice(1), {
+            cwd: process.cwd(),
+            detached: true,
+            stdio: 'ignore',
+            env: { ...process.env },
+          });
+          child.unref();
+          setTimeout(() => { process.exit(0); }, 500);
+        }
       } else if (data.type === 'update_check') {
         log('update_check requested by user');
         try {
