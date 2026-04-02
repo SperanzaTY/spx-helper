@@ -8,52 +8,33 @@ alwaysApply: true
 
 ## 核心原则
 
-**每次功能变更提交时，必须同步更新对应的文档。**
+**每次功能变更提交时，必须同步更新对应模块的说明文档。**
 
-## 需要同步更新的文档
+## 模块 ↔ 文档映射
 
-### 1. 模块级 README（必须）
+| 修改范围 | 必须更新的文档 |
+|---------|---------------|
+| `chrome-extension/` 下的代码 | `docs/guides/CHROME_EXTENSION.md` |
+| `mcp-tools/` 下的 `.py`/`.json`/`.toml`/`.cfg` | `docs/guides/MCP_TOOLS.md` |
+| `seatalk-agent/src/` 下的代码 | `docs/guides/SEATALK_AGENT.md` |
+| `.cursor/skills/` 下的 Skill | `docs/guides/SKILL.md` |
 
-修改任何模块的功能代码后，必须更新该模块目录下的 `README.md`：
+## 发版日志
 
-| 修改范围 | 需更新的 README |
-|---------|----------------|
-| `mcp-tools/<tool>/` 下的代码 | `mcp-tools/<tool>/README.md` + `mcp-tools/README.md` 工具列表 |
-| `chrome-extension/` 下的代码 | 根 `README.md` 的 Chrome 扩展章节 |
-| `seatalk-agent/` 下的代码 | `docs/guides/SEATALK_AGENT_USER_GUIDE.md` |
+每次提交到 `release` 分支时（不论类型），必须在 `docs/RELEASE_LOG.md` 中追加记录。
 
-### 2. 用户指南（功能变更时）
+## Hook 保障
 
-`docs/guides/SEATALK_AGENT_USER_GUIDE.md`：
-- 在「更新日志」章节添加变更记录
-- 新功能涉及 UI/MCP/工作区 → 更新功能说明章节
-- 新增 MCP 工具 → 添加工具条目和使用示例
-- 面向普通用户，语言通俗易懂
-- 格式：`- **功能名称**：一句话说明用户可感知的变化`
+`pre-push` hook 会自动检查上述映射关系，如果修改了模块代码但未更新对应文档，推送将被阻止。
 
-### 3. 安装指南（安装流程变更时）
+## 文档目录结构
 
-`INSTALL.md`：
-- 新增/删除 MCP 工具 → 更新 mcp.json 模板
-- 安装步骤变化 → 更新对应模块章节
-- 新增前置依赖 → 更新前置条件检查
-
-### 4. MCP 工具的 README 规范
-
-每个 MCP 工具的 README 应包含：
-- **功能说明**：一句话描述工具用途
-- **认证方式**：需要什么凭证、如何获取
-- **工具列表**：列出所有 `@mcp.tool()` 注册的函数，含参数说明
-- **使用示例**：在 Cursor 中的自然语言调用示例
-- **注意事项**：限制、已知问题等
-
-### 5. Skill 共享库
-
-`.cursor/skills/` 是团队共享的 Skill 仓库：
-- 新增 Skill → 创建 `SKILL.md` + 更新 `.cursor/skills/README.md` 的 Skill 列表
-- 优化 Skill → 在 SKILL.md 中记录变更，通过 MR 提交
-- 安装/更新流程详见 `.cursor/skills/README.md`
-
-### 6. .cursor/rules/ 更新
-
-新增/删除/重命名模块时，需更新 `.cursor/rules/` 下对应的 `.mdc` 文件。
+```
+docs/
+├── guides/
+│   ├── CHROME_EXTENSION.md   # Chrome 扩展指南
+│   ├── MCP_TOOLS.md          # MCP 工具指南（含推荐外部 MCP）
+│   ├── SEATALK_AGENT.md      # SeaTalk Agent 指南
+│   └── SKILL.md              # Cursor Skill 指南
+└── RELEASE_LOG.md             # 发版日志
+```

@@ -42,6 +42,54 @@
 
 ---
 
+## v3.2.1 — 2026-03-02 — chore: 统一文档管理 + Agent UI 优化 + 链接处理修复
+
+**提交者**: @tianyi.liang
+**Commit Type**: chore
+**修改模块**: SeaTalk Agent / 文档 / Git Hooks
+
+### 变更说明
+
+#### 文档统一管理
+- 建立 `docs/guides/` 统一文档目录，每个模块一份专属指南：
+  - `CHROME_EXTENSION.md` — Chrome 扩展
+  - `MCP_TOOLS.md` — MCP 工具（合并自 `mcp-tools/README.md` + `MCP_RECOMMENDATIONS.md`）
+  - `SEATALK_AGENT.md` — SeaTalk Agent（从 `SEATALK_AGENT_USER_GUIDE.md` 重命名）
+  - `SKILL.md` — Cursor Skill（从 `docs/SKILL_INSTALL.md` 迁移并重写，区分内部/外部 MCP）
+- `README.md` 简化为项目导航入口，链接到各模块指南
+- `pre-push` hook 新增模块 ↔ 文档联动检查（修改代码必须更新对应文档）
+
+#### SeaTalk Agent UI 优化
+- 设置菜单：SVG 图标替换 emoji，移除冗余"重连 Agent"，"重启 Agent"提升为首位
+- 重启 Agent 操作增强：同时重新注入 UI（`injectUI()`），实现完整重启
+- Agent 回复消息中的链接：拦截默认行为，改为系统浏览器打开（`shell.openExternal`）
+  - 同时覆盖 `sidebar-panel.js` 和 `cursor-ui.js`
+
+#### Git Hooks 强化
+- `pre-push` 新增 4 个模块的文档联动检查
+- `commit-msg`、`pre-commit` hook 创建（Conventional Commits 校验、敏感文件拦截）
+- `scripts/setup-hooks.sh` 一键安装 + `package.json` prepare 自动触发
+
+### 测试清单
+
+| 测试项 | 状态 | 备注 |
+|--------|------|------|
+| Chrome 扩展加载正常 | N/A | 本次未修改扩展代码 |
+| MCP 工具正常 | N/A | 本次未修改 MCP 代码 |
+| SeaTalk Agent 重启正常 | ⬜ | 需用户测试 |
+| Agent 消息中链接在系统浏览器打开 | ⬜ | 需用户测试 |
+| 设置菜单 SVG 图标显示正常 | ⬜ | 需用户测试 |
+| commit-msg hook 拦截无效消息 | ✅ | 已测试 |
+| pre-commit hook 拦截敏感文件 | ✅ | 已测试 |
+| pre-push hook 文档联动检查 | ✅ | 已测试 |
+| 文档链接有效 | ✅ | 已验证 |
+
+### 特别注意
+- 旧文档路径（`docs/SKILL_INSTALL.md`、`mcp-tools/MCP_RECOMMENDATIONS.md`）已添加重定向
+- `SEATALK_AGENT_USER_GUIDE.md` 保留原文件（复制而非移动），`SEATALK_AGENT.md` 为新标准名
+
+---
+
 ## v3.2.0 — 2026-04-02 — chore: 全面 Git Hooks 规则化
 
 **提交者**: @tianyi.liang

@@ -5,12 +5,10 @@
 COMMIT_MSG_FILE="$1"
 COMMIT_MSG=$(head -1 "$COMMIT_MSG_FILE")
 
-# 允许 merge commits 和 rebase 操作
 if echo "$COMMIT_MSG" | grep -qE '^(Merge |Revert |fixup! |squash! |amend! )'; then
   exit 0
 fi
 
-# Conventional Commit 格式: type[(scope)][!]: description
 VALID_TYPES="feat|fix|docs|style|refactor|perf|test|chore|build|ci|revert"
 PATTERN="^(${VALID_TYPES})(\([a-zA-Z0-9_-]+\))?\!?:\ .+"
 
@@ -45,7 +43,6 @@ if ! echo "$COMMIT_MSG" | grep -qE "$PATTERN"; then
   exit 1
 fi
 
-# 检查 description 是否太短或无意义
 DESC=$(echo "$COMMIT_MSG" | sed -E "s/^(${VALID_TYPES})(\([a-zA-Z0-9_-]+\))?\!?:\ //")
 DESC_LEN=${#DESC}
 
@@ -58,7 +55,6 @@ if [ "$DESC_LEN" -lt 4 ]; then
   exit 1
 fi
 
-# 检查常见的无意义 message
 DESC_LOWER=$(echo "$DESC" | tr '[:upper:]' '[:lower:]')
 LAZY_PATTERNS="^(update|fix|test|wip|tmp|temp|asdf|aaa|xxx|todo|changed|modified|edited)$"
 if echo "$DESC_LOWER" | grep -qE "$LAZY_PATTERNS"; then

@@ -4,7 +4,6 @@
 
 HAS_ERRORS=0
 
-# 获取暂存的文件列表（只检查新增和修改的文件）
 STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null)
 
 if [ -z "$STAGED_FILES" ]; then
@@ -123,16 +122,13 @@ for FILE in $STAGED_FILES; do
   if [ ! -f "$FILE" ]; then
     continue
   fi
-  # 跳过二进制文件和 hook 脚本本身
   if file "$FILE" 2>/dev/null | grep -q "binary\|executable"; then
     continue
   fi
-  # 跳过明显的非代码文件
   if echo "$FILE" | grep -qE '\.(png|jpg|jpeg|gif|ico|woff|ttf|eot|svg|mp4|zip|tar|gz)$'; then
     continue
   fi
 
-  # 检查暂存内容（只查新增的行）
   MATCHES=$(git diff --cached -U0 -- "$FILE" 2>/dev/null | grep '^+' | grep -v '^+++' | grep -iE "$SECRET_PATTERNS" | grep -viE '(example|sample|placeholder|your_|xxx|TODO|CHANGEME|<your|_here>|process\.env|os\.environ|getenv)' || true)
   if [ -n "$MATCHES" ]; then
     if [ "$SECRETS_FOUND" -eq 0 ]; then
@@ -153,7 +149,6 @@ done
 if [ "$SECRETS_FOUND" -eq 1 ]; then
   echo ""
   echo "  请使用环境变量（process.env / os.environ）替代硬编码密钥。"
-  echo "  如果这不是真实密钥，请在注释中标明（如 // example）。"
   echo ""
 fi
 

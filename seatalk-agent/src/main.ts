@@ -882,6 +882,7 @@ async function main() {
         }
         killOrphanAgentProcesses();
         await new Promise((r) => setTimeout(r, 500));
+        try { await injectUI(); log('restart_agent: UI re-injected'); } catch (e) { log('restart_agent: UI reinject failed:', (e as Error).message); }
         const ok2 = await startAcp();
         if (ok2) {
           bridge.sendToPanel({ type: 'status', connected: true, text: 'Connected' }).catch(() => {});

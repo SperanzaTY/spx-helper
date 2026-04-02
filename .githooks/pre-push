@@ -39,12 +39,10 @@ HAS_ERRORS=0
 
 # 0. 检查远程是否有新提交（防止覆盖他人代码）
 echo "🔍 正在检查远程仓库..."
-# 尝试 fetch 所有 remote 的 release 分支，静默失败不阻塞
 for REMOTE in $(git remote); do
   git fetch "$REMOTE" release --quiet 2>/dev/null || true
 done
 
-# 检查本地是否落后于任一 remote
 for REMOTE in $(git remote); do
   REMOTE_REF="$REMOTE/release"
   if git rev-parse --verify "$REMOTE_REF" >/dev/null 2>&1; then
@@ -74,8 +72,6 @@ if [ -f "$RELEASE_LOG" ]; then
     echo "   本次提交未修改 docs/RELEASE_LOG.md。"
     echo "   每次提交都必须在 RELEASE_LOG.md 中追加记录（包括 docs/chore 类型）。"
     echo ""
-    echo "   请让 Agent 自动生成记录，或手动追加后再推送。"
-    echo ""
     HAS_ERRORS=1
   else
     echo "✅ 发版日志已更新"
@@ -102,15 +98,69 @@ else
   echo "✅ 版本号一致: v${VERSION}"
 fi
 
-# 2.5 检查 feat/fix 类型提交是否升了版本号
-# 获取本地相对于远程的新增提交
+# 2.5 模块 ↔ 文档联动检查
+CHANGED_FILES=$(git diff-tree --no-commit-id --name-only -r HEAD)
+DOC_ERRORS=0
+
+check_module_doc() {
+  local MODULE_NAME="$1"
+  local CODE_PATTERN="$2"
+  local DOC_PATTERN="$3"
+  local DOC_DESC="$4"
+
+  local CODE_CHANGED=$(echo "$CHANGED_FILES" | grep -cE "$CODE_PATTERN" || true)
+  if [ "$CODE_CHANGED" -gt 0 ]; then
+    local DOC_CHANGED=$(echo "$CHANGED_FILES" | grep -cE "$DOC_PATTERN" || true)
+    if [ "$DOC_CHANGED" -eq 0 ]; then
+      echo "❌ 修改了 ${MODULE_NAME} 但未更新说明文档！"
+      echo "   本次提交修改了 ${CODE_CHANGED} 个 ${MODULE_NAME} 相关文件。"
+      echo "   请同步更新: ${DOC_DESC}"
+      echo ""
+      DOC_ERRORS=1
+      HAS_ERRORS=1
+    else
+      echo "✅ ${MODULE_NAME} 文档已同步"
+    fi
+  fi
+}
+
+check_module_doc \
+  "Chrome 扩展" \
+  "^chrome-extension/" \
+  "^docs/guides/CHROME_EXTENSION\.md$" \
+  "docs/guides/CHROME_EXTENSION.md（功能说明、安装步骤）"
+
+check_module_doc \
+  "MCP 工具" \
+  "^mcp-tools/.*\.(py|json|toml|cfg)$" \
+  "^docs/guides/MCP_TOOLS\.md$" \
+  "docs/guides/MCP_TOOLS.md（工具说明、配置示例、凭证获取）"
+
+check_module_doc \
+  "SeaTalk Agent" \
+  "^seatalk-agent/src/" \
+  "^docs/guides/SEATALK_AGENT\.md$" \
+  "docs/guides/SEATALK_AGENT.md（使用方法、功能说明、注意事项）"
+
+check_module_doc \
+  "Cursor Skill" \
+  "^\.cursor/skills/" \
+  "^docs/guides/SKILL\.md$" \
+  "docs/guides/SKILL.md（Skill 列表、依赖 MCP、安装方式）"
+
+if [ "$DOC_ERRORS" -eq 0 ]; then
+  MODULE_TOUCHED=$(echo "$CHANGED_FILES" | grep -cE "^(chrome-extension/|mcp-tools/.*\.(py|json|toml|cfg)$|seatalk-agent/src/|\.cursor/skills/)" || true)
+  if [ "$MODULE_TOUCHED" -gt 0 ]; then
+    echo "✅ 所有模块文档已同步"
+  fi
+fi
+
+# 2.6 检查 feat/fix 类型提交是否升了版本号
 for REMOTE in $(git remote); do
   REMOTE_REF="$REMOTE/release"
   if git rev-parse --verify "$REMOTE_REF" >/dev/null 2>&1; then
-    # 获取远程版本号
     REMOTE_VER=$(git show "$REMOTE_REF:chrome-extension/manifest.json" 2>/dev/null | grep '"version"' | head -1 | sed 's/.*"\([0-9.]*\)".*/\1/' || echo "")
     if [ -n "$REMOTE_VER" ] && [ "$REMOTE_VER" = "$VERSION" ]; then
-      # 版本号没变，检查是否有 feat/fix 类型的提交
       FEAT_FIX_COUNT=$(git log --oneline "$REMOTE_REF"..HEAD --grep='^feat' --grep='^fix' --extended-regexp 2>/dev/null | wc -l | tr -d ' ')
       if [ "$FEAT_FIX_COUNT" -gt 0 ]; then
         echo "❌ 检测到 feat/fix 类型提交但未升级版本号！"
@@ -132,7 +182,6 @@ VALID_TYPES="feat|fix|docs|style|refactor|perf|test|chore|build|ci|revert"
 CC_PATTERN="^(${VALID_TYPES})(\([a-zA-Z0-9_-]+\))?\!?:\ .+"
 MERGE_PATTERN="^(Merge |Revert |fixup! |squash! |amend! )"
 
-# 找到第一个 remote 的 release ref 作为基准
 BASE_REF=""
 for REMOTE in $(git remote); do
   REF="$REMOTE/release"
@@ -147,7 +196,6 @@ if [ -n "$BASE_REF" ]; then
   while IFS= read -r LINE; do
     HASH=$(echo "$LINE" | cut -d' ' -f1)
     MSG=$(echo "$LINE" | cut -d' ' -f2-)
-    # 跳过 merge/revert commits
     if echo "$MSG" | grep -qE "$MERGE_PATTERN"; then
       continue
     fi
@@ -175,11 +223,9 @@ if [ "$AGENT_CHANGED" -gt 0 ]; then
   echo ""
   echo "⚠️  本次推送包含 SeaTalk Agent 修改（${AGENT_CHANGED} 个文件）"
   echo "   提醒：其他团队成员需要重启 Agent 才能生效。"
-  echo "   使用 seatalk 命令内的更新功能，或终端运行 seatalk 重启。"
 fi
 
 # 5. 双仓库推送提醒
-PUSH_REMOTE=$(echo "$@" | head -1)
 REMOTES=$(git remote)
 REMOTE_COUNT=$(echo "$REMOTES" | wc -l | tr -d ' ')
 if [ "$REMOTE_COUNT" -gt 1 ]; then

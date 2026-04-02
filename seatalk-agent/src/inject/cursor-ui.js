@@ -386,6 +386,24 @@
       }
     };
 
+    // Links inside panel open in system browser instead of SeaTalk webview
+    panel.addEventListener('click', function (e) {
+      var a = e.target.closest('a[href]');
+      if (!a) return;
+      var href = a.getAttribute('href');
+      if (!href || /^(javascript|data|vbscript):/i.test(href)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      try {
+        var shell = require('@electron/remote').shell || require('electron').shell;
+        shell.openExternal(href);
+      } catch (_) {
+        try { require('electron').shell.openExternal(href); } catch (_2) {
+          window.open(href, '_blank');
+        }
+      }
+    }, true);
+
     if (typeof opts.onMount === 'function') opts.onMount(handle);
     return handle;
   }
