@@ -938,6 +938,41 @@ async function main() {
             nodeVersion: process.version,
           },
         }).catch(() => {});
+      } else if (data.type === 'send_message') {
+        const session = data.session as string;
+        const text = data.text as string;
+        const format = (data.format as string) || 'text';
+        if (!session || !text) {
+          bridge.sendToPanel({ type: 'send_result', ok: false, error: 'missing session or text' }).catch(() => {});
+          return;
+        }
+        try {
+          const escaped = JSON.stringify(JSON.stringify({ session, text, format }));
+          const res = await client.evaluate(`window.__seatalkSend(JSON.parse(${escaped}))`, 15_000);
+          bridge.sendToPanel({ type: 'send_result', ok: true, session, result: res }).catch(() => {});
+          log(`send_message ok: ${session}`);
+        } catch (e) {
+          const msg = (e as Error).message;
+          bridge.sendToPanel({ type: 'send_result', ok: false, session, error: msg }).catch(() => {});
+          log(`send_message failed: ${msg}`);
+        }
+      } else if (data.type === 'add_contact') {
+        const userId = data.userId as number;
+        const name = (data.name as string) || '';
+        if (!userId) {
+          bridge.sendToPanel({ type: 'add_contact_result', ok: false, error: 'missing userId' }).catch(() => {});
+          return;
+        }
+        try {
+          const escaped = JSON.stringify(JSON.stringify({ userId, name }));
+          const res = await client.evaluate(`window.__seatalkAddContact(JSON.parse(${escaped}))`, 15_000);
+          bridge.sendToPanel({ type: 'add_contact_result', ok: true, userId, result: res }).catch(() => {});
+          log(`add_contact ok: ${userId} (${name})`);
+        } catch (e) {
+          const msg = (e as Error).message;
+          bridge.sendToPanel({ type: 'add_contact_result', ok: false, userId, error: msg }).catch(() => {});
+          log(`add_contact failed: ${msg}`);
+        }
       }
     });
   }
@@ -951,6 +986,8 @@ async function main() {
     await client.evaluate(readScript('cursor-ui.js'));
     log('injecting sidebar panel...');
     await client.evaluate(readScript('sidebar-app.js'));
+    log('injecting seatalk-send...');
+    await client.evaluate(readScript('seatalk-send.js'));
     log('injection complete!');
     await new Promise((r) => setTimeout(r, 200));
   }

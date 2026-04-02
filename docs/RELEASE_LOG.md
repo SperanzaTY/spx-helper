@@ -42,6 +42,33 @@
 
 ---
 
+## v3.2.0 — 2026-04-02 — feat: SeaTalk 发消息 + 后台加好友能力
+
+**提交者**: @tianyi.liang
+**Commit Type**: feat
+**修改模块**: SeaTalk Agent / MCP 工具
+
+### 变更说明
+- 新增 `seatalk-send.js` 注入脚本：通过 React Fiber 提取 Redux actions 实现程序化发消息（支持纯文本和 Markdown）
+- 通过 dynamic import SeaTalk 的 `chunk-service` 模块提取 `ContactService` 单例，实现后台 RPC 加好友（零 DOM 操作，不干扰用户使用）
+- `main.ts` 新增 `send_message` / `add_contact` bridge handler
+- MCP 新增 4 个工具：`search_seatalk_users`（企业通讯录搜索）、`add_seatalk_contact`（后台加好友）、`send_seatalk_message`（发消息）、`get_send_targets`（查询可用会话）
+- 注入脚本增加版本号机制，支持 agent 重启后热更新覆盖
+- 更新完成提示中增加 MCP 重启提醒
+
+### 测试情况
+
+| 测试项 | 结果 | 备注 |
+|--------|------|------|
+| Chrome 扩展加载正常 | N/A | 未修改 |
+| MCP 工具连接正常 | ✅ | 4 个新 MCP 工具均可用 |
+| SeaTalk Agent 启动+注入正常 | ✅ | seatalk-send.js 注入成功 |
+| SeaTalk Agent 重启后 UI 恢复 | ✅ | 版本号机制生效 |
+| 修改的功能正常工作 | ✅ | 批量添加 8 个联系人成功、发消息功能正常 |
+| 已有功能未被破坏 | ✅ | |
+
+---
+
 ## v3.1.5 — 2026-04-02 — chore: pre-push 远程同步检查 + MCP 工具输出优化
 
 **提交者**: @tianyi.liang

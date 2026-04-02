@@ -1054,6 +1054,7 @@
           try { localStorage.setItem('__cursorUpdateState', JSON.stringify({ status: 'done', ts: Date.now() })); } catch (_) {}
           appendUpdateProgress('[ok] 更新完成，Agent 即将重启...');
           setTimeout(function () { appendUpdateProgress('[...] 正在等待 Agent 重新连接...'); }, 2000);
+          setTimeout(function () { appendUpdateProgress('[tip] 如果本次更新涉及 MCP 工具变更，请在 Cursor Settings > MCP 中重启 seatalk-reader'); }, 5000);
           setTimeout(function () {
             appendUpdateProgress('[tip] 如果长时间未重连，请运行 seatalk 命令重启 Agent');
             var applyBtn2 = updateOverlay && updateOverlay.querySelector('[data-act="apply"]');

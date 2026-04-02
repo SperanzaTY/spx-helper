@@ -1605,6 +1605,366 @@ async def download_seatalk_image(
     return "\n".join(lines)
 
 
+@mcp.tool()
+async def search_seatalk_users(
+    keyword: str = "",
+    limit: int = 20,
+) -> str:
+    """在 SeaTalk 企业通讯录中搜索用户。
+
+    搜索 Redux store 中缓存的所有企业用户（userInfo），支持按姓名、邮箱、
+    seatalkId 模糊匹配。
+
+    企业版 SeaTalk 中所有同事可直接发消息，无需"添加好友"。
+    找到目标用户后，可直接用 send_seatalk_message(session="buddy-{id}") 发消息。
+
+    Args:
+        keyword: 搜索关键词（姓名/邮箱/seatalkId，大小写不敏感）
+        limit: 返回数量上限，默认20
+    """
+    if not keyword:
+        return "请提供 keyword（搜索关键词）"
+
+    err = _check_cdp_available()
+    if err:
+        return err
+
+    safe_kw = json.dumps(keyword)
+    js_code = f"""(function(){{
+        var s = window.store.getState().contact;
+        var ui = s.userInfo || {{}};
+        var bl = s.buddyList || [];
+        var buddyIds = {{}};
+        for (var i = 0; i < bl.length; i++) buddyIds[bl[i].id] = true;
+
+        var kw = {safe_kw}.toLowerCase();
+        var results = [];
+        for (var uid in ui) {{
+            var u = ui[uid];
+            if (!u) continue;
+            var name = (u.name || '').toLowerCase();
+            var email = (u.email || '').toLowerCase();
+            var stId = (u.seatalkId || '').toLowerCase();
+            if (name.indexOf(kw) >= 0 || email.indexOf(kw) >= 0 || stId.indexOf(kw) >= 0) {{
+                results.push({{
+                    id: parseInt(uid),
+                    name: u.name || '',
+                    email: u.email || '',
+                    seatalkId: u.seatalkId || '',
+                    isFavorite: !!buddyIds[uid],
+                    status: u.personalStatus || null
+                }});
+            }}
+            if (results.length >= {limit}) break;
+        }}
+        results.sort(function(a, b) {{
+            var aExact = a.name.toLowerCase() === kw || a.email.toLowerCase() === kw;
+            var bExact = b.name.toLowerCase() === kw || b.email.toLowerCase() === kw;
+            if (aExact && !bExact) return -1;
+            if (!aExact && bExact) return 1;
+            return 0;
+        }});
+        return JSON.stringify({{total: Object.keys(ui).length, found: results.length, results: results}});
+    }})()"""
+
+    try:
+        raw = await _eval_js(js_code)
+        data = json.loads(raw) if isinstance(raw, str) else raw
+
+        total = data.get("total", 0)
+        found = data.get("found", 0)
+        results = data.get("results", [])
+
+        if not results:
+            return f"在 {total} 个企业用户中未找到匹配 '{keyword}' 的人。"
+
+        lines = [f"搜索 '{keyword}' — 找到 {found} 人（企业通讯录共 {total} 人）\n"]
+        for u in results:
+            fav = " [星标]" if u.get("isFavorite") else ""
+            status = ""
+            if u.get("status"):
+                ps = u["status"]
+                if isinstance(ps, dict):
+                    status_text = ps.get("text") or ps.get("status") or ""
+                    if status_text:
+                        status = f"  状态: {status_text}"
+
+            lines.append(
+                f"  {u['name']}{fav}\n"
+                f"    ID: {u['id']}  |  发消息: session=\"buddy-{u['id']}\"\n"
+                f"    邮箱: {u['email']}"
+                f"{status}"
+            )
+
+        lines.append(
+            f"\n提示: 企业 SeaTalk 内所有同事可直接发消息，"
+            f"使用 send_seatalk_message(session=\"buddy-{{id}}\") 即可。"
+        )
+        return "\n".join(lines)
+
+    except Exception as e:
+        return f"搜索用户失败: {e}"
+
+
+@mcp.tool()
+async def add_seatalk_contact(
+    user_id: int = 0,
+    user_name: str = "",
+    user_email: str = "",
+) -> str:
+    """添加 SeaTalk 联系人（好友）— 后台 RPC 方式，无 DOM 操作。
+
+    通过 SeaTalk 内部 ContactService.sendContactRequest API 直接添加联系人，
+    不会干扰用户的 SeaTalk 界面操作。添加后该用户会出现在联系人列表中，可以直接发消息。
+
+    如果用户已经是联系人，会直接返回成功。
+
+    Args:
+        user_id: 用户 ID（从 search_seatalk_users 获取）
+        user_name: 用户名（模糊匹配）
+        user_email: 用户邮箱（精确匹配，优先级最高）
+    """
+    err = _check_cdp_available()
+    if err:
+        return err
+
+    # Resolve user info from email or name
+    if user_email and not user_id:
+        result = await _eval_js(f"""(function(){{
+            var ui = window.store.getState().contact.userInfo || {{}};
+            for (var uid in ui) {{
+                if (ui[uid] && ui[uid].email === {json.dumps(user_email)})
+                    return JSON.stringify({{id: parseInt(uid), name: ui[uid].name, email: ui[uid].email}});
+            }}
+            return JSON.stringify({{error: 'not found'}});
+        }})()""")
+        data = json.loads(result) if isinstance(result, str) else result
+        if data.get("error"):
+            return f"在企业通讯录中未找到邮箱 '{user_email}'"
+        user_id = data["id"]
+        user_name = data.get("name", "")
+    elif user_name and not user_id:
+        result = await _eval_js(f"""(function(){{
+            var ui = window.store.getState().contact.userInfo || {{}};
+            var kw = {json.dumps(user_name)}.toLowerCase();
+            var matches = [];
+            for (var uid in ui) {{
+                var u = ui[uid];
+                if (!u) continue;
+                var n = (u.name || '').toLowerCase();
+                var e = (u.email || '').toLowerCase();
+                if (n.indexOf(kw) >= 0 || e.indexOf(kw) >= 0)
+                    matches.push({{id: parseInt(uid), name: u.name, email: u.email}});
+                if (matches.length >= 5) break;
+            }}
+            return JSON.stringify(matches);
+        }})()""")
+        matches = json.loads(result) if isinstance(result, str) else result
+        if not matches:
+            return f"未找到匹配 '{user_name}' 的用户"
+        if len(matches) > 1:
+            lines = [f"找到 {len(matches)} 个匹配，请用 user_email 精确指定:\n"]
+            for m in matches:
+                lines.append(f"  {m['name']} ({m['email']})  →  user_id={m['id']}")
+            return "\n".join(lines)
+        user_id = matches[0]["id"]
+        user_name = matches[0].get("name", "")
+
+    if not user_id:
+        return "请提供 user_id, user_name 或 user_email"
+
+    # Use __seatalkAddContact (backend RPC via ContactService)
+    escaped = json.dumps(json.dumps({"userId": user_id, "name": user_name}))
+    result = await _eval_js(
+        f"window.__seatalkAddContact(JSON.parse({escaped}))"
+    )
+    data = json.loads(result) if isinstance(result, str) else result
+
+    if isinstance(data, dict) and data.get("ok"):
+        display_name = user_name or f"user-{user_id}"
+        if data.get("alreadyContact"):
+            return (
+                f"{display_name} 已经是联系人了，"
+                f"可直接用 send_seatalk_message(session=\"buddy-{user_id}\") 发消息。"
+            )
+        return (
+            f"已成功添加联系人: {display_name} (id={user_id})\n"
+            f"becameContact: {data.get('becameContact', '?')}\n"
+            f"现在可以用 send_seatalk_message(session=\"buddy-{user_id}\") 发消息。"
+        )
+    else:
+        error_msg = data.get("error", str(data)) if isinstance(data, dict) else str(data)
+        return f"添加联系人失败: {error_msg}"
+
+
+@mcp.tool()
+async def send_seatalk_message(
+    session: str = "",
+    text: str = "",
+    format: str = "text",
+    session_name: str = "",
+) -> str:
+    """向指定的 SeaTalk 会话发送消息。
+
+    ⚠️ 重要：发送前请确认 session 和消息内容正确。发出后不可撤回。
+
+    使用方法：
+    1. 先用 list_seatalk_chats 获取会话列表，确定 session 格式
+    2. session 格式为 "group-123456" 或 "buddy-123456"
+    3. 如果不确定 session ID，可以用 session_name 模糊匹配
+
+    Args:
+        session: 目标会话，格式 "group-{id}" 或 "buddy-{id}"
+        text: 消息文本内容
+        format: "text"(纯文本) 或 "markdown"(支持加粗、斜体、代码等)
+        session_name: 会话名称（模糊匹配，如果没有 session 参数则用这个查找）
+    """
+    if not text:
+        return "请提供 text（消息内容）参数"
+
+    err = _check_cdp_available()
+    if err:
+        return err
+
+    # If session_name provided but no session, look up the ID
+    if session_name and not session:
+        search_result = await _eval_js(f"""(function(){{
+            var s = window.store.getState();
+            var gi = (s.contact && s.contact.groupInfo) || {{}};
+            var ui = (s.contact && s.contact.userInfo) || {{}};
+            var keyword = {json.dumps(session_name)}.toLowerCase();
+            var matches = [];
+            for (var gid in gi) {{
+                var name = (gi[gid].name || '').toLowerCase();
+                if (name.indexOf(keyword) >= 0) {{
+                    matches.push({{type:'group', id:parseInt(gid), name:gi[gid].name}});
+                }}
+            }}
+            for (var uid in ui) {{
+                var name = (ui[uid].name || '').toLowerCase();
+                if (name.indexOf(keyword) >= 0) {{
+                    matches.push({{type:'buddy', id:parseInt(uid), name:ui[uid].name}});
+                }}
+            }}
+            return JSON.stringify(matches.slice(0, 5));
+        }})()""")
+        matches = json.loads(search_result) if isinstance(search_result, str) else search_result
+        if not matches:
+            return f"未找到匹配 '{session_name}' 的会话"
+        if len(matches) > 1:
+            lines = [f"找到 {len(matches)} 个匹配 '{session_name}' 的会话，请用 session 参数指定:\n"]
+            for m in matches:
+                prefix = "[群]" if m["type"] == "group" else "[私]"
+                lines.append(f"  {prefix} {m['name']} → session=\"{m['type']}-{m['id']}\"")
+            return "\n".join(lines)
+        session = f"{matches[0]['type']}-{matches[0]['id']}"
+
+    if not session:
+        return "请提供 session（如 'group-123456'）或 session_name 参数"
+
+    import re
+    if not re.match(r'^(group|buddy)-\d+$', session):
+        return f"session 格式错误: '{session}'，应为 'group-NNN' 或 'buddy-NNN'"
+
+    # Resolve session name for confirmation
+    parts = session.split('-')
+    sess_type, sess_id = parts[0], parts[1]
+    name_js = f"""(function(){{
+        var s = window.store.getState().contact;
+        if ('{sess_type}' === 'group') return (s.groupInfo[{sess_id}] || {{}}).name || '';
+        return (s.userInfo[{sess_id}] || {{}}).name || '';
+    }})()"""
+    try:
+        sess_name = await _eval_js(name_js) or session
+    except Exception:
+        sess_name = session
+
+    safe_opts = json.dumps({"session": session, "text": text, "format": format})
+    send_js = f"""(function(){{
+        if (typeof window.__seatalkSend !== 'function')
+            return JSON.stringify({{error: '__seatalkSend not injected. Is seatalk-agent running?'}});
+        return window.__seatalkSend(JSON.parse({json.dumps(safe_opts)}))
+            .then(function(r) {{ return JSON.stringify(r); }})
+            .catch(function(e) {{ return JSON.stringify({{error: e.message || String(e)}}); }});
+    }})()"""
+
+    try:
+        raw = await _eval_js(send_js)
+        result = json.loads(raw) if isinstance(raw, str) else raw
+
+        if isinstance(result, dict) and result.get("error"):
+            error_msg = result["error"]
+            if "__seatalkSend not injected" in error_msg:
+                return (
+                    "发送失败: seatalk-agent 的发送脚本未注入。\n"
+                    "请确认 seatalk-agent 正在运行（发送功能依赖 seatalk-agent 注入的脚本）。"
+                )
+            return f"发送失败: {error_msg}"
+
+        preview = text[:80] + ('...' if len(text) > 80 else '')
+        return (
+            f"消息已发送！\n"
+            f"  目标: {sess_name} ({session})\n"
+            f"  内容: {preview}\n"
+            f"  格式: {format}"
+        )
+
+    except Exception as e:
+        return f"发送消息失败: {e}"
+
+
+@mcp.tool()
+async def get_send_targets() -> str:
+    """获取可用的 SeaTalk 发送目标列表。
+
+    列出当前登录用户的会话列表，显示可用于 send_seatalk_message 的 session 参数值。
+    返回最近活跃的群聊和私聊，包括名称和对应的 session 标识符。
+    """
+    err = _check_cdp_available()
+    if err:
+        return err
+
+    try:
+        raw = await _eval_js("""(function(){
+            if (typeof window.__seatalkSendInfo === 'function') return JSON.stringify(window.__seatalkSendInfo());
+            var s = window.store.getState();
+            var result = {currentSession: null, sessions: []};
+            var sel = s.messages.selectedSession;
+            if (sel) result.currentSession = (sel.type === 'group' ? 'group' : 'buddy') + '-' + sel.id;
+            var sessions = s.messages.sessionList || [];
+            var info = s.contact.userInfo || {};
+            var groups = s.contact.groupInfo || {};
+            for (var i = 0; i < Math.min(sessions.length, 30); i++) {
+                var sess = sessions[i];
+                if (!sess) continue;
+                var name = '';
+                if (sess.type === 'group') name = (groups[sess.id] || {}).name || 'group-' + sess.id;
+                else name = (info[sess.id] || {}).name || 'user-' + sess.id;
+                result.sessions.push({id: sess.type + '-' + sess.id, name: name});
+            }
+            return JSON.stringify(result);
+        })()""")
+
+        data = json.loads(raw) if isinstance(raw, str) else raw
+
+        lines = []
+        if data.get("currentSession"):
+            lines.append(f"当前会话: {data['currentSession']}\n")
+
+        sessions = data.get("sessions", [])
+        if sessions:
+            lines.append(f"最近 {len(sessions)} 个会话 (可直接用于 send_seatalk_message 的 session 参数):\n")
+            for s in sessions:
+                lines.append(f"  {s['name']}  →  session=\"{s['id']}\"")
+        else:
+            lines.append("当前没有可用的会话列表。")
+
+        return "\n".join(lines)
+
+    except Exception as e:
+        return f"获取发送目标失败: {e}"
+
+
 # ═══════════════════════════════════════════════════════════════
 #  启动入口
 # ═══════════════════════════════════════════════════════════════

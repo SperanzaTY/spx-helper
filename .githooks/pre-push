@@ -102,6 +102,31 @@ else
   echo "✅ 版本号一致: v${VERSION}"
 fi
 
+# 2.5 检查 feat/fix 类型提交是否升了版本号
+# 获取本地相对于远程的新增提交
+for REMOTE in $(git remote); do
+  REMOTE_REF="$REMOTE/release"
+  if git rev-parse --verify "$REMOTE_REF" >/dev/null 2>&1; then
+    # 获取远程版本号
+    REMOTE_VER=$(git show "$REMOTE_REF:chrome-extension/manifest.json" 2>/dev/null | grep '"version"' | head -1 | sed 's/.*"\([0-9.]*\)".*/\1/' || echo "")
+    if [ -n "$REMOTE_VER" ] && [ "$REMOTE_VER" = "$VERSION" ]; then
+      # 版本号没变，检查是否有 feat/fix 类型的提交
+      FEAT_FIX_COUNT=$(git log --oneline "$REMOTE_REF"..HEAD --grep='^feat' --grep='^fix' --extended-regexp 2>/dev/null | wc -l | tr -d ' ')
+      if [ "$FEAT_FIX_COUNT" -gt 0 ]; then
+        echo "❌ 检测到 feat/fix 类型提交但未升级版本号！"
+        echo "   远程版本: v${REMOTE_VER}  →  本地版本: v${VERSION}（未变化）"
+        echo "   包含 ${FEAT_FIX_COUNT} 个 feat/fix 提交:"
+        git log --oneline "$REMOTE_REF"..HEAD --grep='^feat' --grep='^fix' --extended-regexp 2>/dev/null | sed 's/^/     /'
+        echo ""
+        echo "   请升级版本号（修改 manifest.json + package.json + seatalk-agent/package.json）"
+        echo ""
+        HAS_ERRORS=1
+      fi
+    fi
+    break
+  fi
+done
+
 # 3. 提醒：SeaTalk Agent 修改需要重启
 AGENT_CHANGED=$(git diff --name-only origin/release...HEAD 2>/dev/null | grep -c "^seatalk-agent/" || true)
 if [ "$AGENT_CHANGED" -gt 0 ]; then
