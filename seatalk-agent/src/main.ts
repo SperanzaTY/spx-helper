@@ -664,6 +664,15 @@ async function main() {
         }
       }
 
+      if (defaultMode !== 'ask') {
+        try {
+          await agent!.connection.setSessionMode({ sessionId: agent!.sessionId, modeId: defaultMode });
+          log(`restored mode: ${defaultMode}`);
+        } catch (e) {
+          log(`restore mode failed: ${(e as Error).message}`);
+        }
+      }
+
       return true;
     } catch (e) {
       const errMsg = (e as Error).message;
@@ -685,6 +694,24 @@ async function main() {
   const acpReady = await startAcp();
 
   // ── Message handler ──
+
+  const pendingSendConfirms = new Map<string, { session: string; text: string; format: string }>();
+  const pendingContactConfirms = new Map<string, { userId: number; name: string }>();
+  let sendGrantActive = false;
+  let acpStarting = false;
+
+  async function doSend(session: string, text: string, format: string, label: string) {
+    try {
+      const escaped = JSON.stringify(JSON.stringify({ session, text, format, confirmed: true }));
+      const res = await client.evaluate(`window.__seatalkSend(JSON.parse(${escaped}))`, 15_000);
+      bridge.sendToPanel({ type: 'send_result', ok: true, session, result: res }).catch(() => {});
+      log(`send_message ok (${label}): ${session}`);
+    } catch (e) {
+      const msg = (e as Error).message;
+      bridge.sendToPanel({ type: 'send_result', ok: false, session, error: msg }).catch(() => {});
+      log(`send_message failed (${label}): ${msg}`);
+    }
+  }
 
   function setupMessageHandler(b: Bridge) {
     b.onMessage(async (data) => {
@@ -824,18 +851,20 @@ async function main() {
           await bridge.sendToPanel({ type: 'turn_end', stopReason: 'cancelled' }).catch(() => {});
         }
       } else if (data.type === 'set_mode') {
-        if (agent) {
+        const mode = data.mode as string;
+        if (mode) defaultMode = mode;
+        if (agent && mode) {
           try {
-            const mode = data.mode as string;
             await agent.connection.setSessionMode({
               sessionId: agent.sessionId,
               modeId: mode,
             });
-            defaultMode = mode;
             log(`mode set to: ${mode}`);
           } catch (e) {
             log('set mode failed:', (e as Error).message);
           }
+        } else if (!agent && mode) {
+          log(`mode saved as default: ${mode} (agent not connected yet)`);
         }
       } else if (data.type === 'set_model') {
         const modelId = data.modelId as string;
@@ -947,6 +976,7 @@ async function main() {
           }
         }
       } else if (data.type === 'reconnect_acp') {
+        if (acpStarting) { log('reconnect_acp ignored: already starting'); return; }
         log('reconnect_acp requested by user');
         bridge.sendToPanel({ type: 'status', connected: false, text: '重连中...' }).catch(() => {});
         if (agent) {
@@ -955,16 +985,20 @@ async function main() {
           agent = null;
         }
         killOrphanAgentProcesses();
-        const ok = await startAcp();
-        if (ok) {
-          bridge.sendToPanel({ type: 'status', connected: true, text: 'Connected' }).catch(() => {});
-          const ag = agent as AgentProcess | null;
-          if (ag && ag.availableModels.length) {
-            bridge.sendToPanel({ type: 'models', models: ag.availableModels, currentModelId: ag.currentModelId }).catch(() => {});
+        acpStarting = true;
+        try {
+          const ok = await startAcp();
+          if (ok) {
+            bridge.sendToPanel({ type: 'status', connected: true, text: 'Connected' }).catch(() => {});
+            bridge.sendToPanel({ type: 'mode', mode: defaultMode }).catch(() => {});
+            const ag = agent as AgentProcess | null;
+            if (ag && ag.availableModels.length) {
+              bridge.sendToPanel({ type: 'models', models: ag.availableModels, currentModelId: ag.currentModelId }).catch(() => {});
+            }
+          } else {
+            bridge.sendToPanel({ type: 'status', connected: false, text: '重连失败' }).catch(() => {});
           }
-        } else {
-          bridge.sendToPanel({ type: 'status', connected: false, text: '重连失败' }).catch(() => {});
-        }
+        } finally { acpStarting = false; }
       } else if (data.type === 'reinject_ui') {
         log('reinject_ui requested by user');
         try {
@@ -974,6 +1008,7 @@ async function main() {
           log('reinject_ui failed:', (e as Error).message);
         }
       } else if (data.type === 'restart_agent') {
+        if (acpStarting) { log('restart_agent ignored: already starting'); return; }
         log('restart_agent requested by user');
         bridge.sendToPanel({ type: 'status', connected: false, text: '重启中...' }).catch(() => {});
         if (agent) {
@@ -983,17 +1018,22 @@ async function main() {
         }
         killOrphanAgentProcesses();
         await new Promise((r) => setTimeout(r, 500));
-        try { await doInject(); log('restart_agent: UI re-injected'); } catch (e) { log('restart_agent: UI reinject failed:', (e as Error).message); }
-        const ok2 = await startAcp();
-        if (ok2) {
-          bridge.sendToPanel({ type: 'status', connected: true, text: 'Connected' }).catch(() => {});
-          const ag2 = agent as AgentProcess | null;
-          if (ag2 && ag2.availableModels.length) {
-            bridge.sendToPanel({ type: 'models', models: ag2.availableModels, currentModelId: ag2.currentModelId }).catch(() => {});
+        acpStarting = true;
+        try {
+          const ok2 = await startAcp();
+          if (ok2) {
+            try { await doInject(); log('restart_agent: UI re-injected'); } catch (e) { log('restart_agent: UI reinject failed:', (e as Error).message); }
+            bridge.sendToPanel({ type: 'status', connected: true, text: 'Connected' }).catch(() => {});
+            bridge.sendToPanel({ type: 'mode', mode: defaultMode }).catch(() => {});
+            const ag2 = agent as AgentProcess | null;
+            if (ag2 && ag2.availableModels.length) {
+              bridge.sendToPanel({ type: 'models', models: ag2.availableModels, currentModelId: ag2.currentModelId }).catch(() => {});
+            }
+          } else {
+            try { await doInject(); } catch {}
+            bridge.sendToPanel({ type: 'status', connected: false, text: '重启失败' }).catch(() => {});
           }
-        } else {
-          bridge.sendToPanel({ type: 'status', connected: false, text: '重启失败' }).catch(() => {});
-        }
+        } finally { acpStarting = false; }
       } else if (data.type === 'update_check') {
         log('update_check requested by user');
         try {
@@ -1065,16 +1105,56 @@ async function main() {
           bridge.sendToPanel({ type: 'send_result', ok: false, error: 'missing session or text' }).catch(() => {});
           return;
         }
-        try {
-          const escaped = JSON.stringify(JSON.stringify({ session, text, format }));
-          const res = await client.evaluate(`window.__seatalkSend(JSON.parse(${escaped}))`, 15_000);
-          bridge.sendToPanel({ type: 'send_result', ok: true, session, result: res }).catch(() => {});
-          log(`send_message ok: ${session}`);
-        } catch (e) {
-          const msg = (e as Error).message;
-          bridge.sendToPanel({ type: 'send_result', ok: false, session, error: msg }).catch(() => {});
-          log(`send_message failed: ${msg}`);
+
+        if (sendGrantActive) {
+          await doSend(session, text, format, 'grant');
+          return;
         }
+
+        const confirmId = `send_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        pendingSendConfirms.set(confirmId, { session, text, format });
+        setTimeout(() => pendingSendConfirms.delete(confirmId), 120_000);
+        bridge.sendToPanel({
+          type: 'send_confirm_request',
+          confirmId,
+          session,
+          text,
+          format,
+        }).catch(() => {});
+        log(`send_message: awaiting user confirmation (${confirmId})`);
+
+      } else if (data.type === 'send_confirmed') {
+        const confirmId = data.confirmId as string;
+        const pending = pendingSendConfirms.get(confirmId);
+        if (!pending) {
+          bridge.sendToPanel({ type: 'send_result', ok: false, error: 'confirmation expired or invalid' }).catch(() => {});
+          return;
+        }
+        pendingSendConfirms.delete(confirmId);
+        await doSend(pending.session, pending.text, pending.format, 'confirmed');
+
+      } else if (data.type === 'send_cancelled') {
+        const confirmId = data.confirmId as string;
+        pendingSendConfirms.delete(confirmId);
+        bridge.sendToPanel({ type: 'send_result', ok: false, session: '', error: 'user cancelled' }).catch(() => {});
+        log(`send_message cancelled by user (${confirmId})`);
+
+      } else if (data.type === 'send_grant_all') {
+        const confirmId = data.confirmId as string;
+        sendGrantActive = true;
+        bridge.sendToPanel({ type: 'send_grant_status', active: true }).catch(() => {});
+        log('send grant mode ENABLED by user');
+        const pending = pendingSendConfirms.get(confirmId);
+        if (pending) {
+          pendingSendConfirms.delete(confirmId);
+          await doSend(pending.session, pending.text, pending.format, 'grant+confirm');
+        }
+
+      } else if (data.type === 'send_grant_off') {
+        sendGrantActive = false;
+        bridge.sendToPanel({ type: 'send_grant_status', active: false }).catch(() => {});
+        log('send grant mode DISABLED by user');
+
       } else if (data.type === 'add_contact') {
         const userId = data.userId as number;
         const name = (data.name as string) || '';
@@ -1082,16 +1162,43 @@ async function main() {
           bridge.sendToPanel({ type: 'add_contact_result', ok: false, error: 'missing userId' }).catch(() => {});
           return;
         }
+        const confirmId = `contact_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        pendingContactConfirms.set(confirmId, { userId, name });
+        setTimeout(() => pendingContactConfirms.delete(confirmId), 120_000);
+        bridge.sendToPanel({
+          type: 'contact_confirm_request',
+          confirmId,
+          userId,
+          name,
+        }).catch(() => {});
+        log(`add_contact: awaiting user confirmation (${confirmId})`);
+
+      } else if (data.type === 'contact_confirmed') {
+        const confirmId = data.confirmId as string;
+        const pending = pendingContactConfirms.get(confirmId);
+        if (!pending) {
+          bridge.sendToPanel({ type: 'add_contact_result', ok: false, error: 'confirmation expired or invalid' }).catch(() => {});
+          return;
+        }
+        pendingContactConfirms.delete(confirmId);
+        const { userId, name } = pending;
         try {
           const escaped = JSON.stringify(JSON.stringify({ userId, name }));
           const res = await client.evaluate(`window.__seatalkAddContact(JSON.parse(${escaped}))`, 15_000);
           bridge.sendToPanel({ type: 'add_contact_result', ok: true, userId, result: res }).catch(() => {});
-          log(`add_contact ok: ${userId} (${name})`);
+          log(`add_contact ok (confirmed): ${userId} (${name})`);
         } catch (e) {
           const msg = (e as Error).message;
           bridge.sendToPanel({ type: 'add_contact_result', ok: false, userId, error: msg }).catch(() => {});
           log(`add_contact failed: ${msg}`);
         }
+
+      } else if (data.type === 'contact_cancelled') {
+        const confirmId = data.confirmId as string;
+        pendingContactConfirms.delete(confirmId);
+        bridge.sendToPanel({ type: 'add_contact_result', ok: false, userId: 0, error: 'user cancelled' }).catch(() => {});
+        log(`add_contact cancelled by user (${confirmId})`);
+
       }
     });
   }
@@ -1188,7 +1295,7 @@ async function main() {
 
   await setupCdpClient();
 
-  // ── Silent update check (30s after start, then every 10 min) ──
+  // ── Silent update check (immediate on start, then every 10 min) ──
 
   function silentUpdateCheck() {
     try {
@@ -1197,7 +1304,7 @@ async function main() {
     } catch {}
   }
 
-  setTimeout(silentUpdateCheck, 30_000);
+  setTimeout(silentUpdateCheck, 3_000);
   setInterval(silentUpdateCheck, 10 * 60 * 1000);
 
   // ── CDP reconnection ──

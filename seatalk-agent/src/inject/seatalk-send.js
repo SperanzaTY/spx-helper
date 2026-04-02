@@ -1,14 +1,12 @@
 // SeaTalk programmatic send — extract React Fiber actions & expose __seatalkSend()
 // Based on seatalk-enhance's proven approach, adapted for seatalk-agent.
 (function () {
-  var SEND_SCRIPT_VERSION = 2;
+  var SEND_SCRIPT_VERSION = 5;
   if (window.__seatalkSendVersion >= SEND_SCRIPT_VERSION) return;
   window.__seatalkSendVersion = SEND_SCRIPT_VERSION;
 
   // ── protocolJson builders ──
 
-  // SeaTalk ProseMirror schema only supports: bold, italic, code
-  // strikethrough (s=32) is NOT rendered by SeaTalk's editor
   var STYLE = { PLAIN: 0, BOLD: 1, ITALIC: 2, CODE: 16 };
   var NODE = { DOC: 10001, OL: 10002, UL: 10003, PARA: 10004, CODE_BLOCK: 10005, TEXT: 20001 };
 
@@ -126,7 +124,6 @@
     });
   }
 
-  // Proactively cache when editor appears
   function tryCache() {
     if (cachedActions) return;
     var a = extractActions();
@@ -135,25 +132,24 @@
 
   // ── Main API ──
 
-  /**
-   * Send a message to a SeaTalk session.
-   * @param {Object} opts
-   * @param {string} opts.session  - "group-123456" or "buddy-123456"
-   * @param {string} opts.text     - message text
-   * @param {string} [opts.format] - "markdown" for rich text, omit for plain
-   * @returns {Promise<{ok: true, session: string}>}
-   */
   var sendLog = [];
   var RATE_LIMIT_PER_MIN = 10;
 
   window.__seatalkSendLog = function () { return sendLog.slice(-50); };
 
+  /**
+   * opts.confirmed must be true — only main.ts bridge handler sets this
+   * after user confirms in the panel dialog (or grant mode is on).
+   */
   window.__seatalkSend = function (opts) {
     if (!opts || !opts.session || !opts.text) {
       return Promise.reject(new Error('missing session or text'));
     }
+    if (!opts.confirmed) {
+      return Promise.reject(new Error('DENIED: opts.confirmed must be true. Send via seatalk-agent bridge.'));
+    }
     var match = opts.session.match(/^(group|buddy)-(\d+)$/);
-    if (!match) return Promise.reject(new Error('invalid session format, expected "group-NNN" or "buddy-NNN"'));
+    if (!match) return Promise.reject(new Error('invalid session format'));
 
     var now = Date.now();
     var recentCount = sendLog.filter(function (e) { return now - e.ts < 60000; }).length;
@@ -195,10 +191,6 @@
     });
   };
 
-  /**
-   * Get info about available sessions and contacts for sending.
-   * @returns {{ currentSession: string|null, sessions: Array<{id:string, name:string}> }}
-   */
   window.__seatalkSendInfo = function () {
     var result = { currentSession: null, sessions: [] };
     try {
@@ -222,7 +214,7 @@
     return result;
   };
 
-  // ── ContactService extraction (for backend add-contact) ──
+  // ── ContactService extraction ──
 
   var contactServicePromise = null;
 
@@ -255,13 +247,6 @@
     return contactServicePromise;
   }
 
-  /**
-   * Add a contact by userId (backend RPC, no DOM operations).
-   * @param {Object} opts
-   * @param {number} opts.userId  - SeaTalk user ID
-   * @param {string} [opts.name]  - display name (optional, for logging)
-   * @returns {Promise<{ok:true, userId:number, becameContact:boolean}>}
-   */
   window.__seatalkAddContact = function (opts) {
     if (!opts || !opts.userId) return Promise.reject(new Error('missing userId'));
     var userId = Number(opts.userId);
@@ -280,7 +265,6 @@
     });
   };
 
-  // Cache on load + observe for editor mount
   if (window.store) tryCache();
   var observer = new MutationObserver(function () {
     if (cachedActions) { observer.disconnect(); return; }
@@ -288,8 +272,7 @@
   });
   observer.observe(document.body, { childList: true, subtree: true });
 
-  // Pre-warm ContactService
   getContactService().catch(function () {});
 
-  console.log('[seatalk-send] ready (with addContact)');
+  console.log('[seatalk-send] ready v5');
 })();

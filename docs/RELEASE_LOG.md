@@ -42,6 +42,37 @@
 
 ---
 
+## v3.2.4 — 2026-04-02 — feat: 发送消息/添加联系人权限控制 + 内联确认卡片
+
+**提交者**: @tianyi.liang
+**Commit Type**: feat
+**修改模块**: SeaTalk Agent / MCP 工具
+
+### 变更说明
+- 发送消息和添加联系人必须经用户确认，防止 AI 自作主张发送
+- MCP `send_seatalk_message` / `add_seatalk_contact` 不再直接执行，统一走 seatalk-agent bridge handler 确认流程
+- 确认卡片内联到消息流中（不再使用全屏覆盖弹窗），显示目标和消息预览
+- 输入框上方添加「免确认」开关（与 Model 选择同行），开启后跳过确认直接发送
+- 修复重启/重连后 session mode 不恢复为 agent 的问题（`defaultMode` 持久化 + `set_mode` 即使 agent 未连接也更新）
+- 添加 ACP 启动互斥锁（`acpStarting`），防止 `restart_agent` 和 `reconnect_acp` 同时触发双重启动
+- `restart_agent` 执行顺序改为先 `startAcp` 再 `doInject`，避免注入后推送 disconnected 状态
+- `seatalk-send.js` 升级到 v5：去除复杂的 token/密钥机制，改为简单的 `confirmed: true` 参数
+- 注入时清理旧版本残留 DOM 元素（`.cursor-confirm-overlay`、`.cursor-grant-indicator`）
+
+### 测试清单
+
+| 测试项 | 状态 | 备注 |
+|--------|------|------|
+| 发送消息弹出确认卡片 | ✅ | |
+| 确认后消息成功发送 | ✅ | |
+| 取消后消息不发送 | ✅ | |
+| 免确认开关开启后直接发送 | ✅ | |
+| 重启后模式正确恢复为 agent | ✅ | |
+| 重启无双重 ACP 启动 | ✅ | |
+| MCP 工具走 bridge 确认 | ✅ | |
+
+---
+
 ## v3.2.3 — 2026-04-02 — fix: 修复孤儿进程泄漏导致内存持续上涨
 
 **提交者**: @tianyi.liang

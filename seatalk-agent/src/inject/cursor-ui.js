@@ -655,6 +655,15 @@
           toolCallEls = {};
         },
 
+        freezeResult: function () {
+          if (resultEl && resultText) {
+            resultEl.classList.add(prefix + '-result-frozen');
+            resultEl.removeAttribute('id');
+          }
+          resultEl = null;
+          resultText = '';
+        },
+
         processChunk: function (evt) {
           if (evt.type === 'thinking' || evt.type === 'thinking_done') {
             ensureThinking();

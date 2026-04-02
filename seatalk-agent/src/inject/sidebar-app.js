@@ -9,6 +9,39 @@
   var oldPanel = document.getElementById('cursor-panel');
   if (oldPanel) oldPanel.remove();
 
+  // ── Inject confirmation dialog CSS ──
+  (function () {
+    // Clean up legacy DOM elements from older versions
+    document.querySelectorAll('.cursor-confirm-overlay, .cursor-grant-indicator').forEach(function (el) { el.remove(); });
+
+    var id = 'cursor-confirm-css';
+    var old = document.getElementById(id);
+    if (old) old.remove();
+    var s = document.createElement('style');
+    s.id = id;
+    s.textContent =
+      '.cursor-confirm-card{margin:8px 16px;padding:12px 14px;background:var(--cp-bg3);border:1px solid var(--cp-border2);border-radius:8px;font-size:12px;color:var(--cp-text2)}' +
+      '.cursor-confirm-card.resolved{opacity:.6}' +
+      '.cursor-confirm-card .cc-title{font-size:12px;font-weight:600;margin-bottom:8px;display:flex;align-items:center;gap:6px;color:#fbbf24}' +
+      '.cursor-confirm-card .cc-field{display:flex;justify-content:space-between;padding:3px 0;font-size:11px;color:var(--cp-text-dim)}' +
+      '.cursor-confirm-card .cc-field span:last-child{color:var(--cp-text2);font-family:"JetBrains Mono",monospace}' +
+      '.cursor-confirm-card .cc-preview{background:var(--cp-bg);border:1px solid var(--cp-border);border-radius:4px;padding:6px 8px;font-size:11px;color:var(--cp-text-dim);max-height:100px;overflow-y:auto;line-height:1.4;margin-top:6px;white-space:pre-wrap;word-break:break-word}' +
+      '.cursor-confirm-card .cc-actions{display:flex;gap:8px;margin-top:10px}' +
+      '.cursor-confirm-card .cc-btn{border:none;border-radius:5px;padding:5px 14px;font-size:11px;cursor:pointer;font-weight:500;transition:all .12s}' +
+      '.cc-btn.cancel{background:var(--cp-bg);border:1px solid var(--cp-border2);color:var(--cp-text-dim)}.cc-btn.cancel:hover{border-color:var(--cp-text-dim);color:var(--cp-text2)}' +
+      '.cc-btn.confirm{background:#4f6ef7;color:#fff}.cc-btn.confirm:hover{background:#6380ff}' +
+      '.cursor-confirm-card .cc-status{font-size:11px;color:var(--cp-text-dim);margin-top:8px;display:flex;align-items:center;gap:4px}' +
+      '.cursor-grant-toggle{display:none;align-items:center;gap:4px;padding:2px 8px;border-radius:4px;background:var(--cp-bg3);border:1px solid var(--cp-border2);font-size:10px;color:var(--cp-text-dim);cursor:pointer;transition:all .15s;user-select:none;margin-left:auto}' +
+      '.cursor-grant-toggle.visible{display:inline-flex}' +
+      '.cursor-grant-toggle .gt-track{width:22px;height:12px;border-radius:6px;background:#3d3d55;transition:background .15s;position:relative;flex-shrink:0}' +
+      '.cursor-grant-toggle .gt-knob{width:8px;height:8px;border-radius:50%;background:#94a3b8;position:absolute;top:2px;left:2px;transition:all .15s}' +
+      '.cursor-grant-toggle.on .gt-track{background:#22c55e}' +
+      '.cursor-grant-toggle.on .gt-knob{left:12px;background:#fff}' +
+      '.cursor-grant-toggle.on{border-color:rgba(34,197,94,.4);color:#22c55e}' +
+      '.cursor-grant-toggle:hover{border-color:var(--cp-accent);color:var(--cp-text2)}';
+    document.head.appendChild(s);
+  })();
+
   var sr = UI.streaming;
   var escapeHtml = UI.escapeHtml;
 
@@ -29,6 +62,7 @@
   var modeSelect = null, modelSelect = null, ctxBar = null, ctxLabel = null;
   var wsLabel = null;
   var turnView = null, turnEl = null, turnFullText = '', turnFullThinking = '';
+  var turnAccumText = []; // all intermediate text segments (preserved across tool calls)
   var turnToolCalls = {}; // accumulate tool call state across tool_start / tool_update
   var pendingImages = []; // [{data: base64String, mimeType, name}]
   var imgPreviewEl = null, imgFileInput = null;
@@ -166,6 +200,7 @@
     '.ca-result td { padding:6px 10px; border:1px solid var(--cp-border3); color:var(--cp-text); }',
     '.ca-result a { color:var(--cp-link); text-decoration:none; } .ca-result a:hover { text-decoration:underline; }',
     '.ca-result hr { border:none; border-top:1px solid var(--cp-border3); margin:16px 0; }',
+    '.ca-result-frozen { opacity:0.7; padding-bottom:8px; margin-bottom:4px; border-bottom:1px dashed var(--cp-border3); }',
 
     // Thinking block
     '.ca-thinking { padding:8px 12px; border-radius:4px; background:var(--cp-think-bg); border:1px solid var(--cp-think-border); font-size:12px; line-height:1.5; color:var(--cp-think-color); max-height:200px; overflow-y:auto; white-space:pre-wrap; word-break:break-word; cursor:text; user-select:text; transition:max-height .3s, padding .2s; }',
@@ -529,6 +564,7 @@
     turnView.reset();
     turnFullText = '';
     turnFullThinking = '';
+    turnAccumText = [];
     turnToolCalls = {};
     messagesEl.scrollTop = messagesEl.scrollHeight;
   }
@@ -536,7 +572,10 @@
   function endTurn(stopReason) {
     if (!turnView && !isProcessing) return; // already ended, ignore duplicate
     if (turnView) turnView.finalize();
-    var finalText = turnFullText ? turnFullText.replace(/^\n+/, '') : '';
+    // Combine all accumulated intermediate texts with the final text
+    var allSegments = turnAccumText.slice();
+    if (turnFullText && turnFullText.replace(/\s/g, '').length > 0) allSegments.push(turnFullText);
+    var finalText = allSegments.join('\n\n---\n\n').replace(/^\n+/, '');
     // Build tool call summary for history
     var toolSummaries = [];
     for (var tcKey in turnToolCalls) {
@@ -561,7 +600,7 @@
     }
     // Visually separate final result from tool calls, and scroll to it
     if (turnEl && messagesEl) {
-      var finalResult = turnEl.querySelector('.ca-result');
+      var finalResult = turnEl.querySelector('.ca-result:not(.ca-result-frozen)');
       var hasToolCalls = turnEl.querySelector('[id^="ca-tc-"]');
       if (finalResult && finalResult.textContent.trim() && hasToolCalls) {
         finalResult.classList.add('has-tools');
@@ -926,13 +965,12 @@
         if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight;
       } else if (d.type === 'tool_start') {
         if (!turnView) startTurn();
-        // Clear intermediate explanation text when a new tool call starts
+        // Preserve intermediate text as a frozen segment before starting a new tool call
         if (turnFullText && turnFullText.replace(/\s/g, '').length > 0) {
-          turnFullText = '';
-          turnView.clearResult();
-        } else {
-          turnFullText = '';
+          turnAccumText.push(turnFullText);
+          if (turnView) turnView.freezeResult();
         }
+        turnFullText = '';
         var tcId = d.toolCallId || ('tc-' + Date.now());
         var existing = turnToolCalls[tcId];
         if (existing) {
@@ -950,7 +988,7 @@
           };
         }
         turnView.processChunk({ type: 'tool_call', toolCall: turnToolCalls[tcId] });
-        if (turnEl) { var r = turnEl.querySelector('.ca-result'); if (r) turnEl.appendChild(r); }
+        if (turnEl) { var r = turnEl.querySelector('.ca-result:not(.ca-result-frozen)'); if (r) turnEl.appendChild(r); }
         if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight;
       } else if (d.type === 'tool_update') {
         if (!turnView) return;
@@ -964,7 +1002,7 @@
         if (d.status) tc.status = d.status;
         if (d.output) tc.result = d.output;
         turnView.processChunk({ type: 'tool_call', toolCall: tc });
-        if (turnEl) { var r2 = turnEl.querySelector('.ca-result'); if (r2) turnEl.appendChild(r2); }
+        if (turnEl) { var r2 = turnEl.querySelector('.ca-result:not(.ca-result-frozen)'); if (r2) turnEl.appendChild(r2); }
       } else if (d.type === 'turn_usage') {
         if (turnEl) {
           var uEl = document.createElement('div');
@@ -1065,9 +1103,122 @@
           var applyBtn = updateOverlay && updateOverlay.querySelector('[data-act="apply"]');
           if (applyBtn) { applyBtn.disabled = false; applyBtn.textContent = '重试更新'; }
         }
+      } else if (d.type === 'send_confirm_request') {
+        _grantToggleVisible = true;
+        updateGrantToggle();
+        showSendConfirmDialog(d);
+      } else if (d.type === 'contact_confirm_request') {
+        _grantToggleVisible = true;
+        updateGrantToggle();
+        showContactConfirmDialog(d);
+      } else if (d.type === 'send_grant_status') {
+        _sendGrantActive = !!d.active;
+        _grantToggleVisible = true;
+        updateGrantToggle();
       }
     } catch (err) { console.error('[cursor-acp] __agentReceive error:', err); }
   };
+
+  // ── Send grant state ──
+  var _sendGrantActive = false;
+  var _grantToggleVisible = true;
+
+  function updateGrantToggle() {
+    var el = panelHandle && panelHandle.el ? panelHandle.el.querySelector('.cursor-grant-toggle') : null;
+    if (!el) return;
+    if (_grantToggleVisible) el.classList.add('visible');
+    else el.classList.remove('visible');
+    if (_sendGrantActive) el.classList.add('on');
+    else el.classList.remove('on');
+  }
+
+  function bindGrantToggle() {
+    var el = panelHandle && panelHandle.el ? panelHandle.el.querySelector('.cursor-grant-toggle') : null;
+    if (!el || el._bound) return;
+    el._bound = true;
+    el.addEventListener('click', function () {
+      if (_sendGrantActive) {
+        if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: 'send_grant_off' }));
+      } else {
+        if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: 'send_grant_all', confirmId: '' }));
+      }
+    });
+  }
+
+  // ── Inline confirmation cards (inside message flow) ──
+
+  function resolveCard(card, statusHtml) {
+    var actions = card.querySelector('.cc-actions');
+    if (actions) actions.remove();
+    var st = document.createElement('div');
+    st.className = 'cc-status';
+    st.innerHTML = statusHtml;
+    card.appendChild(st);
+    card.classList.add('resolved');
+  }
+
+  function showSendConfirmDialog(d) {
+    if (!messagesEl) return;
+    var card = document.createElement('div');
+    card.className = 'cursor-confirm-card';
+    var previewText = (d.text || '').length > 200 ? d.text.substring(0, 200) + '...' : (d.text || '');
+
+    card.innerHTML =
+      '<div class="cc-title">' +
+        '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><path d="M22 2L15 22l-4-9-9-4z"/></svg>' +
+        '发送消息' +
+      '</div>' +
+      '<div class="cc-field"><span>目标</span><span>' + escapeHtml(d.session || '') + '</span></div>' +
+      '<div class="cc-preview">' + escapeHtml(previewText).replace(/\n/g, '<br>') + '</div>' +
+      '<div class="cc-actions">' +
+        '<button class="cc-btn cancel">取消</button>' +
+        '<button class="cc-btn confirm">确认发送</button>' +
+      '</div>';
+
+    var btns = card.querySelectorAll('.cc-btn');
+    btns[0].onclick = function () {
+      resolveCard(card, '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg> 已取消');
+      if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: 'send_cancelled', confirmId: d.confirmId }));
+    };
+    btns[1].onclick = function () {
+      resolveCard(card, '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> 已发送');
+      if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: 'send_confirmed', confirmId: d.confirmId }));
+    };
+
+    messagesEl.appendChild(card);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+
+  function showContactConfirmDialog(d) {
+    if (!messagesEl) return;
+    var card = document.createElement('div');
+    card.className = 'cursor-confirm-card';
+
+    card.innerHTML =
+      '<div class="cc-title">' +
+        '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>' +
+        '添加联系人' +
+      '</div>' +
+      '<div class="cc-field"><span>用户名</span><span>' + escapeHtml(d.name || 'ID: ' + d.userId) + '</span></div>' +
+      '<div class="cc-field"><span>用户 ID</span><span>' + d.userId + '</span></div>' +
+      '<div class="cc-actions">' +
+        '<button class="cc-btn cancel">取消</button>' +
+        '<button class="cc-btn confirm">确认添加</button>' +
+      '</div>';
+
+    var btns = card.querySelectorAll('.cc-btn');
+    btns[0].onclick = function () {
+      resolveCard(card, '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg> 已取消');
+      if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: 'contact_cancelled', confirmId: d.confirmId }));
+    };
+    btns[1].onclick = function () {
+      resolveCard(card, '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> 已添加');
+      if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: 'contact_confirmed', confirmId: d.confirmId }));
+    };
+
+    messagesEl.appendChild(card);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
 
   window.__agentSetStatus = function (connected, text) {
     cachedStatus = { connected: connected, text: text || (connected ? 'Connected' : 'Disconnected') };
@@ -1573,7 +1724,7 @@
     var inputArea = document.createElement('div');
     inputArea.className = 'cursor-input-area';
     inputArea.innerHTML =
-      '<div class="cursor-input-meta"><span class="cursor-model-badge"><span class="dot"></span>Model</span><div class="cursor-model-dd"></div></div>' +
+      '<div class="cursor-input-meta"><span class="cursor-model-badge"><span class="dot"></span>Model</span><div class="cursor-model-dd"></div><span class="cursor-grant-toggle" title="发送免确认"><span class="gt-track"><span class="gt-knob"></span></span><span class="gt-label">免确认</span></span></div>' +
       '<div class="cursor-img-preview"></div>' +
       '<div class="cursor-input-wrap">' +
       '<textarea class="cursor-input" placeholder="Ask anything..." rows="1"></textarea>' +
@@ -1611,6 +1762,8 @@
 
     updateModelBadge();
     buildModelDropdown();
+    bindGrantToggle();
+    updateGrantToggle();
 
     modelBadgeEl.addEventListener('click', function (e) {
       e.stopPropagation();

@@ -22,6 +22,7 @@
 3. **版本唯一源**：`chrome-extension/manifest.json` 的 version
 4. **文档同步**：功能变更必须更新对应模块的 README
 5. **凭证安全**：禁止硬编码密码/token，使用环境变量
+6. **版本升级默认 PATCH**：`feat`/`fix`/`refactor` 均默认只升 PATCH（如 3.2.3 → 3.2.4）。只有用户明确要求时才升 MINOR（如 3.2.3 → 3.3.0）
 
 ## Skill
 

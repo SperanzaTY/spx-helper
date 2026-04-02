@@ -25,6 +25,7 @@ import asyncio
 import json
 import os
 import sys
+import time
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
@@ -1712,12 +1713,17 @@ async def add_seatalk_contact(
     user_name: str = "",
     user_email: str = "",
 ) -> str:
-    """添加 SeaTalk 联系人（好友）— 后台 RPC 方式，无 DOM 操作。
+    """添加 SeaTalk 联系人（好友）— 需用户确认。
 
-    通过 SeaTalk 内部 ContactService.sendContactRequest API 直接添加联系人，
-    不会干扰用户的 SeaTalk 界面操作。添加后该用户会出现在联系人列表中，可以直接发消息。
+    ⚠️ 安全机制：
+    - 调用此工具后，请求会提交到 seatalk-agent 的确认队列
+    - 用户必须在 SeaTalk Agent 面板中点击「确认添加」才会真正添加
+    - 此工具不能直接添加联系人，必须经过 seatalk-agent 的权限控制
 
-    如果用户已经是联系人，会直接返回成功。
+    ⚠️ AI 行为规则：
+    1. 只有当用户**明确要求添加好友**时才可以调用（如"加一下XX"、"添加XX为好友"）
+    2. **禁止**自动批量添加联系人
+    3. 调用前必须告知用户即将添加的联系人信息
 
     Args:
         user_id: 用户 ID（从 search_seatalk_users 获取）
@@ -1773,28 +1779,33 @@ async def add_seatalk_contact(
     if not user_id:
         return "请提供 user_id, user_name 或 user_email"
 
-    # Use __seatalkAddContact (backend RPC via ContactService)
-    escaped = json.dumps(json.dumps({"userId": user_id, "name": user_name}))
-    result = await _eval_js(
-        f"window.__seatalkAddContact(JSON.parse({escaped}))"
-    )
-    data = json.loads(result) if isinstance(result, str) else result
+    # Send via seatalk-agent bridge handler which enforces user confirmation
+    bridge_js = f"""(function(){{
+        if (typeof window.__agentSend !== 'function')
+            return JSON.stringify({{error: 'seatalk-agent bridge not available. Is seatalk-agent running with the Agent panel open?'}});
+        window.__agentSend(JSON.stringify({{
+            type: 'add_contact',
+            userId: {user_id},
+            name: {json.dumps(user_name or f'user-{user_id}')}
+        }}));
+        return JSON.stringify({{queued: true}});
+    }})()"""
 
-    if isinstance(data, dict) and data.get("ok"):
+    try:
+        raw = await _eval_js(bridge_js)
+        result = json.loads(raw) if isinstance(raw, str) else raw
+
+        if isinstance(result, dict) and result.get("error"):
+            return f"添加联系人失败: {result['error']}"
+
         display_name = user_name or f"user-{user_id}"
-        if data.get("alreadyContact"):
-            return (
-                f"{display_name} 已经是联系人了，"
-                f"可直接用 send_seatalk_message(session=\"buddy-{user_id}\") 发消息。"
-            )
         return (
-            f"已成功添加联系人: {display_name} (id={user_id})\n"
-            f"becameContact: {data.get('becameContact', '?')}\n"
-            f"现在可以用 send_seatalk_message(session=\"buddy-{user_id}\") 发消息。"
+            f"添加联系人请求已提交到 seatalk-agent 等待用户确认。\n"
+            f"  用户: {display_name} (id={user_id})\n\n"
+            f"用户需要在 SeaTalk Agent 面板中点击「确认添加」才会真正添加。"
         )
-    else:
-        error_msg = data.get("error", str(data)) if isinstance(data, dict) else str(data)
-        return f"添加联系人失败: {error_msg}"
+    except Exception as e:
+        return f"添加联系人失败: {str(e)}"
 
 
 @mcp.tool()
@@ -1804,9 +1815,18 @@ async def send_seatalk_message(
     format: str = "text",
     session_name: str = "",
 ) -> str:
-    """向指定的 SeaTalk 会话发送消息。
+    """向指定的 SeaTalk 会话发送消息（需用户确认）。
 
-    ⚠️ 重要：发送前请确认 session 和消息内容正确。发出后不可撤回。
+    ⚠️ 安全机制：
+    - 调用此工具后，消息会提交到 seatalk-agent 的确认队列
+    - 用户必须在 SeaTalk Agent 面板中点击「确认发送」才会真正发送
+    - 如果用户已开启「会话级免确认」模式，消息会自动发送
+    - 此工具不能直接发送消息，必须经过 seatalk-agent 的权限控制
+
+    ⚠️ AI 行为规则：
+    1. 只有当用户**明确要求发送**时才可以调用（如"给XX发消息"、"帮我发给XX"、"回复XX"等）
+    2. **禁止**自作主张发送消息——即使上下文暗示需要发送，也必须先向用户确认
+    3. 调用前必须向用户展示完整的消息内容和目标会话
 
     使用方法：
     1. 先用 list_seatalk_chats 获取会话列表，确定 session 格式
@@ -1879,34 +1899,37 @@ async def send_seatalk_message(
     except Exception:
         sess_name = session
 
-    safe_opts = json.dumps({"session": session, "text": text, "format": format})
-    send_js = f"""(function(){{
-        if (typeof window.__seatalkSend !== 'function')
-            return JSON.stringify({{error: '__seatalkSend not injected. Is seatalk-agent running?'}});
-        return window.__seatalkSend(JSON.parse({json.dumps(safe_opts)}))
-            .then(function(r) {{ return JSON.stringify(r); }})
-            .catch(function(e) {{ return JSON.stringify({{error: e.message || String(e)}}); }});
+    # Send via seatalk-agent bridge handler which enforces user confirmation.
+    # The bridge handler will show a confirmation dialog in the Agent panel.
+    # If no Agent panel is open, the message is queued for 120s.
+    bridge_js = f"""(function(){{
+        if (typeof window.__agentSend !== 'function')
+            return JSON.stringify({{error: 'seatalk-agent bridge not available. Is seatalk-agent running with the Agent panel open?'}});
+        window.__agentSend(JSON.stringify({{
+            type: 'send_message',
+            session: {json.dumps(session)},
+            text: {json.dumps(text)},
+            format: {json.dumps(format)}
+        }}));
+        return JSON.stringify({{queued: true}});
     }})()"""
 
     try:
-        raw = await _eval_js(send_js)
+        raw = await _eval_js(bridge_js)
         result = json.loads(raw) if isinstance(raw, str) else raw
 
         if isinstance(result, dict) and result.get("error"):
             error_msg = result["error"]
-            if "__seatalkSend not injected" in error_msg:
-                return (
-                    "发送失败: seatalk-agent 的发送脚本未注入。\n"
-                    "请确认 seatalk-agent 正在运行（发送功能依赖 seatalk-agent 注入的脚本）。"
-                )
             return f"发送失败: {error_msg}"
 
         preview = text[:80] + ('...' if len(text) > 80 else '')
         return (
-            f"消息已发送！\n"
+            f"消息已提交到 seatalk-agent 等待用户确认。\n"
             f"  目标: {sess_name} ({session})\n"
             f"  内容: {preview}\n"
-            f"  格式: {format}"
+            f"  格式: {format}\n\n"
+            f"用户需要在 SeaTalk Agent 面板中点击「确认发送」才会真正发送。\n"
+            f"如果已开启「会话级免确认」模式，消息会自动发送。"
         )
 
     except Exception as e:
