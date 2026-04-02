@@ -27,4 +27,4 @@
 
 Skill 源文件在 `.cursor/skills/`，提交到 Git 供团队共享。
 其他项目使用：`cp -r .cursor/skills/spx-bug-trace ~/.cursor/skills/`
-详见 `docs/SKILL_INSTALL.md`
+详见 `docs/guides/SKILL.md`

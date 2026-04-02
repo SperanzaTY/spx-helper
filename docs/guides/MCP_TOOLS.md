@@ -172,7 +172,7 @@ AI 直接读写 Google Sheets，用于任务管理和数据整理。
 | ---- | ---- | -------- |
 | `PRESTO_PERSONAL_TOKEN` | `eyJhbGci...` 长字符串 | [DataSuite API 管理](https://datasuite.shopee.io/dataservice/ds_api_management) → ☰ → Personal Token |
 | `PRESTO_USERNAME` | `john.doe`（**不是邮箱**） | 你的 Shopee 用户名 |
-| `LIVY_USERNAME` / `LIVY_PASSWORD` | BigData Account | [DataSuite](https://datasuite.shopee.io) → 头像 → **RAM** → Profile → BigData Account |
+| `LIVY_USERNAME` / `LIVY_PASSWORD` | BigData Account | [DataSuite](https://datasuite.shopee.io) → **RAM** → Profile → BigData Account（点 View 查看） |
 | `INFRABOT_TOKEN` | `infrabot.xxxx` | 找 @tianyi.liang 获取，或在 [InfraBot API Playground](https://space.shopee.io/utility/seatalkbot/api-playground) 申请 |
 | `CONFLUENCE_PERSONAL_TOKEN` | 令牌字符串 | confluence.shopee.io → 个人头像 → Profile → Personal Access Tokens |
 

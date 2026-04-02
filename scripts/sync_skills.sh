@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # 【已不推荐日常使用】团队约定：Skill 一律手动编辑、手动 cp 同步，勿依赖本脚本。
-# 保留本文件仅为历史兼容；新流程见 docs/SKILL_INSTALL.md「维护原则」。
+# 保留本文件仅为历史兼容；新流程见 docs/guides/SKILL.md「维护原则」。
 #
 # 原行为：首次安装时复制；已有本地版本时不覆盖，仅提示在 Cursor 中比较合并
 
@@ -30,7 +30,7 @@ for skill_dir in "$SRC_DIR"/*; do
             echo "   不自动覆盖。若需更新，请在 Cursor 中比较："
             echo "   仓库：$SRC_DIR/$name"
             echo "   本地：$dest_path"
-            echo "   详见 docs/SKILL_INSTALL.md"
+            echo "   详见 docs/guides/SKILL.md"
         fi
     fi
 done

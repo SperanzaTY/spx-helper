@@ -85,7 +85,7 @@
 | 文档链接有效 | ✅ | 已验证 |
 
 ### 特别注意
-- 旧文档路径（`docs/SKILL_INSTALL.md`、`mcp-tools/MCP_RECOMMENDATIONS.md`）已添加重定向
+- 旧文档已清理（`SKILL_INSTALL.md`、`SEATALK_AGENT_UPDATE_REPRO`），`mcp-tools/` 下旧文档已添加重定向
 - `SEATALK_AGENT_USER_GUIDE.md` 已删除，统一使用 `SEATALK_AGENT.md`
 
 ---

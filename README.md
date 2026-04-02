@@ -54,7 +54,7 @@ git clone https://github.com/SperanzaTY/spx-helper.git
 | 工具 | 凭证来源 | 获取方式 |
 | ---- | -------- | -------- |
 | presto-query / api-trace | Personal Token + 用户名 | [DataSuite API 管理](https://datasuite.shopee.io/dataservice/ds_api_management) → ☰ → Personal Token |
-| spark-query | DMP BigData Account | [DataSuite](https://datasuite.shopee.io) → 头像 → **RAM** → Profile → BigData Account |
+| spark-query | DMP BigData Account | [DataSuite](https://datasuite.shopee.io) → **RAM** → Profile → BigData Account |
 | ck-query | 团队统一配置 | 密码已配置在 `ck_mcp_server.py` 中 |
 | seatalk-reader | 无需凭证 | 需 SeaTalk 开启 CDP |
 | scheduler-query | 无需凭证 | 通过浏览器 Cookie 自动认证 |
