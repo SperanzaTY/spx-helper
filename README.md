@@ -491,7 +491,7 @@ spx-helper/
 │   └── seatalk-troubleshoot/     # SeaTalk Agent 故障排查工作流
 │
 ├── scripts/                      # 构建/发布/测试脚本
-└── docs/                         # 文档（安装、使用、架构、变更日志）
+└── docs/                         # 文档（发版日志、架构图、排查案例）
 ```
 
 ---
@@ -681,7 +681,7 @@ npm run dev    # tsx watch 模式，代码修改自动重启
 - 新增 API 数据血缘分析
 - 项目结构重组
 
-查看 [CHANGELOG.md](docs/CHANGELOG.md) 了解完整更新历史。
+查看 [docs/RELEASE_LOG.md](docs/RELEASE_LOG.md) 了解发版测试记录。
 
 ---
 
