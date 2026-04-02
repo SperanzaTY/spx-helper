@@ -1,7 +1,7 @@
 // SeaTalk programmatic send — extract React Fiber actions & expose __seatalkSend()
 // Based on seatalk-enhance's proven approach, adapted for seatalk-agent.
 (function () {
-  var SEND_SCRIPT_VERSION = 5;
+  var SEND_SCRIPT_VERSION = 6;
   if (window.__seatalkSendVersion >= SEND_SCRIPT_VERSION) return;
   window.__seatalkSendVersion = SEND_SCRIPT_VERSION;
 
@@ -171,11 +171,13 @@
       protocolJson = textToProtocolJson(text);
     }
 
+    var rootMid = opts.rootMid || undefined;
+
     return ensureActions(String(id)).then(function (actions) {
       var session = { type: type, id: id };
       actions.actionChangeDraft({
         session: session,
-        rootMid: undefined,
+        rootMid: rootMid,
         text: displayText,
         protocolJson: protocolJson,
         mentions: [],
@@ -183,11 +185,11 @@
         clearFormattingCount: 0
       });
       actions.logicSendMessage({
-        data: { messageType: 'text', session: session, rootMid: undefined }
+        data: { messageType: 'text', session: session, rootMid: rootMid }
       });
-      sendLog.push({ ts: Date.now(), session: opts.session, len: opts.text.length });
+      sendLog.push({ ts: Date.now(), session: opts.session, len: opts.text.length, rootMid: rootMid });
       if (sendLog.length > 100) sendLog = sendLog.slice(-50);
-      return { ok: true, session: opts.session };
+      return { ok: true, session: opts.session, rootMid: rootMid };
     });
   };
 
@@ -265,6 +267,60 @@
     });
   };
 
+  // ── Recall API ──
+
+  window.__seatalkRecall = function (opts) {
+    if (!opts || !opts.session || !opts.mid) {
+      return Promise.reject(new Error('missing session or mid'));
+    }
+    if (!opts.confirmed) {
+      return Promise.reject(new Error('DENIED: opts.confirmed must be true. Send via seatalk-agent bridge.'));
+    }
+    var match = opts.session.match(/^(group|buddy)-(\d+)$/);
+    if (!match) return Promise.reject(new Error('invalid session format'));
+
+    var type = match[1];
+    var id = parseInt(match[2], 10);
+    var session = { type: type, id: id };
+    var mid = String(opts.mid);
+
+    try {
+      var state = window.store.getState();
+      var loginUid = state.login && state.login.userInfo && state.login.userInfo.id;
+      if (!loginUid) return Promise.reject(new Error('cannot determine logged-in user'));
+
+      window.store.dispatch({
+        type: 'MESSAGES_ACTION_GENERALIZED_DELETE_MESSAGES',
+        data: {
+          session: session,
+          mids: [mid],
+          operatorId: loginUid,
+          operatorType: 'user'
+        }
+      });
+      return Promise.resolve({ ok: true, session: opts.session, mid: mid });
+    } catch (e) {
+      return Promise.reject(new Error('recall dispatch failed: ' + e.message));
+    }
+  };
+
+  // ── Probe API (for debugging) ──
+
+  window.__seatalkProbe = function () {
+    var result = { actions: [], storeSlices: [] };
+    try {
+      var a = cachedActions || extractActions();
+      if (a) {
+        result.actions = Object.keys(a).filter(function (k) { return typeof a[k] === 'function'; });
+      }
+    } catch (_) {}
+    try {
+      var s = window.store.getState();
+      result.storeSlices = Object.keys(s);
+    } catch (_) {}
+    return result;
+  };
+
   if (window.store) tryCache();
   var observer = new MutationObserver(function () {
     if (cachedActions) { observer.disconnect(); return; }
@@ -274,5 +330,5 @@
 
   getContactService().catch(function () {});
 
-  console.log('[seatalk-send] ready v5');
+  console.log('[seatalk-send] ready v6');
 })();

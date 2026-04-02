@@ -1111,6 +1111,10 @@
         _grantToggleVisible = true;
         updateGrantToggle();
         showContactConfirmDialog(d);
+      } else if (d.type === 'recall_confirm_request') {
+        _grantToggleVisible = true;
+        updateGrantToggle();
+        showRecallConfirmDialog(d);
       } else if (d.type === 'send_grant_status') {
         _sendGrantActive = !!d.active;
         _grantToggleVisible = true;
@@ -1162,13 +1166,18 @@
     var card = document.createElement('div');
     card.className = 'cursor-confirm-card';
     var previewText = (d.text || '').length > 200 ? d.text.substring(0, 200) + '...' : (d.text || '');
+    var titleLabel = d.rootMid ? '线程回复' : '发送消息';
+    var threadField = d.rootMid
+      ? '<div class="cc-field"><span>线程 (rootMid)</span><span>' + escapeHtml(d.rootMid) + '</span></div>'
+      : '';
 
     card.innerHTML =
       '<div class="cc-title">' +
         '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><path d="M22 2L15 22l-4-9-9-4z"/></svg>' +
-        '发送消息' +
+        titleLabel +
       '</div>' +
       '<div class="cc-field"><span>目标</span><span>' + escapeHtml(d.session || '') + '</span></div>' +
+      threadField +
       '<div class="cc-preview">' + escapeHtml(previewText).replace(/\n/g, '<br>') + '</div>' +
       '<div class="cc-actions">' +
         '<button class="cc-btn cancel">取消</button>' +
@@ -1214,6 +1223,37 @@
     btns[1].onclick = function () {
       resolveCard(card, '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> 已添加');
       if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: 'contact_confirmed', confirmId: d.confirmId }));
+    };
+
+    messagesEl.appendChild(card);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+
+  function showRecallConfirmDialog(d) {
+    if (!messagesEl) return;
+    var card = document.createElement('div');
+    card.className = 'cursor-confirm-card';
+
+    card.innerHTML =
+      '<div class="cc-title" style="color:#ef4444">' +
+        '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 105.64-11.36L1 10"/></svg>' +
+        '撤回消息' +
+      '</div>' +
+      '<div class="cc-field"><span>会话</span><span>' + escapeHtml(d.session || '') + '</span></div>' +
+      '<div class="cc-field"><span>消息 ID</span><span>' + escapeHtml(d.mid || '') + '</span></div>' +
+      '<div class="cc-actions">' +
+        '<button class="cc-btn cancel">取消</button>' +
+        '<button class="cc-btn confirm" style="background:#ef4444">确认撤回</button>' +
+      '</div>';
+
+    var btns = card.querySelectorAll('.cc-btn');
+    btns[0].onclick = function () {
+      resolveCard(card, '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg> 已取消');
+      if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: 'recall_cancelled', confirmId: d.confirmId }));
+    };
+    btns[1].onclick = function () {
+      resolveCard(card, '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> 已撤回');
+      if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: 'recall_confirmed', confirmId: d.confirmId }));
     };
 
     messagesEl.appendChild(card);

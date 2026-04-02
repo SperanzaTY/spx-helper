@@ -42,6 +42,34 @@
 
 ---
 
+## v3.2.7 — 2026-04-02 — feat: 线程回复 + 撤回消息 + 添加好友免确认
+
+**提交者**: @tianyi.liang
+**Commit Type**: feat
+**修改模块**: SeaTalk Agent
+
+### 变更说明
+- seatalk-send.js v6：`__seatalkSend` 支持 `rootMid` 参数实现线程回复
+- seatalk-send.js v6：新增 `__seatalkRecall` 通过 Redux dispatch 撤回消息
+- seatalk-send.js v6：新增 `__seatalkProbe` 调试 API（列出 actions 方法名和 store slices）
+- main.ts：`doSend` 支持 `rootMid`，新增 `doRecall` 和 `doAddContact` helper
+- main.ts：`recall_message` bridge handler 完整确认流程
+- main.ts：`add_contact` 现在也受「免确认」开关控制
+- sidebar-app.js：发送确认卡片显示线程信息（rootMid）
+- sidebar-app.js：新增撤回确认卡片（红色主题）
+- sidebar-app.js：新增 `recall_confirm_request` 消息处理
+
+### 测试清单
+
+| 测试项 | 状态 | 备注 |
+|--------|------|------|
+| 线程回复（rootMid）| ⬜ | |
+| 撤回确认卡片显示 | ⬜ | |
+| 添加好友免确认 | ⬜ | |
+| 免确认开关共享所有操作 | ⬜ | |
+
+---
+
 ## v3.2.6 — 2026-04-02 — feat: MCP 新增撤回工具 + 线程回复参数 + 好友限制说明
 
 **提交者**: @tianyi.liang

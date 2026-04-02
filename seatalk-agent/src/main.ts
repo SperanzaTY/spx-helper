@@ -695,21 +695,50 @@ async function main() {
 
   // ── Message handler ──
 
-  const pendingSendConfirms = new Map<string, { session: string; text: string; format: string }>();
+  const pendingSendConfirms = new Map<string, { session: string; text: string; format: string; rootMid?: string }>();
   const pendingContactConfirms = new Map<string, { userId: number; name: string }>();
+  const pendingRecallConfirms = new Map<string, { session: string; mid: string }>();
   let sendGrantActive = false;
   let acpStarting = false;
 
-  async function doSend(session: string, text: string, format: string, label: string) {
+  async function doSend(session: string, text: string, format: string, label: string, rootMid?: string) {
     try {
-      const escaped = JSON.stringify(JSON.stringify({ session, text, format, confirmed: true }));
+      const payload: Record<string, unknown> = { session, text, format, confirmed: true };
+      if (rootMid) payload.rootMid = rootMid;
+      const escaped = JSON.stringify(JSON.stringify(payload));
       const res = await client.evaluate(`window.__seatalkSend(JSON.parse(${escaped}))`, 15_000);
       bridge.sendToPanel({ type: 'send_result', ok: true, session, result: res }).catch(() => {});
-      log(`send_message ok (${label}): ${session}`);
+      log(`send_message ok (${label}): ${session}${rootMid ? ' rootMid=' + rootMid : ''}`);
     } catch (e) {
       const msg = (e as Error).message;
       bridge.sendToPanel({ type: 'send_result', ok: false, session, error: msg }).catch(() => {});
       log(`send_message failed (${label}): ${msg}`);
+    }
+  }
+
+  async function doRecall(session: string, mid: string, label: string) {
+    try {
+      const escaped = JSON.stringify(JSON.stringify({ session, mid, confirmed: true }));
+      const res = await client.evaluate(`window.__seatalkRecall(JSON.parse(${escaped}))`, 15_000);
+      bridge.sendToPanel({ type: 'recall_result', ok: true, session, mid, result: res }).catch(() => {});
+      log(`recall_message ok (${label}): ${session} mid=${mid}`);
+    } catch (e) {
+      const msg = (e as Error).message;
+      bridge.sendToPanel({ type: 'recall_result', ok: false, session, mid, error: msg }).catch(() => {});
+      log(`recall_message failed (${label}): ${msg}`);
+    }
+  }
+
+  async function doAddContact(userId: number, name: string, label: string) {
+    try {
+      const escaped = JSON.stringify(JSON.stringify({ userId, name }));
+      const res = await client.evaluate(`window.__seatalkAddContact(JSON.parse(${escaped}))`, 15_000);
+      bridge.sendToPanel({ type: 'add_contact_result', ok: true, userId, result: res }).catch(() => {});
+      log(`add_contact ok (${label}): ${userId} (${name})`);
+    } catch (e) {
+      const msg = (e as Error).message;
+      bridge.sendToPanel({ type: 'add_contact_result', ok: false, userId, error: msg }).catch(() => {});
+      log(`add_contact failed (${label}): ${msg}`);
     }
   }
 
@@ -1101,18 +1130,19 @@ async function main() {
         const session = data.session as string;
         const text = data.text as string;
         const format = (data.format as string) || 'text';
+        const rootMid = (data.rootMid as string) || undefined;
         if (!session || !text) {
           bridge.sendToPanel({ type: 'send_result', ok: false, error: 'missing session or text' }).catch(() => {});
           return;
         }
 
         if (sendGrantActive) {
-          await doSend(session, text, format, 'grant');
+          await doSend(session, text, format, 'grant', rootMid);
           return;
         }
 
         const confirmId = `send_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-        pendingSendConfirms.set(confirmId, { session, text, format });
+        pendingSendConfirms.set(confirmId, { session, text, format, rootMid });
         setTimeout(() => pendingSendConfirms.delete(confirmId), 120_000);
         bridge.sendToPanel({
           type: 'send_confirm_request',
@@ -1120,8 +1150,9 @@ async function main() {
           session,
           text,
           format,
+          rootMid,
         }).catch(() => {});
-        log(`send_message: awaiting user confirmation (${confirmId})`);
+        log(`send_message: awaiting user confirmation (${confirmId})${rootMid ? ' rootMid=' + rootMid : ''}`);
 
       } else if (data.type === 'send_confirmed') {
         const confirmId = data.confirmId as string;
@@ -1131,7 +1162,7 @@ async function main() {
           return;
         }
         pendingSendConfirms.delete(confirmId);
-        await doSend(pending.session, pending.text, pending.format, 'confirmed');
+        await doSend(pending.session, pending.text, pending.format, 'confirmed', pending.rootMid);
 
       } else if (data.type === 'send_cancelled') {
         const confirmId = data.confirmId as string;
@@ -1147,7 +1178,7 @@ async function main() {
         const pending = pendingSendConfirms.get(confirmId);
         if (pending) {
           pendingSendConfirms.delete(confirmId);
-          await doSend(pending.session, pending.text, pending.format, 'grant+confirm');
+          await doSend(pending.session, pending.text, pending.format, 'grant+confirm', pending.rootMid);
         }
 
       } else if (data.type === 'send_grant_off') {
@@ -1162,6 +1193,12 @@ async function main() {
           bridge.sendToPanel({ type: 'add_contact_result', ok: false, error: 'missing userId' }).catch(() => {});
           return;
         }
+
+        if (sendGrantActive) {
+          await doAddContact(userId, name, 'grant');
+          return;
+        }
+
         const confirmId = `contact_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
         pendingContactConfirms.set(confirmId, { userId, name });
         setTimeout(() => pendingContactConfirms.delete(confirmId), 120_000);
@@ -1181,23 +1218,53 @@ async function main() {
           return;
         }
         pendingContactConfirms.delete(confirmId);
-        const { userId, name } = pending;
-        try {
-          const escaped = JSON.stringify(JSON.stringify({ userId, name }));
-          const res = await client.evaluate(`window.__seatalkAddContact(JSON.parse(${escaped}))`, 15_000);
-          bridge.sendToPanel({ type: 'add_contact_result', ok: true, userId, result: res }).catch(() => {});
-          log(`add_contact ok (confirmed): ${userId} (${name})`);
-        } catch (e) {
-          const msg = (e as Error).message;
-          bridge.sendToPanel({ type: 'add_contact_result', ok: false, userId, error: msg }).catch(() => {});
-          log(`add_contact failed: ${msg}`);
-        }
+        await doAddContact(pending.userId, pending.name, 'confirmed');
 
       } else if (data.type === 'contact_cancelled') {
         const confirmId = data.confirmId as string;
         pendingContactConfirms.delete(confirmId);
         bridge.sendToPanel({ type: 'add_contact_result', ok: false, userId: 0, error: 'user cancelled' }).catch(() => {});
         log(`add_contact cancelled by user (${confirmId})`);
+
+      } else if (data.type === 'recall_message') {
+        const session = data.session as string;
+        const mid = data.mid as string;
+        if (!session || !mid) {
+          bridge.sendToPanel({ type: 'recall_result', ok: false, error: 'missing session or mid' }).catch(() => {});
+          return;
+        }
+
+        if (sendGrantActive) {
+          await doRecall(session, mid, 'grant');
+          return;
+        }
+
+        const confirmId = `recall_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        pendingRecallConfirms.set(confirmId, { session, mid });
+        setTimeout(() => pendingRecallConfirms.delete(confirmId), 120_000);
+        bridge.sendToPanel({
+          type: 'recall_confirm_request',
+          confirmId,
+          session,
+          mid,
+        }).catch(() => {});
+        log(`recall_message: awaiting user confirmation (${confirmId})`);
+
+      } else if (data.type === 'recall_confirmed') {
+        const confirmId = data.confirmId as string;
+        const pending = pendingRecallConfirms.get(confirmId);
+        if (!pending) {
+          bridge.sendToPanel({ type: 'recall_result', ok: false, error: 'confirmation expired or invalid' }).catch(() => {});
+          return;
+        }
+        pendingRecallConfirms.delete(confirmId);
+        await doRecall(pending.session, pending.mid, 'confirmed');
+
+      } else if (data.type === 'recall_cancelled') {
+        const confirmId = data.confirmId as string;
+        pendingRecallConfirms.delete(confirmId);
+        bridge.sendToPanel({ type: 'recall_result', ok: false, session: '', mid: '', error: 'user cancelled' }).catch(() => {});
+        log(`recall_message cancelled by user (${confirmId})`);
 
       }
     });
