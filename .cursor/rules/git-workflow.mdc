@@ -64,9 +64,20 @@ alwaysApply: true
 接收需求 → 分析问题 → 修改代码 → 展示修改内容(git diff)
   → 🛑 等待用户测试
   → 🛑 等待用户确认"可以提交"
+  → ⚠️ 判断 commit type：
+      如果是 feat/fix/refactor → 必须先升版本号（三个文件同步）再 commit
+      如果是 docs/style/chore → 直接 commit
   → git add + git commit
   → git push gitlab <branch> && git push origin <branch>
 ```
+
+### ⚠️ 版本号自检（Agent 必须在每次 commit 前执行）
+在执行 `git commit` 之前，Agent **必须**自问：
+1. 本次 commit message 的 type 是什么？
+2. 如果是 `feat`/`fix`/`refactor`，当前版本号是否已经升级？
+3. 三个文件的版本号是否一致？
+
+**如果答案为"未升级"，必须先修改版本号再 commit，不得跳过。**
 
 ### Commit Message 格式
 ```
@@ -100,9 +111,8 @@ git push gitlab <branch> && git push origin <branch>
 
 ## 提交前检查清单
 
+- [ ] **🔴 版本号（最高优先级）**：commit type 是 feat/fix/refactor？→ 三个文件版本号必须已升级且一致
+- [ ] commit message 符合规范
 - [ ] 修改的功能正常工作
 - [ ] 已有功能未被破坏
-- [ ] commit message 符合规范
-- [ ] **feat/fix 类型提交必须升版本号**（三个文件同步）
 - [ ] 若涉及功能变更，对应模块 README 已更新
-- [ ] 若涉及功能变更，用户指南已更新
