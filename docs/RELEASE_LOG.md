@@ -86,7 +86,7 @@
 
 ### 特别注意
 - 旧文档路径（`docs/SKILL_INSTALL.md`、`mcp-tools/MCP_RECOMMENDATIONS.md`）已添加重定向
-- `SEATALK_AGENT_USER_GUIDE.md` 保留原文件（复制而非移动），`SEATALK_AGENT.md` 为新标准名
+- `SEATALK_AGENT_USER_GUIDE.md` 已删除，统一使用 `SEATALK_AGENT.md`
 
 ---
 
