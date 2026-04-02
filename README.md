@@ -2,7 +2,7 @@
 
 > **Shopee 大数据开发助手** — Chrome 扩展 + MCP 工具套件 + SeaTalk AI Agent
 
-[![Version](https://img.shields.io/badge/version-3.0.0-blue.svg)](https://github.com/SperanzaTY/spx-helper/releases)
+[![Version](https://img.shields.io/badge/version-3.1.1-blue.svg)](https://github.com/SperanzaTY/spx-helper/releases)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 SPX Helper 是一套为 Shopee 大数据开发工程师打造的效率工具集，包含三个核心模块：
@@ -544,6 +544,22 @@ npm run dev    # tsx watch 模式，代码修改自动重启
 ---
 
 ## 更新日志
+
+### v3.1.1 (2026-04)
+
+- **SeaTalk Agent（空发版 / 协作复现）**：基于 **v3.1.0** 仅递增版本号与说明文档，**无任何业务代码或注入脚本变更**，用于同事复现 **内置更新检查卡顿 / 更新流程体验** 等问题。见 [docs/SEATALK_AGENT_UPDATE_REPRO_v3.1.1.md](docs/SEATALK_AGENT_UPDATE_REPRO_v3.1.1.md)。
+
+### v3.1.0 (2026-04)
+
+- **项目结构重构**：seatalk-agent 从 mcp-tools/ 提升为顶级目录
+- **CDP 守护进程**：用户任意方式打开 SeaTalk 都自动启用 CDP，无需手动带参数
+- **Spark SQL 查询工具**：新增 `get_spark_query_sql`，通过 Keyhole 获取 Spark 任务执行的 SQL
+- **Scheduler MCP 增强**：`get_instance_detail` 自动区分 Presto/Spark 任务并给出对应提示
+- **Agent 更新路径修复**：修复重构后 PROJECT_ROOT 路径错误导致的更新检查失败
+- **模块化安装指南**：INSTALL.md 分 A/B/C 三模块按需安装，AI 交互式引导
+- **Cursor Rules 分域重构**：.cursorrules 拆分为 .cursor/rules/*.mdc 按需加载体系
+- **MCP README 全补齐**：ck-query、seatalk-reader、scheduler-query、seatalk-group 均有完整文档
+- **Skill 共享机制**：团队 Skill 仓库 + 安装/更新/贡献/AI 对比优化全流程
 
 ### v3.0.0 (2026-04)
 

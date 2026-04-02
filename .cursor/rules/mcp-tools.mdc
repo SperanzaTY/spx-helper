@@ -102,7 +102,8 @@ python3 -c "import asyncio; from <module> import mcp; asyncio.run(mcp.list_tools
   - `get_task_instances(task_code, env?, date?, page_size?)` — 查询实例列表
   - `get_instance_detail(task_instance_code, env?)` — 查询实例详情（含 Presto Query ID）
   - `get_instance_log(task_instance_code, env?)` — 查询运行日志
-  - `get_presto_query_sql(presto_query_id?, task_instance_code?, env?)` — 获取执行的 SQL
+  - `get_presto_query_sql(presto_query_id?, task_instance_code?, env?)` — 获取 Presto 任务的 SQL
+  - `get_spark_query_sql(yarn_application_id?, task_instance_code?, env?)` — 获取 Spark/Hive 任务的 SQL（通过 Keyhole 日志）
   - `get_task_lineage(task_code, env?)` — 查询上下游血缘
   - `get_task_metric_summary(task_code, env?)` — 运行指标汇总
   - `get_task_operation_log(task_code, days?, env?)` — 操作日志

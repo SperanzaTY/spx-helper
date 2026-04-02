@@ -8,6 +8,7 @@ DataSuite Scheduler 平台信息查询工具，支持任务状态、实例列表
 
 import json
 import os
+import re
 import time
 import logging
 from datetime import datetime, timedelta
@@ -667,10 +668,17 @@ def get_instance_log(task_instance_code: str, env: str = "prod") -> str:
 
 
 PRESTO_HISTORY_BASE = "https://historyserver.presto.data-infra.shopee.io"
+KEYHOLE_BASE = "https://keyhole.data-infra.shopee.io"
 
 
 def _load_presto_cookies() -> dict:
     """获取 Presto History Server 所需的 cookie（从统一缓存中取）。"""
+    _load_all_cookies()
+    return _presto_cookie_cache
+
+
+def _load_keyhole_cookies() -> dict:
+    """获取 Keyhole (data-infra) 所需的 cookie。"""
     _load_all_cookies()
     return _presto_cookie_cache
 
@@ -761,8 +769,12 @@ def get_instance_detail(task_instance_code: str, env: str = "prod") -> str:
         }
 
         if yarn_id:
-            result["presto_history_url"] = f"{PRESTO_HISTORY_BASE}/query.html?{yarn_id}"
-            result["tip"] = "使用 get_presto_query_sql 传入 yarn_application_id 可获取实际执行的 SQL"
+            if yarn_id.startswith("application_"):
+                result["keyhole_url"] = f"{KEYHOLE_BASE}/keyhole/diagnostics?applicationId={yarn_id}"
+                result["tip"] = "这是 Spark/Hive 任务，使用 get_spark_query_sql 传入 yarn_application_id 可获取实际执行的 SQL"
+            else:
+                result["presto_history_url"] = f"{PRESTO_HISTORY_BASE}/query.html?{yarn_id}"
+                result["tip"] = "这是 Presto 任务，使用 get_presto_query_sql 传入 yarn_application_id 可获取实际执行的 SQL"
 
         return json.dumps(result, ensure_ascii=False, indent=2)
     except Exception as e:
@@ -828,6 +840,120 @@ def get_presto_query_sql(presto_query_id: str = "", task_instance_code: str = ""
         return json.dumps(result, ensure_ascii=False, indent=2)
     except requests.RequestException as e:
         return json.dumps({"error": f"Presto History Server 请求失败: {e}"}, ensure_ascii=False)
+    except Exception as e:
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+
+def _extract_log_text(log_html: str) -> str:
+    """从 Keyhole HTML 响应中提取纯文本日志内容。"""
+    import html as html_mod
+
+    pre_matches = re.findall(r'<pre[^>]*>(.*?)</pre>', log_html, re.DOTALL)
+    text = "\n".join(pre_matches) if pre_matches else log_html
+    return html_mod.unescape(text).strip()
+
+
+def _fetch_spark_log_from_keyhole(app_id: str) -> str:
+    """通过 Keyhole 三级跳获取 Spark Driver AM stdout 完整日志。
+
+    链路:
+    1. GET /keyhole/diagnostics?applicationId=... → 提取 AM stdout 链接
+    2. GET stdout tail page (跟随重定向) → 提取 full log 链接 + origin 参数
+    3. GET full log → 返回完整 HTML 日志
+    """
+    cookies = _load_keyhole_cookies()
+    if not cookies:
+        raise RuntimeError("未找到 data-infra Cookie，请先在浏览器登录 Keyhole 或 DataSuite")
+
+    resp1 = requests.get(
+        f"{KEYHOLE_BASE}/keyhole/diagnostics",
+        params={"applicationId": app_id},
+        cookies=cookies,
+        timeout=30,
+    )
+    resp1.raise_for_status()
+
+    stdout_links = re.findall(r'href="([^"]*stdout[^"]*)"', resp1.text)
+    if not stdout_links:
+        raise RuntimeError(f"Keyhole diagnostics 页面中未找到 AM stdout 日志链接（applicationId={app_id}）")
+    stdout_path = stdout_links[0].replace("&amp;", "&")
+
+    resp2 = requests.get(
+        f"{KEYHOLE_BASE}{stdout_path}",
+        cookies=cookies,
+        timeout=30,
+        allow_redirects=True,
+    )
+    resp2.raise_for_status()
+
+    full_links = re.findall(r'href="([^"]*start=0[^"]*)"', resp2.text)
+    if not full_links:
+        raise RuntimeError("stdout 页面中未找到 full log 链接")
+    full_path = full_links[0].replace("&amp;", "&")
+
+    parsed = __import__("urllib.parse", fromlist=["urlparse", "parse_qs", "urlencode"])
+    final_qs = parsed.parse_qs(parsed.urlparse(resp2.url).query)
+    origin_params = {}
+    for k in ("originSchema", "originHost", "originIp", "originPort"):
+        if k in final_qs:
+            origin_params[k] = final_qs[k][0]
+
+    sep = "&" if "?" in full_path else "?"
+    full_url = f"{KEYHOLE_BASE}{full_path}{sep}{parsed.urlencode(origin_params)}"
+
+    resp3 = requests.get(full_url, cookies=cookies, timeout=120)
+    resp3.raise_for_status()
+    if not resp3.text.strip():
+        raise RuntimeError("Full log 返回为空")
+    return resp3.text
+
+
+@mcp.tool()
+def get_spark_query_sql(yarn_application_id: str = "", task_instance_code: str = "", env: str = "prod") -> str:
+    """
+    通过 Yarn Application ID 或任务实例编码，从 Keyhole 获取 Spark 任务的 Driver stdout 日志。
+
+    适用于 Spark/Hive 类型的 Scheduler 任务（Presto 类型请用 get_presto_query_sql）。
+    返回完整的 Driver AM stdout 日志文本，其中包含任务执行的 SQL 语句。
+
+    支持两种使用方式:
+    1. 直接提供 yarn_application_id（如 "application_1773126131675_5513239"）
+    2. 提供 task_instance_code，自动从 Scheduler 获取 Yarn Application ID
+
+    参数:
+        yarn_application_id: Yarn Application ID，如 "application_1773126131675_5513239"
+        task_instance_code: 任务实例编码，如 "mkpldp_shop_health.studio_6075240_20260401_DAY_1"
+        env: 环境，"prod"（默认）或 "dev"（仅在使用 task_instance_code 时生效）
+
+    示例:
+        get_spark_query_sql(yarn_application_id="application_1773126131675_5513239")
+        get_spark_query_sql(task_instance_code="mkpldp_shop_health.studio_6075240_20260401_DAY_1")
+    """
+    try:
+        if not yarn_application_id and not task_instance_code:
+            return json.dumps({"error": "请提供 yarn_application_id 或 task_instance_code 之一"}, ensure_ascii=False)
+
+        if not yarn_application_id:
+            yarn_application_id = _get_instance_yarn_id(task_instance_code, env=env)
+            if not yarn_application_id:
+                return json.dumps({
+                    "error": f"实例 {task_instance_code} 没有关联的 Yarn Application ID（可能尚未执行或不是 Spark 类型任务）",
+                }, ensure_ascii=False)
+
+        log_html = _fetch_spark_log_from_keyhole(yarn_application_id)
+        log_text = _extract_log_text(log_html)
+
+        result = {
+            "yarn_application_id": yarn_application_id,
+            "keyhole_url": f"{KEYHOLE_BASE}/keyhole/diagnostics?applicationId={yarn_application_id}",
+            "log": log_text,
+        }
+        if task_instance_code:
+            result["task_instance_code"] = task_instance_code
+
+        return json.dumps(result, ensure_ascii=False, indent=2)
+    except requests.RequestException as e:
+        return json.dumps({"error": f"Keyhole 请求失败: {e}"}, ensure_ascii=False)
     except Exception as e:
         return json.dumps({"error": str(e)}, ensure_ascii=False)
 

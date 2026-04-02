@@ -17,9 +17,35 @@ alwaysApply: true
 | `package.json`（根） | 跟随 manifest.json 同步 |
 | `seatalk-agent/package.json` | 跟随 manifest.json 同步 |
 
-发版流程：改 manifest.json version → 同步两个 package.json → 更新 README changelog → 更新用户指南 → 提交（三个 version 必须一致）
+### 何时必须升版本号
+
+提交包含以下任一变更时，**必须升版本号**：
+- `feat`: 新功能（MCP 工具、Chrome 扩展功能、SeaTalk Agent 功能）
+- `fix`: Bug 修复
+- `refactor`: 影响用户使用的重构（如项目结构变更）
+
+以下提交**不需要**升版本号：
+- `docs`: 纯文档更新
+- `style`: 代码格式调整
+- `chore`: 构建/工具链变更
+
+### 版本号规则（SemVer）
+- `MAJOR.MINOR.PATCH`（如 3.1.0）
+- MAJOR: 不兼容的架构变更
+- MINOR: 新功能、重要修复（如 3.0.3 → 3.1.0）
+- PATCH: 小修复、小优化（如 3.1.0 → 3.1.1）
+
+### 发版流程
+```
+1. 改 chrome-extension/manifest.json 的 version
+2. 同步更新 package.json（根）的 version
+3. 同步更新 seatalk-agent/package.json 的 version
+4. 更新 README.md 的 Changelog
+5. 提交（三个 version 必须一致）
+```
 
 ### 禁止
+- ❌ feat/fix 提交不升版本号
 - ❌ 只改其中一个文件的版本号
 - ❌ 各文件版本号不一致
 - ❌ 用 package.json 作为版本判断来源
@@ -77,6 +103,6 @@ git push gitlab <branch> && git push origin <branch>
 - [ ] 修改的功能正常工作
 - [ ] 已有功能未被破坏
 - [ ] commit message 符合规范
-- [ ] 若涉及版本号变更，三个文件版本一致
+- [ ] **feat/fix 类型提交必须升版本号**（三个文件同步）
 - [ ] 若涉及功能变更，对应模块 README 已更新
 - [ ] 若涉及功能变更，用户指南已更新
