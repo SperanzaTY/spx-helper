@@ -174,15 +174,16 @@
     '.ca-thinking.collapsed { max-height:0; overflow:hidden; padding:0 12px; border-color:transparent; }',
 
     // Tool calls
-    '.ca-tool-call { padding:8px 10px; border-radius:6px; background:var(--cp-tool-bg); border:1px solid var(--cp-border3); font-size:11px; line-height:1.4; color:var(--cp-text-dim); margin:6px 0; transition:border-color .2s; }',
-    '.ca-tool-call-label { font-size:12px; color:var(--cp-tool-label); cursor:pointer; user-select:none; margin-bottom:2px; display:flex; align-items:center; gap:4px; padding:4px 0; }',
+    '.ca-tool-call-label { font-size:12px; color:var(--cp-tool-label); cursor:pointer; user-select:none; display:flex; align-items:center; gap:5px; padding:3px 0; line-height:1; }',
     '.ca-tool-call-label:hover { color:var(--cp-tool-label-hover); }',
-    '.ca-tool-call-body { max-height:0; overflow:hidden; transition:max-height .3s ease; }',
-    '.ca-tool-call-body.open { max-height:400px; overflow-y:auto; }',
+    '.ca-tool-call-label svg { flex-shrink:0; vertical-align:middle; }',
+    '.ca-tool-call-body { max-height:0; overflow:hidden; transition:max-height .3s ease, padding .2s ease; padding:0; border:1px solid transparent; border-radius:6px; font-size:11px; line-height:1.4; color:var(--cp-text-dim); }',
+    '.ca-tool-call-body.open { max-height:600px; overflow-y:auto; padding:8px 10px; background:var(--cp-tool-bg); border-color:var(--cp-border3); margin-top:2px; }',
     '.ca-tool-call-section { color:var(--cp-text-dim); margin-top:6px; padding-top:6px; border-top:1px solid var(--cp-tool-section-border); }',
     '.ca-tool-call-section:first-child { border-top:none; margin-top:2px; padding-top:0; }',
     '.ca-tool-call-section b { color:var(--cp-tool-section-b); font-size:11px; }',
     '.ca-tool-call-section pre { background:var(--cp-tool-pre-bg); border:1px solid var(--cp-tool-pre-border); border-radius:4px; padding:6px 8px; }',
+    '@keyframes tc-spin { from { transform:rotate(0deg); } to { transform:rotate(360deg); } }',
 
     // Typing indicator
     '.ca-typing { display:inline-flex; gap:4px; padding:12px 16px; }',
@@ -261,6 +262,12 @@
     '.cursor-ctx-icon { flex-shrink:0; color:var(--cp-accent); opacity:.7; }',
     '.cursor-ctx-label { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }',
     '.cursor-ctx .rm { flex-shrink:0; cursor:pointer; opacity:.4; font-size:14px; line-height:1; padding:0 2px; } .cursor-ctx .rm:hover { opacity:1; }',
+
+    // Context quote in user message bubble
+    '.cursor-msg-ctx { margin-bottom:6px; padding:5px 8px; font-size:11px; color:var(--cp-text-dim); background:rgba(255,255,255,.06); border-left:2px solid var(--cp-accent); border-radius:0 4px 4px 0; line-height:1.4; max-height:80px; overflow:hidden; }',
+    '.cursor-msg-ctx-sender { font-weight:600; color:var(--cp-accent); margin-right:4px; }',
+    '.cursor-msg-ctx-text { opacity:.85; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; word-break:break-all; }',
+    '.cursor-msg-ctx-label { font-size:10px; opacity:.5; margin-top:2px; }',
 
     // Status bar
     '.cursor-status-bar { display:flex; align-items:center; gap:6px; padding:4px 12px; font-size:10px; color:var(--cp-text-dim2); border-top:1px solid var(--cp-border); flex-shrink:0; }',
@@ -440,7 +447,7 @@
     container.innerHTML = '';
     if (messages.length === 0) {
       container.innerHTML = '<div class="cursor-empty-wrap"><div class="cursor-empty">' +
-        '<div class="ce-icon">✦</div>' +
+        '<div class="ce-icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none"><path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5Z" fill="currentColor"/></svg></div>' +
         '<div class="ce-title">Cursor Agent</div>' +
         '<div class="ce-sub">在下方输入问题开始对话</div>' +
         '</div></div>';
@@ -450,7 +457,19 @@
       if (m.role === 'user') {
         var el = document.createElement('div');
         el.className = 'cursor-msg-user';
-        var html = '<div class="cursor-msg-user-label">You</div>' + escapeHtml(m.text);
+        var html = '<div class="cursor-msg-user-label">You</div>';
+        if (m.context) {
+          html += '<div class="cursor-msg-ctx">';
+          if (m.context.focusMessage) {
+            html += '<span class="cursor-msg-ctx-sender">' + escapeHtml(m.context.focusMessage.sender || '') + '</span>';
+            html += '<span class="cursor-msg-ctx-text">' + escapeHtml(m.context.focusMessage.text || '') + '</span>';
+          }
+          if (m.context.label) {
+            html += '<div class="cursor-msg-ctx-label"><svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" style="vertical-align:middle;margin-right:3px"><path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5Z"/></svg>' + escapeHtml(m.context.label) + '</div>';
+          }
+          html += '</div>';
+        }
+        html += escapeHtml(m.text);
         if (m.images && m.images.length > 0) {
           html += '<div class="cursor-msg-images">';
           m.images.forEach(function (img) {
@@ -477,9 +496,8 @@
         }
         if (m.toolSummary && m.toolSummary.length > 0) {
           var toolDiv = document.createElement('div');
-          toolDiv.className = 'ca-tool-call';
-          toolDiv.style.cssText = 'font-size:11px;color:var(--cp-text-dim);padding:6px 8px;margin-bottom:4px;';
-          toolDiv.innerHTML = '<div style="font-size:10px;color:var(--cp-text-dim2);margin-bottom:2px">执行了 ' + m.toolSummary.length + ' 个工具:</div>' + m.toolSummary.map(function(s){ return '<div>' + escapeHtml(s) + '</div>'; }).join('');
+          toolDiv.style.cssText = 'font-size:11px;color:var(--cp-text-dim);padding:6px 8px;margin-bottom:4px;border-radius:6px;background:var(--cp-tool-bg);border:1px solid var(--cp-border3);';
+          toolDiv.innerHTML = '<div style="font-size:10px;color:var(--cp-text-dim2);margin-bottom:2px">' + sr.svgIcon('check', 12) + ' 执行了 ' + m.toolSummary.length + ' 个工具</div>' + m.toolSummary.map(function(s){ return '<div>' + escapeHtml(s) + '</div>'; }).join('');
           if (m.text || m.thinking) turnContainer.insertBefore(toolDiv, turnContainer.querySelector('.ca-result'));
           else turnContainer.appendChild(toolDiv);
         }
@@ -524,7 +542,7 @@
     for (var tcKey in turnToolCalls) {
       var tc = turnToolCalls[tcKey];
       var tcName = tc.name || 'Tool';
-      var tcStatus = tc.status === 'completed' ? '✅' : tc.status === 'error' ? '❌' : '⏳';
+      var tcStatus = tc.status === 'completed' ? '[ok]' : tc.status === 'error' ? '[err]' : '[...]';
       toolSummaries.push(tcStatus + ' ' + tcName);
     }
     var savedMsg = { role: 'assistant', text: finalText, thinking: turnFullThinking || undefined };
@@ -534,7 +552,7 @@
     }
     if (stopReason && stopReason !== 'end_turn' && messagesEl) {
       var cls = stopReason === 'cancelled' ? 'cancelled' : 'error';
-      var icon = stopReason === 'cancelled' ? '⏹' : '⚠';
+      var icon = stopReason === 'cancelled' ? '[stop]' : '[warn]';
       var labels = { cancelled: '已取消', max_tokens: '达到 Token 上限', error: '错误' };
       var el = document.createElement('div');
       el.className = 'cursor-stop-reason ' + cls;
@@ -587,7 +605,7 @@
     pendingImages.forEach(function (img, i) {
       var item = document.createElement('div');
       item.className = 'cursor-img-preview-item';
-      item.innerHTML = '<img src="' + img.preview + '"><span class="rm">✕</span>';
+      item.innerHTML = '<img src="' + img.preview + '"><span class="rm"><svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="3" x2="13" y2="13"/><line x1="13" y1="3" x2="3" y2="13"/></svg></span>';
       item.querySelector('.rm').addEventListener('click', function () { removePendingImage(i); });
       imgPreviewEl.appendChild(item);
     });
@@ -602,7 +620,7 @@
     inputEl.value = ''; inputEl.style.height = '36px';
     var msgImages = hasImages ? pendingImages.slice() : undefined;
     clearPendingImages();
-    messages.push({ role: 'user', text: text || (msgImages ? '[图片]' : ''), images: msgImages });
+    messages.push({ role: 'user', text: text || (msgImages ? '[图片]' : ''), images: msgImages, context: contextData || undefined });
     renderAllMessages(messagesEl);
     var typing = document.createElement('div');
     typing.className = 'ca-typing';
@@ -975,7 +993,7 @@
         updateSidebarBtnStatus();
         // After update restart: detect reconnection and auto-close update overlay
         if (wasDisconnected && cachedStatus.connected && updateOverlay && updateOverlay.classList.contains('show')) {
-          appendUpdateProgress('✅ Agent 已重新连接！更新成功。');
+          appendUpdateProgress('[ok] Agent 已重新连接！更新成功。');
           if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: 'update_check' }));
           setTimeout(function () { updateOverlay.classList.remove('show'); }, 3000);
         }
@@ -1034,15 +1052,15 @@
       } else if (d.type === 'update_done') {
         if (d.success) {
           try { localStorage.setItem('__cursorUpdateState', JSON.stringify({ status: 'done', ts: Date.now() })); } catch (_) {}
-          appendUpdateProgress('✅ 更新完成，Agent 即将重启...');
-          setTimeout(function () { appendUpdateProgress('🔄 正在等待 Agent 重新连接...'); }, 2000);
+          appendUpdateProgress('[ok] 更新完成，Agent 即将重启...');
+          setTimeout(function () { appendUpdateProgress('[...] 正在等待 Agent 重新连接...'); }, 2000);
           setTimeout(function () {
-            appendUpdateProgress('💡 如果长时间未重连，请运行 seatalk 命令重启 Agent');
+            appendUpdateProgress('[tip] 如果长时间未重连，请运行 seatalk 命令重启 Agent');
             var applyBtn2 = updateOverlay && updateOverlay.querySelector('[data-act="apply"]');
             if (applyBtn2) { applyBtn2.disabled = false; applyBtn2.textContent = '重新检查'; applyBtn2.dataset.act = 'check'; }
           }, 15000);
         } else {
-          appendUpdateProgress('❌ 更新失败');
+          appendUpdateProgress('[err] 更新失败');
           var applyBtn = updateOverlay && updateOverlay.querySelector('[data-act="apply"]');
           if (applyBtn) { applyBtn.disabled = false; applyBtn.textContent = '重试更新'; }
         }
@@ -1568,7 +1586,7 @@
     // Context bar — sits inside input area, above the text field
     ctxBar = document.createElement('div');
     ctxBar.className = 'cursor-ctx';
-    ctxBar.innerHTML = '<svg class="cursor-ctx-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21c3-3 6.5-7 8-10a4 4 0 1 0-4-4"/><path d="M12.5 8c1.5 3 5 7 8 10"/></svg><span class="cursor-ctx-label"></span><span class="rm">✕</span>';
+    ctxBar.innerHTML = '<svg class="cursor-ctx-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21c3-3 6.5-7 8-10a4 4 0 1 0-4-4"/><path d="M12.5 8c1.5 3 5 7 8 10"/></svg><span class="cursor-ctx-label"></span><span class="rm"><svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="3" x2="13" y2="13"/><line x1="13" y1="3" x2="3" y2="13"/></svg></span>';
     ctxLabel = ctxBar.querySelector('.cursor-ctx-label');
     ctxBar.querySelector('.rm').addEventListener('click', function () { contextData = null; ctxBar.classList.remove('show'); });
     inputArea.insertBefore(ctxBar, inputArea.querySelector('.cursor-img-preview'));
@@ -1771,7 +1789,7 @@
       var st = cachedStatus.connected
         ? '<span style="color:#4ec9b0">● 已连接</span>'
         : '<span style="color:#d44">○ 断开连接</span>';
-      return '<b>✦ Cursor</b><div style="font-size:10px;color:#858585;margin-top:2px">' + st + '</div>';
+      return '<b><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="vertical-align:-1px;margin-right:2px"><path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5Z"/></svg>Cursor</b><div style="font-size:10px;color:#858585;margin-top:2px">' + st + '</div>';
     }
   });
   updateSidebarBtnStatus();
@@ -1796,7 +1814,7 @@
             if (messagesEl) {
               var notice = document.createElement('div');
               notice.className = 'cursor-msg system';
-              notice.innerHTML = '<div class="cursor-msg-text" style="color:#4ec9b0;font-weight:500">✅ 更新成功！Agent 已自动重启到最新版本。</div>';
+              notice.innerHTML = '<div class="cursor-msg-text" style="color:#4ec9b0;font-weight:500">' + sr.svgIcon('check', 14) + ' 更新成功！Agent 已自动重启到最新版本。</div>';
               messagesEl.appendChild(notice);
               messagesEl.scrollTop = messagesEl.scrollHeight;
             }

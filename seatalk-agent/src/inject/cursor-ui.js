@@ -117,6 +117,7 @@
     '  left:auto !important; top:auto !important; height:auto !important;',
     '  flex-shrink:0; border:none; border-left:1px solid rgba(255,255,255,0.08);',
     '  box-shadow:none; opacity:1 !important; transform:none !important;',
+    '  z-index:auto !important; backdrop-filter:none !important; -webkit-backdrop-filter:none !important;',
     '  text-align:left;',
     '}',
     '.hp-panel.docked .hp-panel-resize-n,.hp-panel.docked .hp-panel-resize-s,.hp-panel.docked .hp-panel-resize-e,' +
@@ -468,6 +469,20 @@
         });
     },
 
+    svgIcon: function (name, size) {
+      size = size || 14;
+      var s = size;
+      var icons = {
+        check: '<svg width="'+s+'" height="'+s+'" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="#4ec9b0" stroke-width="1.5"/><path d="M5 8l2 2 4-4" stroke="#4ec9b0" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+        error: '<svg width="'+s+'" height="'+s+'" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="#f44747" stroke-width="1.5"/><path d="M5.5 5.5l5 5M10.5 5.5l-5 5" stroke="#f44747" stroke-width="1.5" stroke-linecap="round"/></svg>',
+        spinner: '<svg width="'+s+'" height="'+s+'" viewBox="0 0 16 16" fill="none" style="animation:tc-spin .8s linear infinite"><circle cx="8" cy="8" r="6.5" stroke="var(--cp-text-dim,#888)" stroke-width="1.5" stroke-dasharray="28 12" stroke-linecap="round"/></svg>',
+        think: '<svg width="'+s+'" height="'+s+'" viewBox="0 0 16 16" fill="none"><path d="M2 10c0-3.3 2.7-6 6-6s6 2.7 6 6" stroke="var(--cp-text-dim,#888)" stroke-width="1.3" stroke-linecap="round"/><circle cx="5" cy="12" r="1.2" fill="var(--cp-text-dim,#888)"/><circle cx="3" cy="14" r="0.8" fill="var(--cp-text-dim,#888)"/><circle cx="6.5" cy="8" r="0.8" fill="var(--cp-text-dim,#888)"/><circle cx="9.5" cy="8" r="0.8" fill="var(--cp-text-dim,#888)"/><circle cx="8" cy="10.5" r="0.8" fill="var(--cp-text-dim,#888)"/></svg>',
+        chevronDown: '<svg width="'+s+'" height="'+s+'" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+        chevronRight: '<svg width="'+s+'" height="'+s+'" viewBox="0 0 16 16" fill="none"><path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+      };
+      return icons[name] || '';
+    },
+
     friendlyToolName: function (tc) {
       var name = tc.name || '';
       var desc = (tc.tool && tc.tool.action_description) || '';
@@ -485,9 +500,19 @@
         'List Directory': 'List Dir'
       };
 
+      // MCP tool names like "presto-query-query_presto: query_presto" — simplify
+      if (name.indexOf(':') !== -1) {
+        var parts = name.split(':');
+        var server = parts[0].trim();
+        var tool = parts.length > 1 ? parts[1].trim() : '';
+        // Remove redundant server prefix segments
+        var serverShort = server.replace(/^[a-z]+-[a-z]+-/, '');
+        var display = tool || serverShort;
+        return { type: 'MCP: ' + display, detail: desc || '' };
+      }
+
       // tc.name for shell commands is the full command string — detect and simplify
       if (!toolTypeMap[name] && name.length > 40) {
-        // Likely a raw shell command string — show as "Shell"
         return { type: 'Shell', detail: desc || '' };
       }
 
@@ -498,14 +523,14 @@
     renderToolCallHTML: function (tc, opts) {
       opts = opts || {};
       var prefix = opts.prefix || 'hs';
-      var truncLen = opts.truncateLen || 500;
+      var truncLen = opts.truncateLen || 2000;
       var toggleAttr = opts.toggleAttr || 'tool-call';
       var isCompleted = tc.status === 'completed' || !!tc.result;
       var isError = tc.status === 'error';
-      var statusIcon = isCompleted ? '\u2705' : isError ? '\u274c' : '\u23f3';
+      var statusIcon = isCompleted ? streaming.svgIcon('check', 13) : isError ? streaming.svgIcon('error', 13) : streaming.svgIcon('spinner', 13);
       var friendly = streaming.friendlyToolName(tc);
       var label = statusIcon + ' ' + escapeHtml(friendly.type);
-      if (friendly.detail) label += ' <span style="opacity:0.6">\u2014 ' + escapeHtml(friendly.detail) + '</span>';
+      if (friendly.detail) label += ' <span style="opacity:0.6"> — ' + escapeHtml(friendly.detail) + '</span>';
       if (!isCompleted && !isError) label += ' <span style="opacity:0.5;font-size:10px">running...</span>';
       var body = '';
       if (tc.arguments) {
@@ -521,16 +546,15 @@
           resultDisplay = parsed.result || JSON.stringify(parsed, null, 2);
         } catch (_) {}
         resultDisplay = streaming.maskSecrets(resultDisplay);
-        if (resultDisplay.length > truncLen) resultDisplay = resultDisplay.substring(0, truncLen) + '\n...';
+        if (resultDisplay.length > truncLen) resultDisplay = resultDisplay.substring(0, truncLen) + '\n... (' + (resultDisplay.length - truncLen) + ' chars truncated)';
         body += '<div class="' + prefix + '-tool-call-section"><b>Output:</b><pre style="margin:4px 0 0;white-space:pre-wrap;word-break:break-all;font-size:11px;color:var(--cp-tool-output,#b5cea8)">' + escapeHtml(resultDisplay) + '</pre></div>';
       }
-      // If no body content, don't render the expandable container at all
       if (!body) {
         return '<div class="' + prefix + '-tool-call-label">' + label + '</div>';
       }
       var bodyClass = opts.collapsed !== false ? prefix + '-tool-call-body' : prefix + '-tool-call-body open';
       return '<div class="' + prefix + '-tool-call-label" data-toggle="' + toggleAttr + '">' + label + '</div>' +
-        '<div class="' + prefix + '-tool-call"><div class="' + bodyClass + '">' + body + '</div></div>';
+        '<div class="' + bodyClass + '">' + body + '</div>';
     },
 
     bindToolCallToggle: function (container, prefix, toggleAttr) {
@@ -540,11 +564,9 @@
         if (labels[i]._bound) continue;
         labels[i]._bound = true;
         labels[i].addEventListener('click', function () {
-          var wrapper = this.nextElementSibling;
-          if (wrapper) {
-            var inner = wrapper.querySelector('.' + prefix + '-tool-call-body');
-            if (!inner) inner = wrapper.classList.contains(prefix + '-tool-call-body') ? wrapper : null;
-            if (inner) inner.classList.toggle('open');
+          var body = this.nextElementSibling;
+          if (body && body.classList.contains(prefix + '-tool-call-body')) {
+            body.classList.toggle('open');
           }
         });
       }
@@ -568,7 +590,7 @@
         if (thinkingEl) return;
         removeTyping();
         var wrap = document.createElement('div');
-        wrap.innerHTML = '<div class="' + prefix + '-thinking-label">\u{1f4ad} thinking... \u25bc</div>' +
+        wrap.innerHTML = '<div class="' + prefix + '-thinking-label">' + streaming.svgIcon('think', 14) + ' thinking... ' + streaming.svgIcon('chevronDown', 12) + '</div>' +
           '<div class="' + prefix + '-thinking"></div>';
         container.appendChild(wrap);
         thinkingEl = wrap;
@@ -576,9 +598,9 @@
         thinkBodyEl = wrap.querySelector('.' + prefix + '-thinking');
         thinkLabelEl.addEventListener('click', function () {
           thinkBodyEl.classList.toggle('collapsed');
-          this.textContent = thinkBodyEl.classList.contains('collapsed')
-            ? '\u{1f4ad} thought (' + Math.round(thinkText.length / 4) + ' tokens) \u25b6'
-            : '\u{1f4ad} thinking... \u25bc';
+          this.innerHTML = thinkBodyEl.classList.contains('collapsed')
+            ? streaming.svgIcon('think', 14) + ' thought (' + Math.round(thinkText.length / 4) + ' tokens) ' + streaming.svgIcon('chevronRight', 12)
+            : streaming.svgIcon('think', 14) + ' thinking... ' + streaming.svgIcon('chevronDown', 12);
         });
       }
 
@@ -613,7 +635,7 @@
             thinkBodyEl.textContent = thinkText;
             thinkBodyEl.scrollTop = thinkBodyEl.scrollHeight;
             if (evt.type === 'thinking_done') {
-              thinkLabelEl.textContent = '\u{1f4ad} thought (' + Math.round(thinkText.length / 4) + ' tokens) \u25bc';
+              thinkLabelEl.innerHTML = streaming.svgIcon('think', 14) + ' thought (' + Math.round(thinkText.length / 4) + ' tokens) ' + streaming.svgIcon('chevronDown', 12);
             }
           }
           if (evt.type === 'tool_call' && evt.toolCall) {
@@ -648,7 +670,7 @@
           }
           if (thinkText && thinkBodyEl) {
             thinkBodyEl.classList.add('collapsed');
-            thinkLabelEl.textContent = '\u{1f4ad} thought (' + Math.round(thinkText.length / 4) + ' tokens) \u25b6';
+            thinkLabelEl.innerHTML = streaming.svgIcon('think', 14) + ' thought (' + Math.round(thinkText.length / 4) + ' tokens) ' + streaming.svgIcon('chevronRight', 12);
           }
           for (var tcKey in toolCallEls) {
             var tcEl = toolCallEls[tcKey];

@@ -42,6 +42,37 @@
 
 ---
 
+## v3.1.5 — 2026-04-02 — style: UI全面SVG化 + 工具展示优化
+
+**提交者**: @tianyi.liang
+**Commit Type**: style
+**修改模块**: SeaTalk Agent
+
+### 变更说明
+- 所有 emoji 图标替换为 SVG：工具状态（✅❌⏳→SVG）、思考（💭→SVG）、展开箭头（▶▼→SVG chevron）、品牌标识（✦→SVG）、关闭按钮（✕→SVG）
+- 修复工具折叠时的白条：移除 `.ca-tool-call` 容器，折叠时不占空间
+- 工具输出 truncLen 从 500 提升到 2000，max-height 从 400px 到 600px
+- MCP 工具名称简化：`presto-query-query_presto: query_presto` → `MCP: query_presto`
+- 修复 docked 面板遮挡原生弹窗（z-index/backdrop-filter reset）
+
+### 测试情况
+
+| 测试项 | 结果 | 备注 |
+|--------|------|------|
+| Chrome 扩展加载正常 | N/A | 本次未修改扩展 |
+| MCP 工具连接正常 | N/A | 本次未修改 MCP |
+| SeaTalk Agent 启动+注入正常 | ✅ | 重启后 UI 正常注入 |
+| SeaTalk Agent 重启后 UI 恢复 | ✅ | |
+| 修改的功能正常工作 | ✅ | SVG 图标、工具展示、z-index 修复均生效 |
+| 已有功能未被破坏 | ✅ | |
+| 控制台无新增错误 | ✅ | |
+
+### 特别注意
+- 纯 UI 样式修改，不涉及功能逻辑变更
+- 其他用户需重启 seatalk agent 生效
+
+---
+
 ## v3.1.5 — 2026-04-02
 
 **提交者**: @tianyi.liang
