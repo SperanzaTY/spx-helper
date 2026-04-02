@@ -7,6 +7,7 @@
 | Skill | 目录 | 用途 | 依赖 MCP |
 |-------|------|------|---------|
 | **spx-bug-trace** | `spx-bug-trace/` | 业务数据问题定位工作流：API 溯源 → 数据管道检查 → 源表验证 → 结论输出 | api-trace, ck-query, presto-query, browser, atlassian, google-sheets |
+| **seatalk-troubleshoot** | `seatalk-troubleshoot/` | SeaTalk Agent 问题排查：CDP 连接、UI 注入、更新机制、消息通信、ACP 断连等故障定位 | 无（仅需终端和源码） |
 
 > 欢迎团队成员贡献新的 Skill！参见下方「贡献新 Skill」章节。
 
@@ -146,6 +147,9 @@ description: 一句话描述这个 Skill 做什么、什么时候触发
 │   ├── tools-reference.md       #   MCP 工具参考
 │   ├── table-mapping.md         #   表映射关系
 │   └── investigation-template.md #  排查模板
+├── seatalk-troubleshoot/        # Skill: SeaTalk Agent 问题排查
+│   ├── SKILL.md                 #   排查流程（7 个 Phase）
+│   └── tools-reference.md       #   命令与代码位置参考
 └── <新 skill>/                  # 你的新 Skill
     ├── SKILL.md
     └── ...

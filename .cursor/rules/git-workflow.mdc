@@ -57,7 +57,7 @@ alwaysApply: true
 - ❌ 未经测试执行 `git commit`
 - ❌ 未经确认执行 `git push`
 - ❌ 只推送到单个远程仓库
-- ❌ 直接推送到 release 分支（应走 MR）
+- ❌ 未经用户确认直接推送
 
 ### 提交流程
 ```
@@ -83,10 +83,10 @@ type: `feat` | `fix` | `docs` | `style` | `refactor` | `perf` | `test` | `chore`
 |------|------|
 | `feature/*` | 新功能，从 release 拉出 |
 | `bugfix/*` | Bug 修复，从 release 拉出 |
-| `release` | 开发主分支，只接受 MR，禁止直接 push |
+| `release` | 开发主分支，可直接 push |
 | `main` | 稳定版本，从 release 合并 |
 
-流程: `feature/bugfix` → **MR** → `release` → `main`
+流程: 日常开发直接在 `release` 上提交推送；大功能可用 `feature/bugfix` 分支开发后合入 `release`
 
 ## 双仓库同步
 
