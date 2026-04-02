@@ -42,6 +42,30 @@
 
 ---
 
+## v3.2.6 — 2026-04-02 — feat: MCP 新增撤回工具 + 线程回复参数 + 好友限制说明
+
+**提交者**: @tianyi.liang
+**Commit Type**: feat
+**修改模块**: MCP 工具
+
+### 变更说明
+- `send_seatalk_message` 新增 `root_mid` 参数，支持线程回复（Thread Reply）
+- 新增 `recall_seatalk_message` 工具，支持撤回自己发送的消息（需确认，走 bridge 流程）
+- 修正好友关系说明：私聊仅限好友，非好友发消息为假发送（前端成功但对方收不到）
+- 新增 Cursor MCP 使用排查说明：免确认开关位置、消息没发出去的排查方向
+- 修复 `search_seatalk_users` 结果提示中 f-string 中文引号导致的 SyntaxError
+
+### 测试清单
+
+| 测试项 | 状态 | 备注 |
+|--------|------|------|
+| MCP server 启动无 SyntaxError | ✅ | 修复中文引号问题 |
+| list_seatalk_chats 可正常调用 | ✅ | |
+| send_seatalk_message docstring 更新 | ✅ | |
+| recall_seatalk_message 工具注册 | ⬜ | 需重启 MCP 验证 |
+
+---
+
 ## v3.2.5 — 2026-04-02 — fix: 小窗面板位置持久化 + 拖拽边界限制
 
 **提交者**: @tianyi.liang

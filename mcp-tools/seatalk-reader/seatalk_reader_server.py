@@ -1616,8 +1616,9 @@ async def search_seatalk_users(
     搜索 Redux store 中缓存的所有企业用户（userInfo），支持按姓名、邮箱、
     seatalkId 模糊匹配。
 
-    企业版 SeaTalk 中所有同事可直接发消息，无需"添加好友"。
-    找到目标用户后，可直接用 send_seatalk_message(session="buddy-{id}") 发消息。
+    ⚠️ 重要：搜索到的用户不一定是好友。只有好友（isFavorite=true）才能通过
+    send_seatalk_message 私聊发消息。非好友发送消息会"假发送"（前端看似成功，
+    但对方实际收不到）。如需给非好友发消息，请先用 add_seatalk_contact 添加好友。
 
     Args:
         keyword: 搜索关键词（姓名/邮箱/seatalkId，大小写不敏感）
@@ -1698,8 +1699,9 @@ async def search_seatalk_users(
             )
 
         lines.append(
-            f"\n提示: 企业 SeaTalk 内所有同事可直接发消息，"
-            f"使用 send_seatalk_message(session=\"buddy-{{id}}\") 即可。"
+            f"\n⚠️ 注意: 只有好友（标记 [星标] 的用户）才能通过 buddy-{{id}} 私聊发消息。"
+            f"\n非好友发消息会假发送（前端显示成功但对方收不到）。"
+            f"\n如需给非好友发消息，请先用 add_seatalk_contact 添加好友。"
         )
         return "\n".join(lines)
 
@@ -1814,14 +1816,29 @@ async def send_seatalk_message(
     text: str = "",
     format: str = "text",
     session_name: str = "",
+    root_mid: str = "",
 ) -> str:
     """向指定的 SeaTalk 会话发送消息（需用户确认）。
+
+    ⚠️ 重要限制 — 好友关系：
+    - 私聊（buddy）：只能向**已是好友**的用户发送消息，否则消息会"假发送"
+      （前端显示已发送，但对方实际收不到）
+    - 群聊（group）：只要是群成员即可正常发送
+    - 如果目标用户不是好友，请先用 add_seatalk_contact 添加好友，等对方通过后再发送
+    - 企业 SeaTalk 中**不是所有同事都能直接发消息**，必须先成为好友
 
     ⚠️ 安全机制：
     - 调用此工具后，消息会提交到 seatalk-agent 的确认队列
     - 用户必须在 SeaTalk Agent 面板中点击「确认发送」才会真正发送
-    - 如果用户已开启「会话级免确认」模式，消息会自动发送
+    - 如果用户已开启「免确认」模式，消息会自动发送
     - 此工具不能直接发送消息，必须经过 seatalk-agent 的权限控制
+
+    ⚠️ 在 Cursor 中使用本工具（通过 MCP）：
+    - Cursor Agent 调用本工具 → 消息提交到 seatalk-agent bridge → 等待用户确认
+    - 如果消息一直没发出去，请检查 SeaTalk Agent 面板是否有待确认的卡片
+    - 如果希望 Cursor 中自动发送而无需手动确认，需要先在 SeaTalk Agent 面板
+      开启「免确认」开关（输入框上方，和模型选择对齐的 toggle 按钮）
+    - 「免确认」开关仅在当前 seatalk-agent 会话期间有效，重启后需重新开启
 
     ⚠️ AI 行为规则：
     1. 只有当用户**明确要求发送**时才可以调用（如"给XX发消息"、"帮我发给XX"、"回复XX"等）
@@ -1832,12 +1849,20 @@ async def send_seatalk_message(
     1. 先用 list_seatalk_chats 获取会话列表，确定 session 格式
     2. session 格式为 "group-123456" 或 "buddy-123456"
     3. 如果不确定 session ID，可以用 session_name 模糊匹配
+    4. 要在某条消息的线程中回复，传入 root_mid 参数（消息的 mid）
+    5. 私聊前请确认对方是好友（search_seatalk_users 返回的 isFavorite 字段）
+
+    线程回复：
+    - root_mid 为目标消息的 mid，发送后消息将出现在该消息的线程（Thread）中
+    - 可通过 query_messages_sqlite 或 read_current_chat 获取消息的 mid
+    - 不传 root_mid 则为普通消息发送
 
     Args:
         session: 目标会话，格式 "group-{id}" 或 "buddy-{id}"
         text: 消息文本内容
         format: "text"(纯文本) 或 "markdown"(支持加粗、斜体、代码等)
         session_name: 会话名称（模糊匹配，如果没有 session 参数则用这个查找）
+        root_mid: 线程回复的目标消息 mid（可选，传入后消息将作为该消息的线程回复）
     """
     if not text:
         return "请提供 text（消息内容）参数"
@@ -1899,18 +1924,21 @@ async def send_seatalk_message(
     except Exception:
         sess_name = session
 
+    # Build bridge payload
+    payload_fields = {
+        "type": "send_message",
+        "session": session,
+        "text": text,
+        "format": format,
+    }
+    if root_mid:
+        payload_fields["rootMid"] = root_mid
+
     # Send via seatalk-agent bridge handler which enforces user confirmation.
-    # The bridge handler will show a confirmation dialog in the Agent panel.
-    # If no Agent panel is open, the message is queued for 120s.
     bridge_js = f"""(function(){{
         if (typeof window.__agentSend !== 'function')
             return JSON.stringify({{error: 'seatalk-agent bridge not available. Is seatalk-agent running with the Agent panel open?'}});
-        window.__agentSend(JSON.stringify({{
-            type: 'send_message',
-            session: {json.dumps(session)},
-            text: {json.dumps(text)},
-            format: {json.dumps(format)}
-        }}));
+        window.__agentSend({json.dumps(json.dumps(payload_fields))});
         return JSON.stringify({{queued: true}});
     }})()"""
 
@@ -1923,11 +1951,12 @@ async def send_seatalk_message(
             return f"发送失败: {error_msg}"
 
         preview = text[:80] + ('...' if len(text) > 80 else '')
+        thread_info = f"\n  线程: rootMid={root_mid}" if root_mid else ""
         return (
             f"消息已提交到 seatalk-agent 等待用户确认。\n"
             f"  目标: {sess_name} ({session})\n"
             f"  内容: {preview}\n"
-            f"  格式: {format}\n\n"
+            f"  格式: {format}{thread_info}\n\n"
             f"用户需要在 SeaTalk Agent 面板中点击「确认发送」才会真正发送。\n"
             f"如果已开启「会话级免确认」模式，消息会自动发送。"
         )
@@ -1986,6 +2015,135 @@ async def get_send_targets() -> str:
 
     except Exception as e:
         return f"获取发送目标失败: {e}"
+
+
+@mcp.tool()
+async def recall_seatalk_message(
+    session: str = "",
+    mid: str = "",
+    session_name: str = "",
+) -> str:
+    """撤回已发送的 SeaTalk 消息（需用户确认）。
+
+    ⚠️ 安全机制：
+    - 调用此工具后，撤回请求会提交到 seatalk-agent 的确认队列
+    - 用户必须在 SeaTalk Agent 面板中点击「确认撤回」才会真正执行
+    - 如果用户已开启「免确认」模式，撤回会自动执行
+    - 此工具不能直接撤回消息，必须经过 seatalk-agent 的权限控制
+
+    ⚠️ 在 Cursor 中使用本工具（通过 MCP）：
+    - Cursor Agent 调用本工具 → 撤回请求提交到 seatalk-agent bridge → 等待用户确认
+    - 如果撤回一直没执行，请检查 SeaTalk Agent 面板是否有待确认的卡片
+    - 如果希望自动执行而无需手动确认，需要先在 SeaTalk Agent 面板
+      开启「免确认」开关（输入框上方，和模型选择对齐的 toggle 按钮）
+    - 「免确认」开关仅在当前 seatalk-agent 会话期间有效，重启后需重新开启
+
+    ⚠️ 限制：
+    - 只能撤回**自己发送的**消息
+    - SeaTalk 有 2 分钟撤回时间窗口限制（群管理员可能没有此限制）
+    - 需要消息的 mid（可通过 query_messages_sqlite 或 read_current_chat 获取）
+
+    ⚠️ AI 行为规则：
+    1. 只有当用户**明确要求撤回**时才可以调用（如"撤回刚才的消息"、"删掉那条消息"等）
+    2. **禁止**自作主张撤回消息
+    3. 调用前必须向用户确认要撤回的具体消息
+
+    Args:
+        session: 目标会话，格式 "group-{id}" 或 "buddy-{id}"
+        mid: 要撤回的消息 ID（mid）
+        session_name: 会话名称（模糊匹配，如果没有 session 参数则用这个查找）
+    """
+    if not mid:
+        return "请提供 mid（消息 ID）参数。可通过 query_messages_sqlite 或 read_current_chat 获取。"
+
+    err = _check_cdp_available()
+    if err:
+        return err
+
+    # If session_name provided but no session, look up the ID
+    if session_name and not session:
+        search_result = await _eval_js(f"""(function(){{
+            var s = window.store.getState();
+            var gi = (s.contact && s.contact.groupInfo) || {{}};
+            var ui = (s.contact && s.contact.userInfo) || {{}};
+            var keyword = {json.dumps(session_name)}.toLowerCase();
+            var matches = [];
+            for (var gid in gi) {{
+                var name = (gi[gid].name || '').toLowerCase();
+                if (name.indexOf(keyword) >= 0) {{
+                    matches.push({{type:'group', id:parseInt(gid), name:gi[gid].name}});
+                }}
+            }}
+            for (var uid in ui) {{
+                var name = (ui[uid].name || '').toLowerCase();
+                if (name.indexOf(keyword) >= 0) {{
+                    matches.push({{type:'buddy', id:parseInt(uid), name:ui[uid].name}});
+                }}
+            }}
+            return JSON.stringify(matches.slice(0, 5));
+        }})()""")
+        matches = json.loads(search_result) if isinstance(search_result, str) else search_result
+        if not matches:
+            return f"未找到匹配 '{session_name}' 的会话"
+        if len(matches) > 1:
+            lines = [f"找到 {len(matches)} 个匹配 '{session_name}' 的会话，请用 session 参数指定:\n"]
+            for m in matches:
+                prefix = "[群]" if m["type"] == "group" else "[私]"
+                lines.append(f"  {prefix} {m['name']} → session=\"{m['type']}-{m['id']}\"")
+            return "\n".join(lines)
+        session = f"{matches[0]['type']}-{matches[0]['id']}"
+
+    if not session:
+        return "请提供 session（如 'group-123456'）或 session_name 参数"
+
+    import re
+    if not re.match(r'^(group|buddy)-\d+$', session):
+        return f"session 格式错误: '{session}'，应为 'group-NNN' 或 'buddy-NNN'"
+
+    # Resolve session name for display
+    parts = session.split('-')
+    sess_type, sess_id = parts[0], parts[1]
+    name_js = f"""(function(){{
+        var s = window.store.getState().contact;
+        if ('{sess_type}' === 'group') return (s.groupInfo[{sess_id}] || {{}}).name || '';
+        return (s.userInfo[{sess_id}] || {{}}).name || '';
+    }})()"""
+    try:
+        sess_name = await _eval_js(name_js) or session
+    except Exception:
+        sess_name = session
+
+    payload_fields = {
+        "type": "recall_message",
+        "session": session,
+        "mid": mid,
+    }
+
+    bridge_js = f"""(function(){{
+        if (typeof window.__agentSend !== 'function')
+            return JSON.stringify({{error: 'seatalk-agent bridge not available. Is seatalk-agent running with the Agent panel open?'}});
+        window.__agentSend({json.dumps(json.dumps(payload_fields))});
+        return JSON.stringify({{queued: true}});
+    }})()"""
+
+    try:
+        raw = await _eval_js(bridge_js)
+        result = json.loads(raw) if isinstance(raw, str) else raw
+
+        if isinstance(result, dict) and result.get("error"):
+            error_msg = result["error"]
+            return f"撤回失败: {error_msg}"
+
+        return (
+            f"撤回请求已提交到 seatalk-agent 等待用户确认。\n"
+            f"  会话: {sess_name} ({session})\n"
+            f"  消息 ID: {mid}\n\n"
+            f"用户需要在 SeaTalk Agent 面板中点击「确认撤回」才会真正执行。\n"
+            f"如果已开启「免确认」模式，撤回会自动执行。"
+        )
+
+    except Exception as e:
+        return f"撤回消息失败: {e}"
 
 
 # ═══════════════════════════════════════════════════════════════
