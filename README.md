@@ -545,6 +545,18 @@ npm run dev    # tsx watch 模式，代码修改自动重启
 
 ## 更新日志
 
+### v3.1.0 (2026-04)
+
+- **项目结构重构**：seatalk-agent 从 mcp-tools/ 提升为顶级目录
+- **CDP 守护进程**：用户任意方式打开 SeaTalk 都自动启用 CDP，无需手动带参数
+- **Spark SQL 查询工具**：新增 `get_spark_query_sql`，通过 Keyhole 获取 Spark 任务执行的 SQL
+- **Scheduler MCP 增强**：`get_instance_detail` 自动区分 Presto/Spark 任务并给出对应提示
+- **Agent 更新路径修复**：修复重构后 PROJECT_ROOT 路径错误导致的更新检查失败
+- **模块化安装指南**：INSTALL.md 分 A/B/C 三模块按需安装，AI 交互式引导
+- **Cursor Rules 分域重构**：.cursorrules 拆分为 .cursor/rules/*.mdc 按需加载体系
+- **MCP README 全补齐**：ck-query、seatalk-reader、scheduler-query、seatalk-group 均有完整文档
+- **Skill 共享机制**：团队 Skill 仓库 + 安装/更新/贡献/AI 对比优化全流程
+
 ### v3.0.0 (2026-04)
 
 - **自动更新推送**：后台静默检查新版本，状态栏 Badge 实时提示，一键更新 + 自动重启
