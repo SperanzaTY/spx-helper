@@ -1032,9 +1032,18 @@
       } else if (d.type === 'update_progress') {
         appendUpdateProgress(d.text || '');
       } else if (d.type === 'update_done') {
-        appendUpdateProgress(d.success ? '✅ 更新完成，Agent 即将重启...' : '❌ 更新失败');
         if (d.success) {
+          appendUpdateProgress('✅ 更新完成，Agent 即将重启...');
           setTimeout(function () { appendUpdateProgress('🔄 正在等待 Agent 重新连接...'); }, 2000);
+          setTimeout(function () {
+            appendUpdateProgress('💡 如果长时间未重连，请运行 seatalk 命令重启 Agent');
+            var applyBtn2 = updateOverlay && updateOverlay.querySelector('[data-act="apply"]');
+            if (applyBtn2) { applyBtn2.disabled = false; applyBtn2.textContent = '重新检查'; applyBtn2.dataset.act = 'check'; }
+          }, 15000);
+        } else {
+          appendUpdateProgress('❌ 更新失败');
+          var applyBtn = updateOverlay && updateOverlay.querySelector('[data-act="apply"]');
+          if (applyBtn) { applyBtn.disabled = false; applyBtn.textContent = '重试更新'; }
         }
       }
     } catch (err) { console.error('[cursor-acp] __agentReceive error:', err); }

@@ -48,11 +48,11 @@ export class Bridge {
     this.handler = handler;
   }
 
-  async sendToPanel(data: Record<string, unknown>) {
+  async sendToPanel(data: Record<string, unknown>, timeoutMs?: number) {
     const json = JSON.stringify(data);
     const escaped = JSON.stringify(json);
     try {
-      await this.client.evaluate(`window.__agentReceive && window.__agentReceive(${escaped})`);
+      await this.client.evaluate(`window.__agentReceive && window.__agentReceive(${escaped})`, timeoutMs);
     } catch (e) {
       console.error(`[bridge:sendToPanel] FAILED type=${data.type}:`, (e as Error).message);
     }

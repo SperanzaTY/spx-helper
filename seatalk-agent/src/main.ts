@@ -77,17 +77,21 @@ function checkUpdate(logFn: typeof log): UpdateCheckResult {
   return result;
 }
 
-async function applyUpdate(onProgress: (msg: string) => void, logFn: typeof log): Promise<boolean> {
+function applyUpdate(onProgress: (msg: string) => void, logFn: typeof log): boolean {
   const branch = 'release';
 
   try {
+    logFn('[updater] applyUpdate start');
     onProgress('📡 检查工作区...');
     let dirty = false;
-    try { gitExec('git diff --quiet && git diff --cached --quiet', PROJECT_ROOT); } catch { dirty = true; }
+    try { gitExec('git diff --quiet', PROJECT_ROOT); } catch { dirty = true; }
+    if (!dirty) {
+      try { gitExec('git diff --cached --quiet', PROJECT_ROOT); } catch { dirty = true; }
+    }
+    logFn(`[updater] workspace dirty=${dirty}`);
 
     if (dirty) {
-      onProgress('❌ 工作区有未提交修改，无法更新');
-      onProgress('请先提交或撤销修改: git add . && git commit 或 git checkout .');
+      onProgress('❌ 工作区有未提交修改，请先处理后重试');
       return false;
     }
     onProgress('✅ 工作区干净');
@@ -99,7 +103,6 @@ async function applyUpdate(onProgress: (msg: string) => void, logFn: typeof log)
     } catch (e) {
       onProgress('❌ rebase 失败: ' + (e as Error).message);
       try { gitExec('git rebase --abort', PROJECT_ROOT); } catch {}
-      onProgress('已回滚 rebase。请手动执行: git pull --rebase origin ' + branch);
       return false;
     }
 
@@ -119,6 +122,7 @@ async function applyUpdate(onProgress: (msg: string) => void, logFn: typeof log)
     logFn('[updater] update applied successfully');
     return true;
   } catch (e) {
+    logFn(`[updater] unexpected error: ${(e as Error).message}`);
     onProgress('❌ 意外错误: ' + (e as Error).message);
     return false;
   }
@@ -865,13 +869,23 @@ async function main() {
         }
       } else if (data.type === 'update_apply') {
         log('update_apply requested by user');
-        const ok = await applyUpdate((msg) => {
-          bridge.sendToPanel({ type: 'update_progress', text: msg }).catch(() => {});
+        const progressMsgs: string[] = [];
+        const ok = applyUpdate((msg) => {
+          progressMsgs.push(msg);
+          log(`[updater] progress: ${msg}`);
         }, log);
-        bridge.sendToPanel({ type: 'update_done', success: ok }).catch(() => {});
-        if (ok) {
-          setTimeout(() => { process.exit(42); }, 500);
-        }
+        log(`[updater] applyUpdate returned ok=${ok}, sending ${progressMsgs.length} progress msgs`);
+
+        (async () => {
+          for (const msg of progressMsgs) {
+            await bridge.sendToPanel({ type: 'update_progress', text: msg }, 3_000);
+          }
+          await bridge.sendToPanel({ type: 'update_done', success: ok }, 3_000);
+          if (ok) {
+            log('[updater] messages sent, exiting in 1s');
+            setTimeout(() => { process.exit(42); }, 1_000);
+          }
+        })();
       } else if (data.type === 'get_logs') {
         bridge.sendToPanel({ type: 'logs', lines: logBuffer.slice() }).catch(() => {});
       } else if (data.type === 'get_diagnostics') {
@@ -936,17 +950,17 @@ async function main() {
     if (injecting) return;
     injecting = true;
     try {
+      bridge = new Bridge(client);
+      await bridge.setup();
+      setupMessageHandler(bridge);
+
       const hasAgent = await client.evaluate('!!window.__agentReceive') as boolean;
       if (hasAgent) {
-        log('skipping injection (agent UI already present), rebinding bridge only');
-        bridge = new Bridge(client);
-        await bridge.setup();
-        setupMessageHandler(bridge);
-        pushInitState();
-        return;
+        log('agent UI already present, re-injecting to ensure latest code');
+      } else {
+        const ok = await waitForSpaReady((c) => client.evaluate(c));
+        log(ok ? 'SPA ready' : 'SPA not ready, injecting anyway');
       }
-      const ok = await waitForSpaReady((c) => client.evaluate(c));
-      log(ok ? 'SPA ready' : 'SPA not ready, injecting anyway');
       await injectScripts();
       pushInitState();
     } finally {
