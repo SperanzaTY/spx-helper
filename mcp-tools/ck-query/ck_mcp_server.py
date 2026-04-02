@@ -10,8 +10,8 @@ cluster 可选值：
 - ck2 / online_2：ck2 写集群
 - ck6 / online_6：ck6 写集群
 - online_4：test 读集群
-- online_5：ck2 读集群
-- online_7：ck6 读集群
+- ck5 / online_5：ck2 读集群
+- ck7 / online_7：ck6 读集群
 
 配置方式（在 mcp.json 中）:
 {
@@ -66,7 +66,7 @@ CK_CLUSTERS = {
     'online_5': (
         'clickhouse-office-only-ytl.data-infra.shopee.io',
         443,
-        'spx_mart_manage_app',  # ck2 读集群，默认库
+        'spx_mart_manage_app',  # ck2 读集群
         'spx_mart-cluster_szsc_spx_mart_online_5',
     ),
     'online_6': (
@@ -93,9 +93,12 @@ mcp = FastMCP("ck-query")
 
 def _format_error_detail(url: str, sql_sent: str, **extra) -> str:
     """汇总调试信息到错误详情"""
+    sql_len = len(sql_sent)
+    sql_preview = sql_sent[:500] + ('...' if sql_len > 500 else '')
     parts = [
         f"[调试] URL: {url}",
-        f"[调试] SQL: {sql_sent[:500]}{'...' if len(sql_sent) > 500 else ''}",
+        f"[调试] SQL 长度: {sql_len} 字符",
+        f"[调试] SQL 预览: {sql_preview}",
     ]
     for k, v in extra.items():
         if v is not None and v != '':
@@ -112,41 +115,78 @@ def execute_direct(
     """DBeaver 方式直连 ClickHouse：HTTP 接口 + Basic Auth"""
     cfg = CK_CLUSTERS.get(cluster)
     if not cfg:
-        valid = ', '.join(sorted(set(k for k in CK_CLUSTERS if not k.startswith('ck')) | {'ck2', 'ck6'}))
+        valid = ', '.join(sorted(set(k for k in CK_CLUSTERS if not k.startswith('ck')) | {'ck2', 'ck5', 'ck6', 'ck7'}))
         return {'success': False, 'error': f'不支持的集群: {cluster}，可选: {valid}'}
 
     host, port, default_db, user = cfg
     database = database_override or default_db or 'default'
     url = f"https://{host}:{port}/"
     basic_auth = base64.b64encode(f"{user}:{CK_PASSWORD}".encode()).decode()
-    headers = {'Authorization': f'Basic {basic_auth}', 'Content-Type': 'text/plain'}
+    headers = {
+        'Authorization': f'Basic {basic_auth}',
+        'Content-Type': 'text/plain; charset=utf-8',
+    }
 
     sql_stripped = sql.strip().rstrip(';')
-    is_select = sql_stripped.lstrip().upper().startswith('SELECT')
-    query_sql = sql_stripped if (not is_select or 'format' in sql_stripped.lower()) else sql_stripped + ' FORMAT TabSeparatedWithNames'
-    sql_for_debug = query_sql if is_select else sql_stripped
+    normalized = sql_stripped.lstrip().upper()
+    # WITH...SELECT、SELECT、DESCRIBE、SHOW 等均为读操作，需 FORMAT 以便解析表头
+    is_read_query = (
+        normalized.startswith('SELECT')
+        or normalized.startswith('WITH')
+        or normalized.startswith('DESCRIBE')
+        or normalized.startswith('DESC ')
+        or normalized.startswith('SHOW')
+    )
+    query_sql = (
+        sql_stripped
+        if (not is_read_query or 'format' in sql_stripped.lower())
+        else sql_stripped + ' FORMAT TabSeparatedWithNames'
+    )
+    sql_for_debug = query_sql if is_read_query else sql_stripped
 
     try:
-        if not is_select:
+        if not is_read_query:
             response = requests.post(
-                url, headers=headers, data=sql_stripped,
-                params={'database': database}, timeout=120, verify=False
+                url,
+                headers=headers,
+                data=sql_stripped.encode('utf-8'),
+                params={'database': database},
+                timeout=120,
+                verify=False,
             )
             response.raise_for_status()
             return {'success': True, 'is_write': True, 'message': response.text.strip() or '执行成功'}
 
+        params = {'database': database}
         response = requests.post(
-            url, headers=headers, data=query_sql,
-            params={'database': database}, timeout=120, verify=False
+            url,
+            headers=headers,
+            data=query_sql.encode('utf-8'),
+            params=params,
+            timeout=180,
+            verify=False,
         )
+        # 404 时重试：部分网关对 raw body 的 POST 返回 404，改用 form-data 的 query 字段
+        if response.status_code == 404:
+            response = requests.post(
+                url,
+                headers={'Authorization': headers['Authorization']},
+                files={'query': (None, query_sql)},
+                params=params,
+                timeout=180,
+                verify=False,
+            )
         # ClickHouse 对“表不存在”等错误可能返回 404，需解析 body 中的实际错误
         if not response.ok:
             err_body = (response.text or '').strip()
             err_detail = err_body[:2000] + ('...' if len(err_body) > 2000 else '')
             detail = _format_error_detail(url, sql_for_debug, status_code=response.status_code)
+            hint = ""
+            if cluster in ('ck5', 'ck7', 'online_5', 'online_7') and 'UNKNOWN_TABLE' in err_body:
+                hint = "\n\n💡 ck5/ck7 为读集群，表为子集。若表不存在，请改用 ck2 或 ck6（写集群表更全）。"
             return {
                 'success': False,
-                'error': f"ClickHouse 错误 (HTTP {response.status_code}):\n\n{err_detail or '(响应体为空)'}\n\n{detail}"
+                'error': f"ClickHouse 错误 (HTTP {response.status_code}):\n\n{err_detail or '(响应体为空)'}\n\n{detail}{hint}"
             }
 
         lines = [l for l in response.text.strip().splitlines() if l]
@@ -163,7 +203,8 @@ def execute_direct(
                 'truncated': total_rows > max_rows}
 
     except requests.exceptions.Timeout:
-        detail = _format_error_detail(url, sql_for_debug, note="请求超时(120s)")
+        timeout_sec = 180 if is_read_query else 120
+        detail = _format_error_detail(url, sql_for_debug, note=f"请求超时({timeout_sec}s)")
         return {'success': False, 'error': f"请求超时\n\n{detail}"}
     except requests.exceptions.RequestException as e:
         resp = e.response if hasattr(e, 'response') and e.response is not None else None
@@ -220,14 +261,18 @@ async def query_ck(
     1. env：live（生产）或 test（测试）
     2. cluster（env=live 时必填），支持：ddc、ck2/ck5/ck6/ck7、online_2/4/5/6/7
 
+    支持长 SQL：WITH 子句、多行、复杂 CTE 均可；读查询超时 180 秒；请传递完整 SQL，勿截断。
+
     集群说明：
     - test：测试集群 spx_mart_pub
     - ddc：DDC 集群 spx_mart_ddc
-    - ck2 / online_2：ck2 写集群
-    - ck6 / online_6：ck6 写集群
-    - ck5 / online_5：ck2 读集群
-    - ck7 / online_7：ck6 读集群
+    - ck2 / online_2：ck2 写集群（表最全）
+    - ck6 / online_6：ck6 写集群（表最全）
+    - ck5 / online_5：ck2 读集群（表为子集，部分表不存在）
+    - ck7 / online_7：ck6 读集群（表为子集，部分表不存在）
     - online_4：test 读集群
+
+    若 ck5/ck7 报 UNKNOWN_TABLE，改查 ck2/ck6（写集群表更全）。
 
     Args:
         sql: SQL 语句
@@ -265,5 +310,9 @@ async def query_ck(
     return output
 
 
-if __name__ == "__main__":
+def main():
     mcp.run()
+
+
+if __name__ == "__main__":
+    main()

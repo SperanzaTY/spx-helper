@@ -944,13 +944,34 @@
                 </div>
 
                 <div class="sync-form-group">
+                  <label class="sync-label">表名模式:</label>
+                  <div style="display: flex; gap: 20px; margin-bottom: 8px;">
+                    <label style="cursor: pointer;">
+                      <input type="radio" name="syncTableMode" value="template" checked>
+                      <span>模板模式</span>
+                    </label>
+                    <label style="cursor: pointer;">
+                      <input type="radio" name="syncTableMode" value="explicit">
+                      <span>指定表名</span>
+                    </label>
+                  </div>
+                  <div class="sync-hint" style="font-size: 11px; color: #666;">指定表名：适用于命名不规范的表，格式 database.table，每行一个</div>
+                </div>
+
+                <div id="syncTemplateSection" class="sync-form-group">
                   <label class="sync-label">表名模板:</label>
                   <input type="text" id="syncTableTemplate" class="sync-input" 
                          placeholder="例如: dim_spx_driver_tab"
                          value="dim_spx_driver_tab">
                 </div>
 
-                <div class="sync-form-group">
+                <div id="syncExplicitSection" class="sync-form-group" style="display: none;">
+                  <label class="sync-label">完整表名 (每行一个):</label>
+                  <textarea id="syncExplicitTables" class="sync-input" rows="4"
+                            placeholder="例如:&#10;spx_mart_manage_app.dim_spx_station_tab_ph_all&#10;spx_mart_manage_app.some_weird_table_name"></textarea>
+                </div>
+
+                <div id="syncMarketSection" class="sync-form-group">
                   <label class="sync-label">市场 (可多选):</label>
                   <div class="sync-market-selector">
                     <div class="market-checkboxes">
@@ -999,7 +1020,7 @@
                   <div class="sync-hint" id="selectedMarketsHint">已选择: SG</div>
                 </div>
 
-                <div class="sync-form-group">
+                <div id="syncDatabaseSection" class="sync-form-group">
                   <label class="sync-label">数据库 (LIVE环境):</label>
                   <input type="text" id="syncDatabase" class="sync-input" 
                          placeholder="例如: spx_mart_manage_app"

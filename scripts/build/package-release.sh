@@ -3,7 +3,8 @@
 # SPX Helper 打包脚本
 # 版本: 2.6.7
 
-VERSION=$(grep '"version"' manifest.json | head -1 | sed 's/.*"version": "\(.*\)".*/\1/')
+EXT_DIR="chrome-extension"
+VERSION=$(grep '"version"' "${EXT_DIR}/manifest.json" | head -1 | sed 's/.*"version": "\(.*\)".*/\1/')
 PACKAGE_NAME="SPX_Helper_v${VERSION}.zip"
 TEMP_DIR=$(mktemp -d)
 
@@ -14,18 +15,18 @@ mkdir -p "${TEMP_DIR}/SPX_Helper"
 
 # 复制必需的文件
 echo "📋 复制文件..."
-cp manifest.json "${TEMP_DIR}/SPX_Helper/"
-cp popup.html "${TEMP_DIR}/SPX_Helper/"
-cp popup.js "${TEMP_DIR}/SPX_Helper/"
-cp background.js "${TEMP_DIR}/SPX_Helper/"
-cp styles.css "${TEMP_DIR}/SPX_Helper/"
-cp mermaid.min.js "${TEMP_DIR}/SPX_Helper/"
-cp calendar-config.html "${TEMP_DIR}/SPX_Helper/"
-cp calendar-config.js "${TEMP_DIR}/SPX_Helper/"
+cp "${EXT_DIR}/manifest.json" "${TEMP_DIR}/SPX_Helper/"
+cp "${EXT_DIR}/popup.html" "${TEMP_DIR}/SPX_Helper/"
+cp "${EXT_DIR}/popup.js" "${TEMP_DIR}/SPX_Helper/"
+cp "${EXT_DIR}/background.js" "${TEMP_DIR}/SPX_Helper/"
+cp "${EXT_DIR}/styles.css" "${TEMP_DIR}/SPX_Helper/"
+cp "${EXT_DIR}/mermaid.min.js" "${TEMP_DIR}/SPX_Helper/"
+cp "${EXT_DIR}/calendar-config.html" "${TEMP_DIR}/SPX_Helper/"
+cp "${EXT_DIR}/calendar-config.js" "${TEMP_DIR}/SPX_Helper/"
 
 # 复制 images 目录
 echo "🖼️  复制图标文件..."
-cp -r images "${TEMP_DIR}/SPX_Helper/"
+cp -r "${EXT_DIR}/images" "${TEMP_DIR}/SPX_Helper/"
 
 # 创建安装说明文件
 cat > "${TEMP_DIR}/SPX_Helper/INSTALL.md" << 'EOF'

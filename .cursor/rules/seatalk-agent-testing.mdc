@@ -1,0 +1,118 @@
+---
+description: SeaTalk Agent 前端注入代码修改后必须通过 CDP 模拟测试验证
+globs: seatalk-agent/src/inject/*.js
+alwaysApply: false
+---
+
+# SeaTalk Agent 前端注入测试规则
+
+修改 `inject/` 下的任何 JS 文件后，**必须通过 CDP 远程调试协议执行自动化测试**，确认功能正常后才能告知用户修改完成。
+
+## 测试方法
+
+使用 Node.js 脚本通过 WebSocket 连接 SeaTalk CDP（端口 19222），执行 `Runtime.evaluate` 验证前端状态。
+
+```javascript
+// 测试模板
+const WebSocket = require('ws');
+const http = require('http');
+http.get('http://127.0.0.1:19222/json', (res) => {
+  let data = '';
+  res.on('data', c => data += c);
+  res.on('end', () => {
+    const pages = JSON.parse(data);
+    const main = pages.find(p => p.url && p.url.includes('web.haiserve.com'));
+    const ws = new WebSocket(main.webSocketDebuggerUrl);
+    ws.on('open', () => {
+      ws.send(JSON.stringify({
+        id: 1, method: 'Runtime.evaluate',
+        params: { expression: `/* 测试代码 */`, returnByValue: true }
+      }));
+    });
+    ws.on('message', (msg) => {
+      const r = JSON.parse(msg.toString());
+      if (r.id === 1) { console.log(r.result.result.value); ws.close(); process.exit(0); }
+    });
+  });
+});
+```
+
+## 必测项目
+
+### 1. 基础注入验证（每次必测）
+
+```javascript
+JSON.stringify({
+  cursorUI: !!window.__cursorUI,
+  agentToggle: typeof window.__agentToggle,
+  agentReceive: typeof window.__agentReceive,
+  sidebarBtn: !!document.getElementById('cursor-sidebar-btn')
+})
+```
+
+预期：全部为 `true` / `"function"`。
+
+### 2. 面板打开/关闭（修改面板相关代码时）
+
+```javascript
+(function(){
+  // 关闭 → 打开
+  if (document.getElementById('cursor-panel')) window.__agentToggle(false);
+  window.__agentToggle(true);
+  var panel = document.getElementById('cursor-panel');
+  var has = !!panel && !!panel.querySelector('.cursor-msgs') && !!panel.querySelector('.cursor-input');
+  // 再次打开不应重建
+  var ref = document.getElementById('cursor-panel');
+  window.__agentToggle(true);
+  var same = ref === document.getElementById('cursor-panel');
+  return JSON.stringify({opened: has, notRebuilt: same});
+})()
+```
+
+预期：`opened: true, notRebuilt: true`。
+
+### 3. ✦ 图标注入与点击（修改消息引用相关代码时）
+
+```javascript
+(function(){
+  var icons = document.querySelectorAll('.cursor-qo-icon');
+  if (icons.length === 0) return JSON.stringify({error: 'no icons'});
+  // 确保面板关闭来测试完整流程
+  if (document.getElementById('cursor-panel')) window.__agentToggle(false);
+  var evt = new MouseEvent('click', {bubbles: true, cancelable: true});
+  icons[0].dispatchEvent(evt);
+  var panel = document.getElementById('cursor-panel');
+  var ctxBar = panel ? panel.querySelector('.cursor-ctx') : null;
+  var label = panel ? panel.querySelector('.cursor-ctx-label') : null;
+  return JSON.stringify({
+    iconCount: icons.length,
+    panelOpened: !!panel,
+    ctxVisible: ctxBar ? ctxBar.classList.contains('show') : false,
+    hasLabel: label ? label.textContent.length > 0 : false
+  });
+})()
+```
+
+预期：`panelOpened: true, ctxVisible: true, hasLabel: true`。
+
+### 4. 层级验证（修改 z-index / 面板样式时）
+
+```javascript
+(function(){
+  var layer = document.getElementById('cursor-layer');
+  return JSON.stringify({
+    layerZ: layer ? layer.style.zIndex : 'missing'
+  });
+})()
+```
+
+预期：`layerZ: "2147483647"`。
+
+## 流程
+
+1. 修改代码
+2. 重启 seatalk-agent（`kill PID; npx tsx src/main.ts`）
+3. 等待日志输出 `injection complete!`
+4. 运行上述 CDP 测试脚本
+5. 全部通过后才能告知用户修改完成
+6. 若测试失败，修复后重新测试，不要让用户手动验证已知问题

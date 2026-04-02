@@ -1,0 +1,45 @@
+---
+description: Chrome 扩展开发规则和高风险文件说明
+globs: chrome-extension/**
+alwaysApply: false
+---
+
+# Chrome 扩展开发规则
+
+## 文件职责
+
+| 文件 | 职责 | 修改后必须 |
+|------|------|-----------|
+| `background.js` | Service Worker, 消息中枢, 数据存储 | 重新加载扩展 + 全功能测试 |
+| `content.js` | 页面注入, DOM 操作, UI 渲染 | 刷新页面 + UI 测试 |
+| `injected.js` | API 拦截 (XHR/Fetch hook) | 刷新页面 + API 拦截测试 |
+| `manifest.json` | 扩展权限、配置、**版本号唯一来源** | 重新加载扩展 + 权限验证 |
+| `popup.js` | 弹出页逻辑、JWT 生成 | 打开 popup + 配置功能测试 |
+
+## 开发原则
+
+- DOM 操作 / UI → `content.js`
+- API 拦截 → `injected.js`
+- 后台逻辑 / 存储 / 消息转发 → `background.js`
+- 配置页面 / JWT → `popup.js`
+- **禁止**在 `background.js` 中直接操作 DOM
+
+## 数据流
+
+```
+页面请求 → injected.js 拦截 → content.js 处理 → background.js 存储/转发 → popup.js 展示
+```
+
+## 测试方法
+
+```bash
+# 加载/刷新扩展
+chrome://extensions/ → 开发者模式 → 加载已解压的扩展 → 选择 chrome-extension/ 目录
+
+# 调试
+F12 → Console → 过滤 [SPX Helper]
+```
+
+## README 维护
+
+修改 Chrome 扩展功能后，必须更新 `chrome-extension/` 目录下的相关文档（如有），或在根 `README.md` 的 Chrome 扩展章节中同步说明。

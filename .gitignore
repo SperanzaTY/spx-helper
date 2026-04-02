@@ -4,6 +4,7 @@ npm-debug.log
 yarn-error.log
 package-lock.json
 yarn.lock
+pnpm-lock.yaml
 
 # 编辑器
 .vscode/
@@ -15,14 +16,13 @@ yarn.lock
 *.sublime-project
 *.sublime-workspace
 
-# 构建输出和发布包（根目录）
+# 构建输出和发布包
 dist/
 build/
 releases/
 *.crx
 *.pem
 *.zip
-SPX_Helper_v*.zip
 
 # 临时文件
 tmp/
@@ -41,16 +41,16 @@ coverage/
 # 密钥文件
 key.pem
 
-# Playwright
-.playwright-mcp/
-
-# 整理后的归档和测试目录
-archives/
-test/
-
-# 但是保留scripts目录下的所有文件
-!scripts/**
-
-# Python cache
+# Python cache & venv
 __pycache__/
 *.pyc
+*.egg-info/
+.venv/
+venv/
+
+# SeaTalk Agent runtime
+.last-session.json
+
+# 备份文件
+*.backup
+*.broken

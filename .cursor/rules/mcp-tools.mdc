@@ -1,0 +1,133 @@
+---
+description: MCP 工具开发规范与各工具使用说明。编辑 mcp-tools/ 下的文件时自动激活。
+globs: mcp-tools/**
+alwaysApply: false
+---
+
+# MCP 工具开发规范
+
+## 开发规范
+
+### 目录结构
+每个 MCP 工具独立目录 `mcp-tools/<tool-name>/`，必须包含：
+
+```
+<tool-name>/
+├── <tool>_mcp_server.py   # 主程序（或 *_server.py）
+├── pyproject.toml          # 包定义（uvx 安装需要）
+└── README.md               # 工具说明（必须！）
+```
+
+### 编码规范
+- 使用 `FastMCP` 框架，`transport="stdio"`
+- 凭证通过环境变量传入，**禁止硬编码**
+- 所有网络请求必须 try-catch，返回有意义的错误信息
+- 工具函数的 docstring 就是用户在 Cursor 里看到的工具描述，必须清晰
+
+### 修改后刷新
+MCP 工具代码修改后，需要在 Cursor Settings → MCP 中**关闭再开启**对应服务以刷新。
+
+### README 维护规则
+- **新增 MCP 工具**：必须在工具目录下创建 `README.md`，包含功能说明、配置方式、工具列表、使用示例
+- **修改 MCP 工具**：若新增/删除/重命名了工具函数，必须同步更新该工具的 `README.md`
+- **同时更新** `mcp-tools/README.md` 工具列表
+
+### 验证注册
+```bash
+python3 -c "import asyncio; from <module> import mcp; asyncio.run(mcp.list_tools())"
+```
+
+---
+
+## 工具清单与使用说明
+
+### presto-query — Presto SQL 查询
+- **用途**：通过 DataSuite API 查询 Presto 数据库
+- **认证**：环境变量 `PRESTO_PERSONAL_TOKEN` + `PRESTO_USERNAME`
+- **凭证获取**：https://datasuite.shopee.io/dataservice/ds_api_management → ☰ → Personal Token
+- **核心工具**：
+  - `query_presto(sql, queue?, region?, cell_max_len?, write_full_result_to?)` — 执行 Presto SQL
+- **特性**：支持 `write_full_result_to` 将大结果集落盘为 JSON 文件
+- **详细文档**：`mcp-tools/presto-query/README.md`
+
+### spark-query — Spark SQL 查询
+- **用途**：通过 Livy REST API 提交 Spark SQL 到 DMP 集群
+- **认证**：环境变量 `LIVY_USERNAME` + `LIVY_PASSWORD`
+- **凭证获取**：https://datasuite.shopee.io → 右上角头像 → Profile → BigData Account
+- **核心工具**：
+  - `spark_sql(sql, session_name?)` — 执行 Spark SQL
+  - `list_sessions()` — 列出活跃 Livy Session
+- **详细文档**：`mcp-tools/spark-query/README.md`
+
+### ck-query — ClickHouse 查询
+- **用途**：通过 HTTP 直连（DBeaver 方式）查询 ClickHouse 集群
+- **认证**：密码内置于代码中（团队统一管理）
+- **核心工具**：
+  - `query_clickhouse(sql, cluster?, database?, max_rows?)` — 执行 CK SQL
+- **可用集群**：`test`(spx_mart_pub), `ddc`, `ck2`/`online_2`, `ck6`/`online_6`, `online_4`(ck2读), `online_5`, `online_7`(ck6读)
+- **注意**：默认集群为 `test`，写集群操作请谨慎
+
+### api-trace — API 血缘溯源
+- **用途**：查询 API 接口的数据血缘关系，从 spx_mart.api_lineage 表检索
+- **认证**：同 presto-query（`PRESTO_PERSONAL_TOKEN` + `PRESTO_USERNAME`）
+- **核心工具**：
+  - `trace_api(api_path?, keyword?)` — 查询 API 的数据来源链路
+- **详细文档**：`mcp-tools/api-trace/README.md`
+
+### seatalk-reader — SeaTalk 消息读取
+- **用途**：通过 CDP 协议读取 SeaTalk 桌面客户端的消息（Redux store + SQLite）
+- **前提**：SeaTalk 以 CDP 模式运行（安装 SeaTalk Agent 后自动满足）
+- **认证**：无需凭证，通过 CDP 本地连接
+- **核心工具**：
+  - `list_seatalk_chats(chat_type?)` — 列出聊天会话
+  - `read_seatalk_messages(session_type?, session_name, limit?)` — 读取指定群/私聊消息
+  - `search_seatalk_messages(keyword)` — 跨群搜索消息
+  - `navigate_to_chat(session_name)` — 导航到指定聊天
+  - `read_current_chat(limit?)` — 读取当前聊天窗口
+  - `query_messages_sqlite(...)` — 从本地 SQLite 查历史消息
+  - `query_mentions(hours?)` — 查询最近被 @ 的消息
+  - `seatalk_screenshot()` — 截图
+  - `seatalk_eval(code)` — 执行 JS
+  - `open_seatalk_link(url)` — 打开链接
+  - `download_seatalk_image(image_url)` — 下载图片
+- **详细文档**：`mcp-tools/seatalk-reader/README.md`
+
+### scheduler-query — DataSuite Scheduler 查询
+- **用途**：查询 Scheduler 任务状态、实例列表、运行日志、血缘、Presto SQL
+- **认证**：自动从 Chrome 读取 `datasuite.shopee.io` 的 Cookie（需先在浏览器登录）
+- **安装**：`pip3 install mcp requests browser-cookie3`
+- **核心工具**：
+  - `search_tasks(keyword, project_code?, env?)` — 搜索任务
+  - `get_task_info(task_code, env?)` — 获取任务详情
+  - `get_task_instances(task_code, env?, date?, page_size?)` — 查询实例列表
+  - `get_instance_detail(task_instance_code, env?)` — 查询实例详情（含 Presto Query ID）
+  - `get_instance_log(task_instance_code, env?)` — 查询运行日志
+  - `get_presto_query_sql(presto_query_id?, task_instance_code?, env?)` — 获取执行的 SQL
+  - `get_task_lineage(task_code, env?)` — 查询上下游血缘
+  - `get_task_metric_summary(task_code, env?)` — 运行指标汇总
+  - `get_task_operation_log(task_code, days?, env?)` — 操作日志
+  - `get_task_violations(task_code, project_code?, env?)` — SLA 违规记录
+- **注意**：`env` 参数支持 `prod`/`dev`/`staging`，默认 `prod`
+- **详细文档**：`mcp-tools/scheduler-query/README.md`
+
+### seatalk-group — SeaTalk 批量拉群
+- **用途**：通过 InfraBot API 批量邀请成员进 SeaTalk 群
+- **前提**：群中已添加 InfraBot 并设为管理员
+- **认证**：环境变量 `INFRABOT_TOKEN`
+- **凭证获取**：https://space.shopee.io/utility/seatalkbot/api-playground → Get API Token
+- **核心工具**：
+  - `invite_to_group(group_id, emails, token?)` — 批量邀请成员
+  - `check_group_setup(group_id, token?)` — 检查群 InfraBot 配置
+- **详细文档**：`mcp-tools/seatalk-group/README.md`
+
+---
+
+## 配置位置
+
+用户的 MCP 配置在 `~/.cursor/mcp.json`，完整模板见 `INSTALL.md` 模块 A。
+
+## 内部平台文档查阅
+
+对接公司内部平台开发前，先用 Confluence MCP 搜索相关文档：
+- 搜索 `DI` 空间：`confluence_search(query="平台名 + API")`
+- 已知文档：Scheduler Open API (page_id: 1382956585)

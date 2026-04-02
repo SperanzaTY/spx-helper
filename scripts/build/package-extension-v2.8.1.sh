@@ -13,25 +13,26 @@ echo "=========================================="
 rm -rf "${BUILD_DIR}/${PACKAGE_NAME}"
 mkdir -p "${BUILD_DIR}/${PACKAGE_NAME}"
 
+EXT_DIR="chrome-extension"
 echo "📋 复制扩展文件..."
 
 # 复制核心文件
-cp manifest.json "${BUILD_DIR}/${PACKAGE_NAME}/"
-cp popup.html "${BUILD_DIR}/${PACKAGE_NAME}/"
-cp popup.js "${BUILD_DIR}/${PACKAGE_NAME}/"
-cp background.js "${BUILD_DIR}/${PACKAGE_NAME}/"
-cp styles.css "${BUILD_DIR}/${PACKAGE_NAME}/"
+cp "${EXT_DIR}/manifest.json" "${BUILD_DIR}/${PACKAGE_NAME}/"
+cp "${EXT_DIR}/popup.html" "${BUILD_DIR}/${PACKAGE_NAME}/"
+cp "${EXT_DIR}/popup.js" "${BUILD_DIR}/${PACKAGE_NAME}/"
+cp "${EXT_DIR}/background.js" "${BUILD_DIR}/${PACKAGE_NAME}/"
+cp "${EXT_DIR}/styles.css" "${BUILD_DIR}/${PACKAGE_NAME}/"
 
 # 复制图标目录
 echo "🖼️  复制图标..."
 mkdir -p "${BUILD_DIR}/${PACKAGE_NAME}/images"
-cp -r images/* "${BUILD_DIR}/${PACKAGE_NAME}/images/"
+cp -r "${EXT_DIR}/images"/* "${BUILD_DIR}/${PACKAGE_NAME}/images/"
 
 # 复制库文件
 echo "📚 复制库文件..."
-cp sql-formatter.min.js "${BUILD_DIR}/${PACKAGE_NAME}/"
-cp cronstrue.min.js "${BUILD_DIR}/${PACKAGE_NAME}/"
-cp mermaid.min.js "${BUILD_DIR}/${PACKAGE_NAME}/"
+cp "${EXT_DIR}/sql-formatter.min.js" "${BUILD_DIR}/${PACKAGE_NAME}/" 2>/dev/null || true
+cp "${EXT_DIR}/cronstrue.min.js" "${BUILD_DIR}/${PACKAGE_NAME}/" 2>/dev/null || true
+cp "${EXT_DIR}/mermaid.min.js" "${BUILD_DIR}/${PACKAGE_NAME}/"
 
 # 打包成 zip
 echo "📦 创建 ZIP 包..."

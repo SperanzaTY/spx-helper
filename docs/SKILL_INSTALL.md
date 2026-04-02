@@ -1,43 +1,43 @@
-# SPX Bug Trace Skill 安装指南
+# Skill 安装与维护
 
-当用户说「帮我安装 skill」「安装 spx-bug-trace」「如何安装这个 skill」时，按以下步骤执行。
+> 完整的 Skill 共享库说明、安装、更新、贡献流程，请参见 [.cursor/skills/README.md](../.cursor/skills/README.md)。
 
-## 安装目标
-
-将 `spx-bug-trace` Skill 安装到 `~/.cursor/skills/`，使其在**所有项目**中可用（不仅限 SPX_Helper）。
-
-## 前置条件
-
-- 已克隆 SPX_Helper 仓库
-- 当前在 SPX_Helper 项目目录下
-
-## 安装步骤
-
-### 方式一：执行脚本（推荐）
+## 快速安装
 
 ```bash
-# 在 SPX_Helper 项目根目录执行
-./scripts/sync_skills.sh
-```
-
-- **首次安装**：`~/.cursor/skills/spx-bug-trace/` 不存在时，脚本会自动复制
-- **已有本地版本**：不覆盖，仅提示在 Cursor 中比较合并
-
-### 方式二：手动复制
-
-若 `~/.cursor/skills/spx-bug-trace/` 尚不存在：
-
-```bash
+# 安装所有 Skill 到本地（所有项目可用）
 mkdir -p ~/.cursor/skills
-cp -r .cursor/skills/spx-bug-trace ~/.cursor/skills/
+for skill in .cursor/skills/*/; do
+  name=$(basename "$skill")
+  [ "$name" = "README.md" ] && continue
+  cp -r "$skill" ~/.cursor/skills/
+  echo "✅ 已安装: $name"
+done
 ```
 
-## 验证安装
+安装后重启 Cursor 生效。
 
-1. 重启 Cursor 或切换项目
-2. 打开 Cursor Settings → Rules，确认 `spx-bug-trace` 已出现在 Skill 列表
-3. 在其他项目（如 fm-realtime）中触发业务排查场景，验证 Skill 是否自动加载
+## 更新已安装的 Skill
 
-## 依赖
+```bash
+# 1. 拉取最新代码
+git pull origin release
 
-Skill 需配合以下 MCP 使用：user-api-trace、user-ck-query、user-presto-query、cursor-ide-browser。详见 `mcp-tools/` 目录配置。
+# 2. 对比本地和仓库版本
+diff -ru ~/.cursor/skills/<skill-name> .cursor/skills/<skill-name>
+
+# 3. 选择更新方向（详见 .cursor/skills/README.md）
+```
+
+## 维护原则
+
+1. **手动维护**：用编辑器 diff/合并，不依赖自动化脚本
+2. **确认方向**：更新前确认"谁是最新版"——本地 vs 仓库
+3. **协作合并**：仓库有他人提交时，禁止整目录覆盖，须手动合并
+4. **AI 辅助**：可让 Cursor AI 对比两个版本，取长补短生成最优合并
+
+## 贡献新 Skill
+
+在 `.cursor/skills/` 下创建新目录，包含 `SKILL.md`（必须）+ 辅助文档（可选），通过 MR 提交。
+
+详见 [.cursor/skills/README.md 的「贡献新 Skill」章节](../.cursor/skills/README.md)。

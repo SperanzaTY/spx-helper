@@ -1,0 +1,19 @@
+[project]
+name = "spx-spark-query-mcp"
+version = "0.1.0"
+description = "Spark MCP Server - 为 Cursor 提供 Spark SQL 查询能力"
+requires-python = ">=3.9"
+dependencies = [
+    "mcp",
+    "requests",
+]
+
+[project.scripts]
+spark-query-mcp = "spark_mcp_server:main"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["spark_mcp_server"]

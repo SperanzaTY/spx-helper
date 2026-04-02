@@ -1,0 +1,82 @@
+---
+description: Git 提交规范、分支管理、版本管理、双仓库同步。编辑任何文件准备提交时适用。
+globs:
+alwaysApply: true
+---
+
+# Git 工作流与提交规范
+
+## 版本管理
+
+### 唯一版本源
+`chrome-extension/manifest.json` 的 `version` 字段是项目唯一版本号来源。
+
+| 文件 | 规则 |
+|------|------|
+| `chrome-extension/manifest.json` | **主版本源**，发版时只改这里 |
+| `package.json`（根） | 跟随 manifest.json 同步 |
+| `seatalk-agent/package.json` | 跟随 manifest.json 同步 |
+
+发版流程：改 manifest.json version → 同步两个 package.json → 更新 README changelog → 更新用户指南 → 提交（三个 version 必须一致）
+
+### 禁止
+- ❌ 只改其中一个文件的版本号
+- ❌ 各文件版本号不一致
+- ❌ 用 package.json 作为版本判断来源
+
+## 提交规则
+
+### Agent 禁止行为
+- ❌ 自动提交代码到 Git（必须等用户说"可以提交"）
+- ❌ 未经测试执行 `git commit`
+- ❌ 未经确认执行 `git push`
+- ❌ 只推送到单个远程仓库
+- ❌ 直接推送到 release 分支（应走 MR）
+
+### 提交流程
+```
+接收需求 → 分析问题 → 修改代码 → 展示修改内容(git diff)
+  → 🛑 等待用户测试
+  → 🛑 等待用户确认"可以提交"
+  → git add + git commit
+  → git push gitlab <branch> && git push origin <branch>
+```
+
+### Commit Message 格式
+```
+<type>: <subject>
+
+<body>
+```
+
+type: `feat` | `fix` | `docs` | `style` | `refactor` | `perf` | `test` | `chore`
+
+## 分支管理
+
+| 分支 | 用途 |
+|------|------|
+| `feature/*` | 新功能，从 release 拉出 |
+| `bugfix/*` | Bug 修复，从 release 拉出 |
+| `release` | 开发主分支，只接受 MR，禁止直接 push |
+| `main` | 稳定版本，从 release 合并 |
+
+流程: `feature/bugfix` → **MR** → `release` → `main`
+
+## 双仓库同步
+
+```
+GitLab: gitlab  https://git.garena.com/tianyi.liang/spx-helper.git
+GitHub: origin  https://github.com/SperanzaTY/spx-helper.git
+
+推送时必须同时推送到两个仓库:
+git push gitlab <branch> && git push origin <branch>
+```
+
+## 提交前检查清单
+
+- [ ] 修改的功能正常工作
+- [ ] 已有功能未被破坏
+- [ ] commit message 符合规范
+- [ ] 若涉及版本号变更，三个文件版本一致
+- [ ] 若涉及功能变更，对应模块 README 已更新
+- [ ] 若涉及功能变更，用户指南已更新

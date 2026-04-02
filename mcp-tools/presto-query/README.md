@@ -109,6 +109,18 @@ python3 simple_query.py
 python3 query_presto.py "你的SQL查询"
 ```
 
+## 📤 MCP `query_presto`：长单元格与落盘（v1.1+）
+
+历史行为曾将**每个单元格固定截断为 50 字符**，血缘类大字段在对话里不可读。已优化为：
+
+| 参数 / 环境变量 | 说明 |
+|-----------------|------|
+| `cell_max_len` | **默认 0** = 表格展示**不截断**；设为 `50`–`120` 可缩短 MCP 返回体积。 |
+| `write_full_result_to` | 传入相对或绝对路径（如 `docs/investigations/presto_lineage.json`），将 **完整** 结果写入 UTF-8 JSON（`columns` + `rows` + `jobId`），对话中仅保留短预览表。后续用脚本读文件合并或写 Google Sheet。 |
+| `PRESTO_MCP_OUTPUT_DIR` | 可选；`write_full_result_to` 为**相对路径**时的基准目录（未设则用 MCP 进程当前工作目录，一般为 Cursor 工作区根）。 |
+
+**仍可能受限**：宿主对单条 MCP 消息的长度限制；超大结果务必使用 `write_full_result_to` 或命令行 `query_presto.py --output`。
+
 ## 📋 依赖安装
 
 所有工具都需要安装以下依赖：
@@ -194,7 +206,14 @@ pip3 install mcp
 - 检查 `~/.cursor/mcp.json` 配置
 - 查看Cursor的MCP日志
 
+### MCP 启动失败：`PydanticUserError: result = <class 'str'>`
+- 已在本仓库将 `query_presto` 的返回注解改为 `Any`，以兼容 **FastMCP + Pydantic 2.10**（裸 `-> str` 会触发该错误）。
+- 若你本地仍用旧版 `presto_mcp_server.py`，请 `git pull` 后重启 Cursor。
+
 ## 📝 更新日志
+
+### v1.1 (2026-03-05)
+- MCP：取消固定 50 字单元格截断；默认 `cell_max_len=0`；新增 `write_full_result_to` 落盘完整 JSON。
 
 ### v1.0 (2026-02-28)
 - ✅ 创建MCP工具

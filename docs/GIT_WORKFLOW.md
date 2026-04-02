@@ -85,10 +85,14 @@ git commit -m "feat: 添加新功能描述"
 # - 测试新功能
 # - 确认无问题
 
-# Step 4: 合并到 release（本地测试通过）
-git checkout release
-git merge feature/new-feature-name
-git push origin release
+# Step 4: 推送分支并创建 MR 合并到 release（推荐）
+git push gitlab feature/new-feature-name && git push origin feature/new-feature-name
+# 打开 https://git.garena.com/tianyi.liang/spx-helper/-/merge_requests/new
+# 选择 source: feature/new-feature-name, target: release，创建 MR 并合并
+
+# 备选：本地合并（MR 不可用时）
+# git checkout release && git merge feature/new-feature-name
+# git push gitlab release && git push origin release
 
 # Step 5: 删除功能分支
 git branch -d feature/new-feature-name
@@ -109,11 +113,9 @@ git commit -m "fix: 修复XX问题"
 # - 验证 bug 已修复
 # - 确认没有引入新问题
 
-# Step 4: 合并到 release
-git checkout release
-git merge bugfix/bug-description
-git push origin release
-git branch -d bugfix/bug-description
+# Step 4: 推送分支并创建 MR 合并到 release（推荐）
+git push gitlab bugfix/bug-description && git push origin bugfix/bug-description
+# 打开 GitLab 创建 MR：source: bugfix/xxx, target: release
 ```
 
 ### 3. 发布到 Main（正式发布）

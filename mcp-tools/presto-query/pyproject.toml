@@ -1,0 +1,19 @@
+[project]
+name = "spx-presto-query-mcp"
+version = "0.1.0"
+description = "Presto MCP Server - 为 Cursor 提供 Presto 查询能力"
+requires-python = ">=3.9"
+dependencies = [
+    "mcp",
+    "requests",
+]
+
+[project.scripts]
+presto-query-mcp = "presto_mcp_server:main"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["presto_mcp_server"]
