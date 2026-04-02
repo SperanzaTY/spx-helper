@@ -544,7 +544,18 @@ async function main() {
 
       return true;
     } catch (e) {
-      log('ACP start failed:', (e as Error).message);
+      const errMsg = (e as Error).message;
+      log('ACP start failed:', errMsg);
+      bridge.sendToPanel({
+        type: 'status',
+        connected: false,
+        text: errMsg.includes('Cursor CLI') ? 'Cursor CLI 未安装' : 'ACP 连接失败',
+      }).catch(() => {});
+      bridge.sendToPanel({
+        type: 'text_chunk',
+        text: `**Agent 启动失败**\n\n${errMsg}\n`,
+      }).catch(() => {});
+      bridge.sendToPanel({ type: 'turn_end', stopReason: 'error' }).catch(() => {});
       return false;
     }
   }

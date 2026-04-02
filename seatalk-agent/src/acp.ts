@@ -14,6 +14,33 @@ import * as acp from '@agentclientprotocol/sdk';
 
 const AGENT_BIN = path.join(os.homedir(), '.local', 'bin', 'agent');
 
+export function checkAgentCli(): { ok: boolean; path: string; error?: string } {
+  if (fs.existsSync(AGENT_BIN)) {
+    return { ok: true, path: AGENT_BIN };
+  }
+
+  const fallbacks = ['/usr/local/bin/agent', '/opt/homebrew/bin/agent'];
+  for (const p of fallbacks) {
+    if (fs.existsSync(p)) return { ok: true, path: p };
+  }
+
+  return {
+    ok: false,
+    path: AGENT_BIN,
+    error: [
+      `Cursor CLI (agent) 未找到: ${AGENT_BIN}`,
+      '',
+      '安装方法:',
+      '  1. 打开 Cursor IDE',
+      '  2. Cmd+Shift+P → 搜索 "Install \'cursor\' command"',
+      '  3. 执行后会在 ~/.local/bin/ 下创建 agent 命令',
+      '',
+      '或手动安装:',
+      '  curl -fsSL https://cursor.sh/install-agent | bash',
+    ].join('\n'),
+  };
+}
+
 // ── Callback types exposed to main.ts ──
 
 export type OnTurnStart = () => void;
@@ -279,12 +306,18 @@ export async function spawnAgent(opts: {
 }): Promise<AgentProcess> {
   const { workspacePath, callbacks, log, modelId } = opts;
 
+  const cliCheck = checkAgentCli();
+  if (!cliCheck.ok) {
+    throw new Error(cliCheck.error!);
+  }
+  const agentBin = cliCheck.path;
+
   const useShell = process.platform === 'win32';
   const args = ['--approve-mcps', 'acp'];
   if (modelId) args.push('--model', modelId);
-  log(`spawning agent: ${AGENT_BIN} ${args.join(' ')} (cwd: ${workspacePath})`);
+  log(`spawning agent: ${agentBin} ${args.join(' ')} (cwd: ${workspacePath})`);
 
-  const proc = spawn(AGENT_BIN, args, {
+  const proc = spawn(agentBin, args, {
     stdio: ['pipe', 'pipe', 'pipe'],
     env: { ...process.env, HOME: os.homedir() },
     shell: useShell,
@@ -387,8 +420,13 @@ export async function spawnAgent(opts: {
 }
 
 export async function listModels(log: (msg: string) => void): Promise<{ models: ModelInfo[]; currentModelId: string }> {
+  const cliCheck = checkAgentCli();
+  if (!cliCheck.ok) {
+    log(`agent CLI not found, skipping model listing`);
+    return { models: [], currentModelId: '' };
+  }
   return new Promise((resolve) => {
-    const p = spawn(AGENT_BIN, ['models'], {
+    const p = spawn(cliCheck.path, ['models'], {
       stdio: ['ignore', 'pipe', 'pipe'],
       env: { ...process.env, HOME: os.homedir() },
     });
