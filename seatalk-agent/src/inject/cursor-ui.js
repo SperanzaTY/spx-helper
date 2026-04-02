@@ -168,6 +168,14 @@
     if (!key) return;
     try { localStorage.setItem('cursor_panel_' + key, JSON.stringify({ w: w, h: h })); } catch (_) {}
   }
+  function getSavedPos(key) {
+    if (!key) return null;
+    try { var v = localStorage.getItem('cursor_panel_pos_' + key); return v ? JSON.parse(v) : null; } catch (_) { return null; }
+  }
+  function savePanelPos(key, left, top) {
+    if (!key) return;
+    try { localStorage.setItem('cursor_panel_pos_' + key, JSON.stringify({ left: left, top: top })); } catch (_) {}
+  }
 
   // ── createPanel ──
   function createPanel(opts) {
@@ -181,14 +189,22 @@
     var savedSize = getSavedSize(opts.sizeKey);
     var panelW = (savedSize && savedSize.w) || opts.width || 380;
     var panelH = (savedSize && savedSize.h) || opts.height || 520;
+    var savedPos = getSavedPos(opts.sizeKey);
 
     var panel = document.createElement('div');
     panel.className = 'hp-panel' + (opts.className ? ' ' + opts.className : '');
     panel.id = panelId;
     panel.style.width = panelW + 'px';
     panel.style.height = panelH + 'px';
-    panel.style.left = (window.innerWidth - panelW - 16) + 'px';
-    panel.style.top = (window.innerHeight - panelH - 40) + 'px';
+    if (savedPos) {
+      var l = Math.max(40 - panelW, Math.min(window.innerWidth - 40, savedPos.left));
+      var t = Math.max(0, Math.min(window.innerHeight - 40, savedPos.top));
+      panel.style.left = l + 'px';
+      panel.style.top = t + 'px';
+    } else {
+      panel.style.left = (window.innerWidth - panelW - 16) + 'px';
+      panel.style.top = (window.innerHeight - panelH - 40) + 'px';
+    }
 
     var html = '<div class="hp-panel-header"><span class="hp-panel-title">' + (opts.title || '') + '</span><span class="hp-panel-close">\u2715</span></div>';
     html += '<div class="hp-panel-body">' + (opts.content || '') + '</div>';
@@ -205,13 +221,29 @@
 
     // Drag
     var dragState = null;
+    function clampPosition(left, top) {
+      var pw = panel.offsetWidth, ph = panel.offsetHeight;
+      var vw = window.innerWidth, vh = window.innerHeight;
+      var GRIP = 40;
+      left = Math.max(GRIP - pw, Math.min(vw - GRIP, left));
+      top = Math.max(0, Math.min(vh - GRIP, top));
+      return { left: left, top: top };
+    }
     function onDragMove(e) {
       if (!dragState) return;
-      panel.style.left = (dragState.origLeft + e.clientX - dragState.startX) + 'px';
-      panel.style.top = (dragState.origTop + e.clientY - dragState.startY) + 'px';
+      var raw = clampPosition(
+        dragState.origLeft + e.clientX - dragState.startX,
+        dragState.origTop + e.clientY - dragState.startY
+      );
+      panel.style.left = raw.left + 'px';
+      panel.style.top = raw.top + 'px';
     }
     function onDragEnd() {
-      if (dragState) { dragState = null; panel.classList.remove('dragging'); }
+      if (dragState) {
+        dragState = null;
+        panel.classList.remove('dragging');
+        if (!isDocked) savePanelPos(opts.sizeKey, panel.offsetLeft, panel.offsetTop);
+      }
     }
     panel.addEventListener('mousedown', function (e) {
       if (e.target.closest(dragExclude)) return;
@@ -260,6 +292,7 @@
           try { localStorage.setItem(DOCK_W_KEY, '' + panel.offsetWidth); } catch (_) {}
         } else {
           savePanelSize(opts.sizeKey, panel.offsetWidth, panel.offsetHeight);
+          savePanelPos(opts.sizeKey, panel.offsetLeft, panel.offsetTop);
         }
       }
       for (var ei = 0; ei < edges.length; ei++) {
