@@ -699,7 +699,128 @@ async function main() {
   const pendingContactConfirms = new Map<string, { userId: number; name: string }>();
   const pendingRecallConfirms = new Map<string, { session: string; mid: string }>();
   let sendGrantActive = false;
+  let watchActive = false;
+  let watchConfig: { sessions: string | string[]; mentionsOnly: boolean; keywords: string[] } = {
+    sessions: 'all',
+    mentionsOnly: false,
+    keywords: [],
+  };
+  let remoteEnabled = false;
+  let remoteAgent: AgentProcess | null = null;
+  let remoteAgentSpawning = false;
+  let remoteReplyText = '';
+  const pendingRemoteCmds: Array<Record<string, unknown>> = [];
   let acpStarting = false;
+
+  function startWatchListening() {
+    if (!watchActive) {
+      watchActive = true;
+      const escaped = JSON.stringify(JSON.stringify(watchConfig));
+      client.evaluate(`window.__seatalkWatch && window.__seatalkWatch.start(JSON.parse(${escaped}))`).catch(() => {});
+      log('watch listener started (always-on)');
+    }
+  }
+
+  function remoteLog(msg: string, level: 'info' | 'warn' | 'error' = 'info') {
+    log(`[remote] ${msg}`);
+    bridge.sendToPanel({ type: 'watch_remote_log', text: msg, level, ts: Date.now() }).catch(() => {});
+  }
+
+  async function ensureRemoteAgent() {
+    if (!remoteAgent && !remoteAgentSpawning) {
+      remoteAgentSpawning = true;
+      remoteLog('正在启动远程 Agent...');
+      bridge.sendToPanel({ type: 'watch_remote_status', active: true, status: 'spawning' }).catch(() => {});
+      try {
+        const watchCallbacks = {
+          onTextChunk: (text: string) => { remoteReplyText += text; },
+          onThoughtChunk: () => {},
+          onToolCall: () => {},
+          onModeUpdate: () => {},
+          onUsageUpdate: () => {},
+        };
+        remoteAgent = await spawnAgent({
+          workspacePath: currentWorkspace,
+          callbacks: watchCallbacks,
+          log: (msg: string) => log(`[remote-agent] ${msg}`),
+          sessionMode: 'agent',
+        });
+        remoteAgent.proc.on('exit', (code) => {
+          remoteLog(`Agent 进程退出 (code=${code})`, code === 0 ? 'info' : 'warn');
+          remoteAgent = null;
+        });
+        remoteLog('远程 Agent 就绪 ✓');
+        bridge.sendToPanel({ type: 'watch_remote_status', active: true, status: 'ready' }).catch(() => {});
+        if (pendingRemoteCmds.length > 0) {
+          const queued = pendingRemoteCmds.splice(0);
+          remoteLog(`处理 ${queued.length} 条排队指令...`);
+          processRemoteCmds(queued).catch((e) => remoteLog(`排队指令处理失败: ${(e as Error).message}`, 'error'));
+        }
+      } catch (e) {
+        remoteLog(`Agent 启动失败: ${(e as Error).message}`, 'error');
+        pendingRemoteCmds.length = 0;
+        bridge.sendToPanel({ type: 'watch_remote_status', active: false, status: 'error', error: (e as Error).message }).catch(() => {});
+        throw e;
+      } finally {
+        remoteAgentSpawning = false;
+      }
+    }
+  }
+
+  async function processRemoteCmds(cmds: Array<Record<string, unknown>>) {
+    if (!remoteAgent) return;
+    for (const msg of cmds) {
+      const session = msg.session as string;
+      const mid = msg.mid as string;
+      const msgText = (msg.text || '') as string;
+      if (!session || !msgText) continue;
+      if (msgText.startsWith('Remote Agent')) {
+        log('[remote] skipping own reply echo');
+        continue;
+      }
+
+      remoteLog(`收到指令: "${msgText.substring(0, 80)}"`);
+      bridge.sendToPanel({ type: 'watch_reply_generating', mid, session, sessionName: session, sender: 'self', text: msgText }).catch(() => {});
+
+      try {
+        remoteReplyText = '';
+        remoteLog('Agent 执行中...');
+        const promptText =
+          `你是远程 Cursor 助手。用户通过 SeaTalk 给你发送了指令。\n\n` +
+          `[指令内容]:\n${msgText}\n\n` +
+          `请执行该指令。你拥有完整的工具权限。执行完成后，输出简洁的结果摘要作为回复。`;
+        await remoteAgent.connection.prompt({
+          sessionId: remoteAgent.sessionId,
+          prompt: [{ type: 'text', text: promptText }] as any,
+        });
+        const replyText = remoteReplyText.trim();
+        if (!replyText) {
+          remoteLog('Agent 返回空回复，已跳过', 'warn');
+          continue;
+        }
+        remoteLog(`回复已生成 (${replyText.length} 字)`);
+
+        const time = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        const formattedReply =
+          `**Remote Agent**\n` +
+          `━━━━━━━━━━━━━━\n` +
+          `**指令**: \`${msgText.substring(0, 100)}\`\n\n` +
+          `${replyText}\n\n` +
+          `━━━━━━━━━━━━━━\n` +
+          `*${time} | ${replyText.length} 字*`;
+
+        try {
+          const escapedText = JSON.stringify(formattedReply.substring(0, 500));
+          await client.evaluate(`window.__seatalkWatch && window.__seatalkWatch.addSentText(${escapedText})`);
+        } catch (_) {}
+        await doSend(session, formattedReply, 'markdown', 'watch-self');
+        remoteLog('回复已发送 ✓');
+        bridge.sendToPanel({ type: 'watch_reply_sent', mid, session, replyText }).catch(() => {});
+      } catch (e) {
+        remoteLog(`执行失败: ${(e as Error).message}`, 'error');
+      }
+    }
+  }
 
   async function doSend(session: string, text: string, format: string, label: string, rootMid?: string) {
     try {
@@ -1047,21 +1168,24 @@ async function main() {
           killAgent(agent.proc);
           agent = null;
         }
-
-        if (process.env.SEATALK_LAUNCHER) {
-          log('restart_agent: launcher detected, exiting with code 42 for auto-restart');
-          setTimeout(() => { process.exit(42); }, 500);
-        } else {
-          log('restart_agent: no launcher, spawning new process and exiting');
-          const child = spawnChild(process.execPath, process.argv.slice(1), {
-            cwd: process.cwd(),
-            detached: true,
-            stdio: 'ignore',
-            env: { ...process.env },
-          });
-          child.unref();
-          setTimeout(() => { process.exit(0); }, 500);
+        if (remoteAgent) {
+          remoteAgent.proc.removeAllListeners('exit');
+          killAgent(remoteAgent.proc);
+          remoteAgent = null;
         }
+        remoteEnabled = false;
+
+        log('restart_agent: spawning new process and exiting');
+        const mainScript = path.resolve(__dirname, 'main.ts');
+        const child = spawnChild('npx', ['tsx', mainScript], {
+          cwd: path.resolve(__dirname, '..'),
+          detached: true,
+          stdio: 'ignore',
+          env: { ...process.env },
+          shell: true,
+        });
+        child.unref();
+        setTimeout(() => { process.exit(0); }, 500);
       } else if (data.type === 'update_check') {
         log('update_check requested by user');
         try {
@@ -1265,6 +1389,75 @@ async function main() {
         bridge.sendToPanel({ type: 'recall_result', ok: false, session: '', mid: '', error: 'user cancelled' }).catch(() => {});
         log(`recall_message cancelled by user (${confirmId})`);
 
+      } else if (data.type === 'watch_start') {
+        const cfg = data.config as typeof watchConfig | undefined;
+        if (cfg) {
+          watchConfig = { ...watchConfig, ...cfg };
+        }
+        watchActive = true;
+        const escaped = JSON.stringify(JSON.stringify(watchConfig));
+        try {
+          await client.evaluate(`window.__seatalkWatch && window.__seatalkWatch.start(JSON.parse(${escaped}))`);
+          log(`watch started: ${JSON.stringify(watchConfig)}`);
+          bridge.sendToPanel({ type: 'watch_status', active: true, config: watchConfig }).catch(() => {});
+        } catch (e) {
+          log(`watch start error: ${(e as Error).message}`);
+          watchActive = false;
+          bridge.sendToPanel({ type: 'watch_status', active: false, error: (e as Error).message }).catch(() => {});
+        }
+
+      } else if (data.type === 'watch_stop') {
+        watchActive = false;
+        try {
+          await client.evaluate('window.__seatalkWatch && window.__seatalkWatch.stop()');
+        } catch (_) { /* ignore */ }
+        log('watch stopped');
+        bridge.sendToPanel({ type: 'watch_status', active: false }).catch(() => {});
+
+      } else if (data.type === 'watch_config') {
+        const cfg = data.config as Partial<typeof watchConfig>;
+        if (cfg) watchConfig = { ...watchConfig, ...cfg };
+        if (watchActive) {
+          const escaped = JSON.stringify(JSON.stringify(watchConfig));
+          try {
+            await client.evaluate(`window.__seatalkWatch && window.__seatalkWatch.start(JSON.parse(${escaped}))`);
+          } catch (_) { /* ignore */ }
+        }
+        log(`watch config updated: ${JSON.stringify(watchConfig)}`);
+        bridge.sendToPanel({ type: 'watch_status', active: watchActive, config: watchConfig }).catch(() => {});
+
+      } else if (data.type === 'watch_new_messages') {
+        const messages = data.messages as Array<Record<string, unknown>>;
+        if (messages && messages.length > 0) {
+          log(`watch: ${messages.length} new message(s)`);
+          bridge.sendToPanel({ type: 'watch_messages', messages }).catch(() => {});
+
+          if (remoteEnabled) {
+            const selfCmds = messages.filter((m) => !!m.isSelfCommand);
+            if (selfCmds.length > 0) {
+              if (!remoteAgent && remoteAgentSpawning) {
+                remoteLog(`${selfCmds.length} 条指令已排队 (Agent 启动中)`);
+                pendingRemoteCmds.push(...selfCmds);
+              } else if (remoteAgent) {
+                await processRemoteCmds(selfCmds);
+              } else {
+                remoteLog(`${selfCmds.length} 条指令被忽略 (Agent 未就绪)`, 'warn');
+              }
+            }
+          }
+        }
+
+      } else if (data.type === 'watch_remote_on') {
+        remoteEnabled = true;
+        remoteLog('远程控制已开启');
+        try { await ensureRemoteAgent(); } catch (_) { remoteEnabled = false; return; }
+        bridge.sendToPanel({ type: 'watch_remote_status', active: true, status: 'ready' }).catch(() => {});
+
+      } else if (data.type === 'watch_remote_off') {
+        remoteEnabled = false;
+        remoteLog('远程控制已关闭');
+        bridge.sendToPanel({ type: 'watch_remote_status', active: false }).catch(() => {});
+
       }
     });
   }
@@ -1280,6 +1473,8 @@ async function main() {
     await client.evaluate(readScript('sidebar-app.js'));
     log('injecting seatalk-send...');
     await client.evaluate(readScript('seatalk-send.js'));
+    log('injecting seatalk-watch...');
+    await client.evaluate(readScript('seatalk-watch.js'));
     log('injection complete!');
     await new Promise((r) => setTimeout(r, 200));
   }
@@ -1305,6 +1500,9 @@ async function main() {
         })
         .catch(() => {});
     }
+    // Always start watch listener on injection
+    startWatchListening();
+    bridge.sendToPanel({ type: 'watch_remote_status', active: remoteEnabled, status: remoteAgent ? 'ready' : 'off' }).catch(() => {});
   }
 
   let injecting = false;

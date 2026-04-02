@@ -78,6 +78,7 @@ export interface AcpCallbacks {
 
 class SeaTalkAcpClient implements acp.Client {
   private cb: AcpCallbacks;
+  permissionFilter: ((title: string) => boolean) | null = null;
 
   constructor(cb: AcpCallbacks) {
     this.cb = cb;
@@ -90,13 +91,25 @@ class SeaTalkAcpClient implements acp.Client {
   async requestPermission(
     params: acp.RequestPermissionRequest,
   ): Promise<acp.RequestPermissionResponse> {
+    const tc = params.toolCall as Record<string, unknown> | undefined;
+    const tcId = (tc?.toolCallId as string) ?? '';
+    const tcTitle = (tc?.title as string) ?? 'unknown';
+
+    // If a permission filter is set, check if this tool is allowed
+    if (this.permissionFilter && !this.permissionFilter(tcTitle)) {
+      const rejectOpt = params.options.find(
+        (o) => o.kind === 'reject_once' || o.kind === 'reject_always',
+      );
+      const rejectId = rejectOpt?.optionId ?? 'reject';
+      console.log(`[acp] REJECTED by filter: ${tcTitle} → ${rejectId}`);
+      this.cb.onToolCall?.({ toolCallId: tcId, title: tcTitle, kind: '', status: 'rejected', output: '权限被拒绝: 该工具不在 Watch Agent 白名单中' });
+      return { outcome: { outcome: 'selected', optionId: rejectId } };
+    }
+
     const allowOpt = params.options.find(
       (o) => o.kind === 'allow_once' || o.kind === 'allow_always',
     );
     const optionId = allowOpt?.optionId ?? params.options[0]?.optionId ?? 'allow';
-    const tc = params.toolCall as Record<string, unknown> | undefined;
-    const tcId = (tc?.toolCallId as string) ?? '';
-    const tcTitle = (tc?.title as string) ?? 'unknown';
     console.log(`[acp] auto-allowed: ${tcTitle} → ${optionId}`);
 
     // Extract input from tc.content (ACP puts the command/input in content array)
@@ -318,6 +331,7 @@ export async function spawnAgent(opts: {
   log: (msg: string) => void;
   modelId?: string;
   previousSessionId?: string;
+  sessionMode?: 'ask' | 'agent';
 }): Promise<AgentProcess> {
   const { workspacePath, callbacks, log, modelId } = opts;
 
@@ -425,8 +439,10 @@ export async function spawnAgent(opts: {
     log(`session created: ${sessionId}`);
   }
 
+  const modeId = opts.sessionMode || 'ask';
   try {
-    await race(connection.setSessionMode({ sessionId, modeId: 'ask' }));
+    await race(connection.setSessionMode({ sessionId, modeId }));
+    log(`session mode set: ${modeId}`);
   } catch {
     log('set_mode not supported, skipping');
   }

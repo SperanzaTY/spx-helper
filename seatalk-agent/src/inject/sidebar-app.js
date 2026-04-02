@@ -71,6 +71,19 @@
   var cachedUpdate = { available: false, local: '', remote: '', behind: 0, changelog: '' };
   var verBadgeEl = null, updateOverlay = null;
 
+  // Remote state
+  var _watchActive = false;
+  var _watchMsgCount = 0;
+  var _watchMessages = [];
+  var _watchRemoteEnabled = false;
+  var _remotePopoverEl = null;
+  var _remoteToggleEl = null;
+  var _remoteStatusEl = null;
+  var _remoteLogEl = null;
+  var _remoteLogs = [];
+  var MAX_REMOTE_LOGS = 50;
+  var MAX_WATCH_MESSAGES = 200;
+
   // ── Persistence ──
   function loadConvs() { try { var r = localStorage.getItem(STORE_KEY); return r ? JSON.parse(r) : []; } catch (_) { return []; } }
   function saveConvs(c) { try { localStorage.setItem(STORE_KEY, JSON.stringify(c.slice(-50))); } catch (_) {} }
@@ -1119,6 +1132,22 @@
         _sendGrantActive = !!d.active;
         _grantToggleVisible = true;
         updateGrantToggle();
+        updateWatchUI();
+      } else if (d.type === 'watch_messages') {
+        addWatchMessages(d.messages);
+      } else if (d.type === 'watch_status') {
+        _watchActive = !!d.active;
+        updateWatchUI();
+      } else if (d.type === 'watch_remote_status') {
+        _watchRemoteEnabled = !!d.active;
+        updateRemoteToggle();
+        updateWatchSidebarDot();
+      } else if (d.type === 'watch_remote_log') {
+        addRemoteLog(d);
+      } else if (d.type === 'watch_reply_generating') {
+        markWatchMsg(d.mid, 'generating', '执行中...');
+      } else if (d.type === 'watch_reply_sent') {
+        markWatchMsg(d.mid, 'sent', d.replyText);
       }
     } catch (err) { console.error('[cursor-acp] __agentReceive error:', err); }
   };
@@ -1412,10 +1441,210 @@
   }
 
   var modeTabEls = [];
+
   function updateModeTabs() {
     modeTabEls.forEach(function (tab) {
       tab.classList.toggle('active', tab.dataset.mode === currentMode);
     });
+  }
+
+  function formatElapsed(ms) {
+    var s = Math.floor(ms / 1000);
+    var h = Math.floor(s / 3600); s %= 3600;
+    var m = Math.floor(s / 60); s %= 60;
+    return (h ? h + ':' : '') + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+  }
+
+  // ── Remote popover ──
+
+  function toggleRemotePopover() {
+    if (_remotePopoverEl) {
+      closeRemotePopover();
+    } else {
+      showRemotePopover();
+    }
+  }
+
+  function showRemotePopover() {
+    if (_remotePopoverEl) return;
+
+    var btn = document.getElementById('cursor-watch-sidebar-btn');
+    if (!btn) return;
+    var rect = btn.getBoundingClientRect();
+
+    var pop = document.createElement('div');
+    pop.className = 'cursor-remote-popover';
+    pop.id = 'cursor-remote-popover';
+    pop.style.visibility = 'hidden';
+    pop.style.left = (rect.right + 8) + 'px';
+    pop.style.top = '0px';
+    pop.innerHTML =
+      '<div class="crp-header">' +
+        '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" style="vertical-align:-2px;margin-right:5px"><path d="M12 22C6.5 22 2 17.5 2 12S6.5 2 12 2"/><line x1="22" y1="2" x2="13" y2="11"/><path d="M18 2h4v4"/><circle cx="12" cy="12" r="3"/></svg>' +
+        'Remote' +
+      '</div>' +
+      '<div class="crp-row">' +
+        '<span class="crp-toggle" title="开启后，发给自己的消息将作为远程指令执行"><span class="gt-track"><span class="gt-knob"></span></span><span class="gt-label">远程控制</span></span>' +
+      '</div>' +
+      '<div class="crp-status"></div>' +
+      '<div class="crp-logs"></div>';
+
+    document.body.appendChild(pop);
+    _remotePopoverEl = pop;
+
+    _remoteToggleEl = pop.querySelector('.crp-toggle');
+    _remoteStatusEl = pop.querySelector('.crp-status');
+    _remoteLogEl = pop.querySelector('.crp-logs');
+    renderRemoteLogs();
+    if (_remoteToggleEl) {
+      if (_watchRemoteEnabled) _remoteToggleEl.classList.add('on');
+      _remoteToggleEl.addEventListener('click', function () {
+        if (_watchRemoteEnabled) {
+          if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: 'watch_remote_off' }));
+        } else {
+          if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: 'watch_remote_on' }));
+        }
+      });
+    }
+    updateRemoteStatus();
+
+    var popH = pop.offsetHeight;
+    var vh = window.innerHeight;
+    var margin = 8;
+    var topPos = rect.top - 10;
+    if (topPos + popH > vh - margin) {
+      topPos = rect.bottom + 10 - popH;
+    }
+    topPos = Math.max(margin, Math.min(topPos, vh - popH - margin));
+    pop.style.top = topPos + 'px';
+    pop.style.visibility = '';
+
+    btn.classList.add('active');
+
+    requestAnimationFrame(function () { pop.classList.add('show'); });
+
+    setTimeout(function () {
+      document.addEventListener('click', _remoteOutsideClick, true);
+    }, 0);
+  }
+
+  function closeRemotePopover() {
+    if (_remotePopoverEl) {
+      _remotePopoverEl.remove();
+      _remotePopoverEl = null;
+      _remoteToggleEl = null;
+      _remoteStatusEl = null;
+      _remoteLogEl = null;
+    }
+    document.removeEventListener('click', _remoteOutsideClick, true);
+    var btn = document.getElementById('cursor-watch-sidebar-btn');
+    if (btn) btn.classList.remove('active');
+  }
+
+  function _remoteOutsideClick(e) {
+    if (_remotePopoverEl && !_remotePopoverEl.contains(e.target)) {
+      var btn = document.getElementById('cursor-watch-sidebar-btn');
+      if (btn && btn.contains(e.target)) return;
+      closeRemotePopover();
+    }
+  }
+
+  function updateRemoteStatus() {
+    if (!_remoteStatusEl) return;
+    if (_watchRemoteEnabled) {
+      _remoteStatusEl.innerHTML = '<span class="crp-dot on"></span>等待远程指令...';
+    } else {
+      _remoteStatusEl.innerHTML = '<span class="crp-dot"></span>未启动';
+    }
+  }
+
+  function addRemoteLog(entry) {
+    _remoteLogs.push({
+      text: entry.text || '',
+      level: entry.level || 'info',
+      ts: entry.ts || Date.now()
+    });
+    if (_remoteLogs.length > MAX_REMOTE_LOGS) _remoteLogs = _remoteLogs.slice(-MAX_REMOTE_LOGS);
+    renderRemoteLogs();
+  }
+
+  function renderRemoteLogs() {
+    if (!_remoteLogEl) return;
+    if (_remoteLogs.length === 0) {
+      _remoteLogEl.innerHTML = '<div class="crp-log-empty">暂无日志</div>';
+      return;
+    }
+    var html = '';
+    for (var i = 0; i < _remoteLogs.length; i++) {
+      var l = _remoteLogs[i];
+      var t = new Date(l.ts);
+      var time = ('0' + t.getHours()).slice(-2) + ':' + ('0' + t.getMinutes()).slice(-2) + ':' + ('0' + t.getSeconds()).slice(-2);
+      var cls = 'crp-log-line' + (l.level === 'error' ? ' error' : l.level === 'warn' ? ' warn' : '');
+      html += '<div class="' + cls + '"><span class="crp-log-time">' + time + '</span>' + escapeHtml(l.text) + '</div>';
+    }
+    _remoteLogEl.innerHTML = html;
+    _remoteLogEl.scrollTop = _remoteLogEl.scrollHeight;
+    repositionPopover();
+  }
+
+  function repositionPopover() {
+    if (!_remotePopoverEl) return;
+    var btn = document.getElementById('cursor-watch-sidebar-btn');
+    if (!btn) return;
+    var rect = btn.getBoundingClientRect();
+    var popH = _remotePopoverEl.offsetHeight;
+    var vh = window.innerHeight;
+    var margin = 8;
+    var topPos = rect.top - 10;
+    if (topPos + popH > vh - margin) {
+      topPos = rect.bottom + 10 - popH;
+    }
+    topPos = Math.max(margin, Math.min(topPos, vh - popH - margin));
+    _remotePopoverEl.style.top = topPos + 'px';
+  }
+
+  function escapeHtml(s) {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  function updateWatchUI() {
+    updateWatchSidebarDot();
+  }
+
+  function updateWatchSidebarDot() {
+    var wBtn = document.getElementById('cursor-watch-sidebar-btn');
+    if (!wBtn) return;
+    var dot = wBtn.querySelector('.watch-status-dot');
+    if (dot) {
+      dot.style.background = _watchRemoteEnabled ? '#4ec9b0' : '#555';
+      dot.style.boxShadow = _watchRemoteEnabled ? '0 0 4px rgba(78,201,176,0.6)' : 'none';
+    }
+  }
+
+  function addWatchMessages(msgs) {
+    if (!msgs || !msgs.length) return;
+    for (var i = 0; i < msgs.length; i++) {
+      _watchMessages.unshift(msgs[i]);
+    }
+    _watchMsgCount += msgs.length;
+    if (_watchMessages.length > MAX_WATCH_MESSAGES) _watchMessages = _watchMessages.slice(0, MAX_WATCH_MESSAGES);
+  }
+
+  function markWatchMsg(mid, status, replyText) {
+    for (var i = 0; i < _watchMessages.length; i++) {
+      if (_watchMessages[i].mid === mid) {
+        _watchMessages[i]._replyStatus = status;
+        if (replyText) _watchMessages[i]._replyText = replyText;
+        break;
+      }
+    }
+  }
+
+  function updateRemoteToggle() {
+    if (!_remoteToggleEl) return;
+    if (_watchRemoteEnabled) _remoteToggleEl.classList.add('on');
+    else _remoteToggleEl.classList.remove('on');
+    updateRemoteStatus();
   }
 
   function wsDisplayName(p) {
@@ -1764,7 +1993,7 @@
     var inputArea = document.createElement('div');
     inputArea.className = 'cursor-input-area';
     inputArea.innerHTML =
-      '<div class="cursor-input-meta"><span class="cursor-model-badge"><span class="dot"></span>Model</span><div class="cursor-model-dd"></div><span class="cursor-grant-toggle" title="发送免确认"><span class="gt-track"><span class="gt-knob"></span></span><span class="gt-label">免确认</span></span></div>' +
+      '<div class="cursor-input-meta"><span class="cursor-model-badge"><span class="dot"></span>Model</span><div class="cursor-model-dd"></div><span class="cursor-grant-toggle" title="开启后 AI 可直接发送消息，无需逐条确认"><span class="gt-track"><span class="gt-knob"></span></span><span class="gt-label">自动发送</span></span></div>' +
       '<div class="cursor-img-preview"></div>' +
       '<div class="cursor-input-wrap">' +
       '<textarea class="cursor-input" placeholder="Ask anything..." rows="1"></textarea>' +
@@ -1976,16 +2205,40 @@
   if (oldBtn) oldBtn.remove();
   UI.createSidebarButton({
     id: 'cursor-sidebar-btn',
-    icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="22" height="22"><path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2Z"/></svg>',
+    icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" width="19" height="19"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="7" stroke-opacity="0.4"/><line x1="12" y1="6" x2="12" y2="15"/><path d="M9 9l3-1 3 1"/><circle cx="12" cy="17" r="1" fill="currentColor" stroke="none"/></svg>',
     onClick: function () { window.__agentToggle(); },
     tooltip: function () {
       var st = cachedStatus.connected
         ? '<span style="color:#4ec9b0">● 已连接</span>'
         : '<span style="color:#d44">○ 断开连接</span>';
-      return '<b><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="vertical-align:-1px;margin-right:2px"><path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5Z"/></svg>Cursor</b><div style="font-size:10px;color:#858585;margin-top:2px">' + st + '</div>';
+      return '<b>Cursor</b><div style="font-size:10px;color:#858585;margin-top:2px">' + st + '</div>';
     }
   });
   updateSidebarBtnStatus();
+
+  // ── Watch sidebar button ──
+  var oldWatchBtn = document.getElementById('cursor-watch-sidebar-btn');
+  if (oldWatchBtn) oldWatchBtn.remove();
+  UI.createSidebarButton({
+    id: 'cursor-watch-sidebar-btn',
+    icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="19" height="19"><path d="M12 22C6.5 22 2 17.5 2 12S6.5 2 12 2"/><line x1="22" y1="2" x2="13" y2="11"/><path d="M18 2h4v4"/><circle cx="12" cy="12" r="3"/><circle class="watch-status-dot" cx="20" cy="6" r="2.5" fill="#555" stroke="none"/></svg>',
+    onClick: function () { toggleRemotePopover(); },
+    tooltip: function () {
+      var st = _watchRemoteEnabled
+        ? '<span style="color:#4ec9b0">● 远程控制 (' + _watchMsgCount + ' 条)</span>'
+        : '<span style="color:#888">○ 未启动</span>';
+      return '<b>Remote</b><div style="font-size:10px;color:#858585;margin-top:2px">' + st + '</div>';
+    }
+  });
+  updateWatchSidebarDot();
+
+  window.__watchToggle = function (open) {
+    if (open === false || (open === undefined && _remotePopoverEl)) {
+      closeRemotePopover();
+    } else if (!_remotePopoverEl) {
+      showRemotePopover();
+    }
+  };
 
   document.addEventListener('keydown', function (e) { if (e.ctrlKey && e.shiftKey && e.key === 'A') { e.preventDefault(); window.__agentToggle(); } });
 

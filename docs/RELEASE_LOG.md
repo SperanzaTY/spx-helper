@@ -42,6 +42,62 @@
 
 ---
 
+## v3.3.0 — 2026-03-02 — `56a1e8e` feat: Remote 远程控制功能 + 日志面板 + Markdown 卡片回复
+
+**提交者**: @tianyi.liang
+**Commit Type**: feat
+**修改模块**: SeaTalk Agent
+
+### 变更说明
+
+#### Remote 远程控制
+- 新增 `seatalk-watch.js`：Redux `store.subscribe` 消息监听器，始终监听 SeaTalk 消息变更，识别 Saved Messages（自发消息）作为远程指令
+- `main.ts`：新增 `remoteAgent` 独立 Agent 进程（Agent 模式），接收自发消息并通过 ACP 执行指令
+- 指令排队机制：Agent 启动期间收到的指令自动缓冲（`pendingRemoteCmds`），就绪后批量处理，确保不丢失消息
+- `sidebar-app.js`：左侧边栏 Remote 按钮（Caladbolg 图标）+ 极简 popover 面板，包含远程控制开关和状态显示
+
+#### Remote 日志面板
+- 后端 `remoteLog()` 函数：在关键节点发送 `watch_remote_log` 事件到前端
+- 前端 popover 内嵌实时日志滚动区域，展示远程控制生命周期：开启/关闭、Agent 启动/就绪、指令接收/执行/回复/失败
+- 日志区域支持 info/warn/error 颜色区分，等宽字体，自动滚底，最多保留 50 条
+
+#### Markdown 卡片回复
+- Remote Agent 回复改为 Markdown 格式，结构化展示：粗体标题 **Remote Agent**、分割线、指令回显（code 格式）、正文、时间戳和字数元信息
+- 前后端双层防循环：前端 `seatalk-watch.js` 跳过 "Remote Agent" 前缀消息 + 后端 `processRemoteCmds` 跳过自身回复
+
+#### UI 优化
+- 侧边栏按钮对齐原生 SeaTalk 图标（32×32, 20px 间距）
+- "免确认" 按钮更名为 "自动发送"，语义更清晰
+- Popover 智能定位：自动向上/向下展开，不超出视口
+
+#### Agent 重启修复
+- `restart_agent` 改为 `npx tsx` 自启动新进程，不再依赖 `launch.sh`
+- 重启时同时清理 `remoteAgent` 进程，防止孤儿进程泄漏
+
+#### ACP 增强
+- `spawnAgent` 新增 `sessionMode` 参数，支持 `ask`/`agent` 两种模式
+- 新增 `permissionFilter` 工具权限过滤器，Remote Agent 可限制可用工具范围
+
+### 测试情况
+
+| 测试项 | 结果 | 备注 |
+|--------|------|------|
+| Chrome 扩展加载正常 | N/A | 本次未修改 Chrome 扩展功能代码 |
+| MCP 工具连接正常 | N/A | |
+| SeaTalk Agent 启动+注入正常 | ✅ | CDP 注入 + 所有脚本加载正常 |
+| SeaTalk Agent 重启后 UI 恢复 | ✅ | 重启后面板和 Remote 状态恢复 |
+| 修改的功能正常工作 | ✅ | Remote 开关/日志/指令执行/回复均正常 |
+| 已有功能未被破坏 | ✅ | 主面板对话、发送确认、工具调用均正常 |
+| 控制台无新增错误 | ✅ | |
+
+### 特别注意
+- Remote 功能需要在 SeaTalk Saved Messages（自己和自己的对话）中发消息才能触发
+- Remote Agent 使用独立的 ACP Agent 进程（Agent 模式），与主面板 Agent 互不干扰
+- Markdown 格式回复在 SeaTalk 中显示为结构化卡片样式，方便在手机端区分用户指令和 Agent 回复
+- 其他团队成员需要重启 Agent 才能使用 Remote 功能
+
+---
+
 ## v3.2.8 — 2026-04-02 — fix: restart_agent 改为全进程重启
 
 **提交者**: @tianyi.liang
