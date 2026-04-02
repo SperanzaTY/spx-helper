@@ -541,13 +541,22 @@
       }
       if (tc.result) {
         var resultDisplay = tc.result;
+        var isMinimalResult = false;
         try {
           var parsed = JSON.parse(tc.result);
+          // ACP CLI returns only {success:true} for MCP tools — detect and show friendly message
+          if (parsed && typeof parsed === 'object' && parsed.success === true && Object.keys(parsed).length === 1) {
+            isMinimalResult = true;
+          }
           resultDisplay = parsed.result || JSON.stringify(parsed, null, 2);
         } catch (_) {}
-        resultDisplay = streaming.maskSecrets(resultDisplay);
-        if (resultDisplay.length > truncLen) resultDisplay = resultDisplay.substring(0, truncLen) + '\n... (' + (resultDisplay.length - truncLen) + ' chars truncated)';
-        body += '<div class="' + prefix + '-tool-call-section"><b>Output:</b><pre style="margin:4px 0 0;white-space:pre-wrap;word-break:break-all;font-size:11px;color:var(--cp-tool-output,#b5cea8)">' + escapeHtml(resultDisplay) + '</pre></div>';
+        if (isMinimalResult) {
+          body += '<div class="' + prefix + '-tool-call-section" style="opacity:0.6;font-style:italic"><span style="color:var(--cp-tool-output,#b5cea8)">OK</span> — 完整结果见下方回复</div>';
+        } else {
+          resultDisplay = streaming.maskSecrets(resultDisplay);
+          if (resultDisplay.length > truncLen) resultDisplay = resultDisplay.substring(0, truncLen) + '\n... (' + (resultDisplay.length - truncLen) + ' chars truncated)';
+          body += '<div class="' + prefix + '-tool-call-section"><b>Output:</b><pre style="margin:4px 0 0;white-space:pre-wrap;word-break:break-all;font-size:11px;color:var(--cp-tool-output,#b5cea8)">' + escapeHtml(resultDisplay) + '</pre></div>';
+        }
       }
       if (!body) {
         return '<div class="' + prefix + '-tool-call-label">' + label + '</div>';

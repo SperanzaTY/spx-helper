@@ -37,6 +37,35 @@ echo ""
 
 HAS_ERRORS=0
 
+# 0. 检查远程是否有新提交（防止覆盖他人代码）
+echo "🔍 正在检查远程仓库..."
+# 尝试 fetch 所有 remote 的 release 分支，静默失败不阻塞
+for REMOTE in $(git remote); do
+  git fetch "$REMOTE" release --quiet 2>/dev/null || true
+done
+
+# 检查本地是否落后于任一 remote
+for REMOTE in $(git remote); do
+  REMOTE_REF="$REMOTE/release"
+  if git rev-parse --verify "$REMOTE_REF" >/dev/null 2>&1; then
+    BEHIND=$(git rev-list --count HEAD.."$REMOTE_REF" 2>/dev/null || echo "0")
+    if [ "$BEHIND" -gt 0 ]; then
+      REMOTE_VER=$(git show "$REMOTE_REF:chrome-extension/manifest.json" 2>/dev/null | grep '"version"' | head -1 | sed 's/.*"\([0-9.]*\)".*/\1/' || echo "?")
+      echo "❌ 本地落后于 ${REMOTE}/release ${BEHIND} 个提交！(远程版本: v${REMOTE_VER})"
+      echo "   有人在你开发期间推送了新版本。"
+      echo ""
+      echo "   请先执行："
+      echo "     git pull --rebase ${REMOTE} release"
+      echo "   解决可能的冲突后再推送。"
+      echo ""
+      HAS_ERRORS=1
+    fi
+  fi
+done
+if [ "$HAS_ERRORS" -eq 0 ]; then
+  echo "✅ 远程仓库无新提交"
+fi
+
 # 1. 检查 RELEASE_LOG 在最新一次提交中是否被修改
 if [ -f "$RELEASE_LOG" ]; then
   LOG_CHANGED=$(git diff-tree --no-commit-id --name-only -r HEAD | grep -c "^docs/RELEASE_LOG.md$" || true)

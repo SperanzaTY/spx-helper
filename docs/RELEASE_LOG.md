@@ -42,6 +42,36 @@
 
 ---
 
+## v3.1.5 — 2026-04-02 — chore: pre-push 远程同步检查 + MCP 工具输出优化
+
+**提交者**: @tianyi.liang
+**Commit Type**: chore
+**修改模块**: SeaTalk Agent / Git Hooks / 规则
+
+### 变更说明
+- pre-push hook 新增远程同步检查：push 前自动 fetch 并检查是否落后于远程，防止覆盖他人提交
+- git-workflow 规则同步更新：Agent 自动检查项增加远程同步步骤
+- MCP 工具结果优化：尝试从 content 数组提取完整结果；检测到 `{success:true}` 时显示友好提示"OK — 完整结果见下方回复"
+- 清理调试日志
+
+### 测试情况
+
+| 测试项 | 结果 | 备注 |
+|--------|------|------|
+| Chrome 扩展加载正常 | N/A | 未修改 |
+| MCP 工具连接正常 | N/A | 未修改 MCP server |
+| SeaTalk Agent 启动+注入正常 | ✅ | |
+| SeaTalk Agent 重启后 UI 恢复 | ✅ | |
+| 修改的功能正常工作 | ✅ | MCP 工具提示、hook 检查均生效 |
+| 已有功能未被破坏 | ✅ | |
+| 控制台无新增错误 | ✅ | |
+
+### 特别注意
+- pre-push hook 的远程同步检查需要网络连接，fetch 失败会静默跳过不阻塞
+- ACP CLI 对 MCP 工具只返回 `{success:true}`，完整查询结果由模型在回复文本中呈现，属于上游限制
+
+---
+
 ## v3.1.5 — 2026-04-02 — style: UI全面SVG化 + 工具展示优化
 
 **提交者**: @tianyi.liang

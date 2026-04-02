@@ -171,6 +171,21 @@ class SeaTalkAcpClient implements acp.Client {
         } else if (typeof ro === 'string' && ro) {
           outputStr = ro;
         }
+        // MCP tools often return results in content array rather than rawOutput
+        if (!outputStr && update.content) {
+          const contentArr = update.content as Array<Record<string, unknown>>;
+          if (Array.isArray(contentArr) && contentArr.length > 0) {
+            const texts: string[] = [];
+            for (const c of contentArr) {
+              if (c?.type === 'text' && typeof c.text === 'string') {
+                texts.push(c.text);
+              } else if (c?.content && typeof (c.content as Record<string, unknown>).text === 'string') {
+                texts.push((c.content as Record<string, unknown>).text as string);
+              }
+            }
+            if (texts.length > 0) outputStr = texts.join('\n');
+          }
+        }
         this.cb.onToolCall?.({
           toolCallId: (update.toolCallId as string) ?? '',
           title: (update.title as string) ?? '',
