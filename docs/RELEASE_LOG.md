@@ -42,6 +42,33 @@
 
 ---
 
+## v3.2.3 — 2026-04-02 — fix: 修复孤儿进程泄漏导致内存持续上涨
+
+**提交者**: @tianyi.liang
+**Commit Type**: fix
+**修改模块**: SeaTalk Agent
+
+### 变更说明
+- 新增 `getMyFamily()` 函数，构建完整的进程族谱（祖先链 + 子孙树），避免清理逻辑误杀自身进程链
+- 新增 `killProcessTree()` 函数，递归杀死指定进程的完整子进程树（而非单个 PID）
+- 新增 `killAllStaleAgentProcesses()` 函数，启动时全量扫描残留的 `npm exec tsx` / `tsx cli` 进程
+- 修复 `killStaleCdpClients()` 只杀单个进程的问题，改为杀整棵进程树
+- 修复 `killOrphanAgentProcesses()` 不排除自身祖先链的问题
+- `cleanupAndExit()` 增加子进程树清理，`process.on('exit')` 使用预缓存的 PID 列表避免在退出时执行 `execSync`
+- `update_apply` 成功后先杀 ACP agent 再退出，防止旧 ACP 进程残留
+- `launch.sh` / `install.sh` 模板增加 `trap cleanup EXIT INT TERM`，使用 `pkill -P $$` 杀所有子进程
+- 收窄进程匹配范围，加入 `seatalk-agent` 路径特征，避免误杀其他项目进程
+
+### 测试清单
+
+| 测试项 | 状态 | 备注 |
+|--------|------|------|
+| Agent 正常启动（不误杀自身） | ✅ | |
+| SIGTERM 后全部子进程清理干净 | ✅ | |
+| 无残留孤儿进程 | ✅ | |
+
+---
+
 ## v3.2.2 — 2026-03-02 — fix: Agent 更新后自动重启（前后端完整重启）
 
 **提交者**: @tianyi.liang

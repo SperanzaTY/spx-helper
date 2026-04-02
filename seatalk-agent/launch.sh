@@ -5,9 +5,12 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CDP_PORT=${CDP_PORT:-19222}
 
 cleanup() {
-  echo "[launch] shutting down..."
+  echo "[launch] shutting down, killing child processes..."
+  pkill -P $$ 2>/dev/null
+  sleep 0.3
+  pkill -9 -P $$ 2>/dev/null
 }
-trap cleanup EXIT
+trap cleanup EXIT INT TERM
 
 export SEATALK_LAUNCHER=1
 

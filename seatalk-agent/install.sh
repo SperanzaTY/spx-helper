@@ -76,6 +76,14 @@ NODE_DIR="__NODE_DIR__"
 export PATH="$NODE_DIR:$PATH"
 export SEATALK_LAUNCHER=1
 
+cleanup() {
+  echo "[$(date)] shutting down, killing child processes..." >> "$LOG_DIR/agent.log"
+  pkill -P $$ 2>/dev/null
+  sleep 0.3
+  pkill -9 -P $$ 2>/dev/null
+}
+trap cleanup EXIT INT TERM
+
 # Launch SeaTalk with CDP if not already running with it
 if ! curl -s -o /dev/null -w "" http://localhost:$CDP_PORT/json 2>/dev/null; then
   pkill -x SeaTalk 2>/dev/null || true
@@ -91,8 +99,13 @@ for i in $(seq 1 30); do
   sleep 1
 done
 
-# Kill any existing agent process
-pkill -f "tsx src/main.ts" 2>/dev/null || true
+# Kill any existing agent process (full process tree, scoped to our project)
+for pid in $(pgrep -f "tsx.*seatalk-agent.*main\.ts" 2>/dev/null || true); do
+  pkill -P "$pid" 2>/dev/null || true
+  kill "$pid" 2>/dev/null || true
+done
+pgrep -f "npm exec tsx.*seatalk-agent.*main\.ts" | xargs kill 2>/dev/null || true
+pkill -f "agent.*--approve-mcps.*acp" 2>/dev/null || true
 sleep 1
 
 # Start agent

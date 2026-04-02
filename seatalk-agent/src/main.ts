@@ -153,17 +153,93 @@ function log(...args: unknown[]) {
   if (logBuffer.length > LOG_BUFFER_SIZE) logBuffer.shift();
 }
 
+function parseProcessTable(): { childrenMap: Map<number, number[]>; parentMap: Map<number, number> } {
+  const childrenMap = new Map<number, number[]>();
+  const parentMap = new Map<number, number>();
+  try {
+    const output = execSync(
+      `ps -eo pid,ppid 2>/dev/null || true`,
+      { encoding: 'utf-8' },
+    );
+    for (const line of output.split('\n').slice(1)) {
+      const m = line.trim().match(/^(\d+)\s+(\d+)/);
+      if (m) {
+        const pid = parseInt(m[1], 10);
+        const ppid = parseInt(m[2], 10);
+        parentMap.set(pid, ppid);
+        if (!childrenMap.has(ppid)) childrenMap.set(ppid, []);
+        childrenMap.get(ppid)!.push(pid);
+      }
+    }
+  } catch { /* ps unavailable */ }
+  return { childrenMap, parentMap };
+}
+
+function getProcessTree(): number[] {
+  const myPid = process.pid;
+  const tree: number[] = [];
+  const { childrenMap } = parseProcessTable();
+  const queue = [myPid];
+  while (queue.length) {
+    const p = queue.shift()!;
+    const kids = childrenMap.get(p) || [];
+    for (const k of kids) {
+      tree.push(k);
+      queue.push(k);
+    }
+  }
+  return tree;
+}
+
+function getMyFamily(): Set<number> {
+  const myPid = process.pid;
+  const family = new Set<number>([myPid]);
+  const { childrenMap, parentMap } = parseProcessTable();
+  let cur = myPid;
+  while (parentMap.has(cur) && parentMap.get(cur)! > 1) {
+    cur = parentMap.get(cur)!;
+    family.add(cur);
+  }
+  const queue = [myPid];
+  while (queue.length) {
+    const p = queue.shift()!;
+    for (const kid of (childrenMap.get(p) || [])) {
+      family.add(kid);
+      queue.push(kid);
+    }
+  }
+  return family;
+}
+
+function killProcessTree(rootPid: number, signal: NodeJS.Signals = 'SIGTERM') {
+  try {
+    const { childrenMap } = parseProcessTable();
+    const toKill: number[] = [];
+    const queue = [rootPid];
+    while (queue.length) {
+      const p = queue.shift()!;
+      toKill.push(p);
+      for (const kid of (childrenMap.get(p) || [])) queue.push(kid);
+    }
+    for (const pid of toKill.reverse()) {
+      try { process.kill(pid, signal); } catch { /* already gone */ }
+    }
+  } catch {
+    try { process.kill(rootPid, signal); } catch { /* already gone */ }
+  }
+}
+
 function killStaleCdpClients() {
   try {
-    const myPid = process.pid;
+    const myFamily = getMyFamily();
     const output = execSync(`lsof -i :${CDP_PORT} -t 2>/dev/null || true`, { encoding: 'utf-8' });
-    const pids = output.split('\n').map((l) => parseInt(l.trim(), 10)).filter((p) => p > 0 && p !== myPid);
+    const pids = output.split('\n').map((l) => parseInt(l.trim(), 10)).filter((p) => p > 0 && !myFamily.has(p));
     for (const pid of pids) {
       try {
         const cmdline = execSync(`ps -p ${pid} -o command= 2>/dev/null || true`, { encoding: 'utf-8' }).trim();
-        if (cmdline.includes('tsx') && cmdline.includes('main')) {
-          process.kill(pid, 'SIGTERM');
-          log(`killed stale agent process ${pid}`);
+        if ((cmdline.includes('tsx') && cmdline.includes('main.ts')) || (cmdline.includes('npm exec') && cmdline.includes('main.ts'))) {
+          killProcessTree(pid);
+          log(`killed stale agent process tree (root ${pid})`);
         }
       } catch { /* already gone */ }
     }
@@ -172,9 +248,9 @@ function killStaleCdpClients() {
 
 function killOrphanAgentProcesses() {
   try {
-    const myPid = process.pid;
+    const myFamily = getMyFamily();
     const output = execSync(`pgrep -f 'agent.*--approve-mcps.*acp' 2>/dev/null || true`, { encoding: 'utf-8' });
-    const pids = output.split('\n').map((l) => parseInt(l.trim(), 10)).filter((p) => p > 0 && p !== myPid);
+    const pids = output.split('\n').map((l) => parseInt(l.trim(), 10)).filter((p) => p > 0 && !myFamily.has(p));
     if (pids.length > 0) {
       log(`found ${pids.length} orphan agent process(es), cleaning up...`);
       for (const pid of pids) {
@@ -185,6 +261,31 @@ function killOrphanAgentProcesses() {
       }
     }
   } catch { /* pgrep not available */ }
+}
+
+function killAllStaleAgentProcesses() {
+  try {
+    const myFamily = getMyFamily();
+    const output = execSync(
+      `ps -eo pid,command 2>/dev/null || true`,
+      { encoding: 'utf-8' },
+    );
+    for (const line of output.split('\n').slice(1)) {
+      const m = line.trim().match(/^(\d+)\s+(.*)/);
+      if (!m) continue;
+      const pid = parseInt(m[1], 10);
+      const cmd = m[2];
+      if (myFamily.has(pid)) continue;
+      if (
+        (cmd.includes('npm exec tsx') && cmd.includes('seatalk-agent') && cmd.includes('main.ts')) ||
+        (cmd.includes('tsx/dist/cli.mjs') && cmd.includes('seatalk-agent') && cmd.includes('main.ts'))
+      ) {
+        killProcessTree(pid);
+        log(`killed stale agent process tree (root ${pid}, cmd: ${cmd.slice(0, 80)})`);
+      }
+    }
+  } catch { /* ps unavailable */ }
+  killOrphanAgentProcesses();
 }
 
 function readScript(name: string): string {
@@ -279,7 +380,7 @@ function ensureSeaTalkRunning() {
 
 async function main() {
   killStaleCdpClients();
-  killOrphanAgentProcesses();
+  killAllStaleAgentProcesses();
   ensureSeaTalkRunning();
   log(`connecting to SeaTalk CDP on port ${CDP_PORT}...`);
 
@@ -917,6 +1018,11 @@ async function main() {
           }
           await bridge.sendToPanel({ type: 'update_done', success: ok }, 3_000);
           if (ok) {
+            if (agent) {
+              agent.proc.removeAllListeners('exit');
+              killAgent(agent.proc);
+              agent = null;
+            }
             if (process.env.SEATALK_LAUNCHER) {
               log('[updater] launcher detected, exiting with code 42 for restart loop');
               setTimeout(() => { process.exit(42); }, 1_000);
@@ -1129,14 +1235,20 @@ async function main() {
     }, 5000);
   }
 
+  let knownChildPids: number[] = [];
+
   function cleanupAndExit(code = 0) {
     log('shutting down...');
+    knownChildPids = getProcessTree();
     if (agent) {
       agent.proc.removeAllListeners('exit');
       killAgent(agent.proc);
       agent = null;
     }
-    client.close();
+    try { client.close(); } catch {}
+    for (const pid of knownChildPids) {
+      try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ }
+    }
     process.exit(code);
   }
 
@@ -1146,6 +1258,9 @@ async function main() {
   process.on('exit', () => {
     if (agent) {
       try { agent.proc.kill('SIGKILL'); } catch {}
+    }
+    for (const pid of knownChildPids) {
+      try { process.kill(pid, 'SIGKILL'); } catch {}
     }
   });
 
