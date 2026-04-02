@@ -1,0 +1,72 @@
+---
+description: 项目总览、安装引导、架构概览。用户问"这是什么项目"、"帮我安装"时自动触发。
+globs:
+alwaysApply: true
+---
+
+# SPX Helper — 项目总览
+
+SPX Helper 是 Shopee SPX 数据开发工程师的效率工具集，由三个独立模块组成：
+
+| 模块 | 目录 | 功能 |
+|------|------|------|
+| **A. MCP 工具套件** | `mcp-tools/` | 让 Cursor AI 直连 Presto/Spark/ClickHouse/Scheduler |
+| **B. SeaTalk Agent** | `seatalk-agent/` | 把 Cursor AI 注入 SeaTalk 桌面客户端 |
+| **C. Chrome 扩展** | `chrome-extension/` | 快速链接、API 溯源、SQL/正则工具箱 |
+
+**依赖关系**：B 需要先装 A。A 和 C 互相独立。
+
+## 技术栈
+
+- Chrome Extension Manifest V3（JavaScript，无构建步骤）
+- Python 3.10+ MCP Server（FastMCP, asyncio, transport="stdio"）
+- SeaTalk Agent（TypeScript, Node.js 22+, CDP 协议）
+- 依赖：requests, websockets, mcp, browser-cookie3
+
+## 架构
+
+```
+Chrome 扩展 (chrome-extension/)
+  ├── manifest.json        → MV3 配置，版本号唯一来源
+  ├── background.js        → Service Worker, 消息中枢, 存储
+  ├── content.js           → 页面注入, DOM 操作, UI 渲染
+  ├── injected.js          → API 拦截 (XHR/Fetch hook)
+  ├── popup.html/js        → 弹出页, 配置管理, JWT 生成
+  └── styles.css           → 全局样式
+
+SeaTalk Agent (seatalk-agent/)
+  ├── src/main.ts          → CDP + ACP 编排
+  ├── src/inject/          → 注入 SeaTalk 的 UI 脚本
+  └── install.sh           → 一键安装（含 CDP 守护进程）
+
+MCP 工具集 (mcp-tools/)
+  ├── presto-query/        → Presto SQL 查询 (DataSuite API)
+  ├── spark-query/         → Spark SQL 查询 (Livy REST API)
+  ├── ck-query/            → ClickHouse 查询 (HTTP 直连)
+  ├── api-trace/           → API 血缘溯源 (spx_mart.api_lineage)
+  ├── seatalk-reader/      → SeaTalk 消息读取 (CDP 直连)
+  ├── scheduler-query/     → DataSuite Scheduler 查询
+  └── seatalk-group/       → SeaTalk 批量拉群 (InfraBot API)
+```
+
+## 安装引导规则
+
+当用户表达"安装"、"配置"、"部署"、"我要用这个"等意图时：
+
+1. **介绍三个模块**，让用户选择需要安装的模块（可多选）
+2. **打开 `INSTALL.md`**，按对应模块章节逐步执行
+3. 交互式一步步来，每步验证后再继续
+4. 凭证让用户自己填写，不要生成占位符
+
+## 安全约束
+
+- AI 可执行只读操作：读文件、查数据库、分析代码、读 SeaTalk 消息
+- 危险操作需用户确认：Git 提交/推送、发送 SeaTalk 消息、修改生产配置
+- AI 禁止：自动 `git commit/push`、硬编码密码/token、跳过测试
+
+## 常见问答
+
+- **"帮我安装"** → 参照 `INSTALL.md` 引导
+- **"帮我安装 skill"** → `cp -r .cursor/skills/spx-bug-trace ~/.cursor/skills/`
+- **"MCP 凭证怎么获取"** → 参照 `INSTALL.md` 模块 A 的凭证表
+- **"更新到最新版本"** → `git pull`，MCP 有变更则提醒刷新

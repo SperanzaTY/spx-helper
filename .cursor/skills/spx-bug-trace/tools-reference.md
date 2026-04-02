@@ -53,13 +53,9 @@ query_presto(
     sql: str,
     queue: str,    # "szsc-adhoc"（默认）或 "szsc-scheduled"
     region: str,   # "SG"（默认）或 "US"
-    max_rows: int,              # 默认 100，最大 2000
-    cell_max_len: int = 0,       # 0 = 表格展示不截断单元格（旧版 MCP 曾固定 50 字截断）
-    write_full_result_to: str | None = None,  # 可选：相对/绝对路径，完整结果写 UTF-8 JSON（大字段、写 Sheet）
+    max_rows: int  # 默认 100，最大 2000
 )
 ```
-
-**长字段 / GSheet 回填**：MCP 对话仍可能被宿主截断。请对「多行大单元格」查询传 `write_full_result_to="docs/investigations/xxx.json"`（路径相对工作区），再在仓库内用脚本读 JSON 合并或更新 Sheet；**以落盘文件为准**。
 
 **常用 Presto 库：**
 - `sls_mart`：API 元数据血缘表所在库
@@ -83,10 +79,10 @@ query_presto(
 -- 1) 确认分区列与字段
 DESCRIBE data_metamart.ods_flink_platform_connector_metadata_df;
 
--- 2) 样例：限定分区后探查（Presto 上 grass_date 多为 varchar，用 'YYYY-MM-DD'）
+-- 2) 样例：限定分区后探查（日期改为最近有数据的分区）
 SELECT *
 FROM data_metamart.ods_flink_platform_connector_metadata_df
-WHERE grass_date = '2026-03-04'
+WHERE grass_date = DATE '2026-03-04'
 LIMIT 20;
 
 -- 3) 在确认列名后，按任务名/表名/connector 等追加过滤
