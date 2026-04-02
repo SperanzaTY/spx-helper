@@ -74,6 +74,7 @@ AGENT_DIR="__AGENT_DIR__"
 LOG_DIR="__LOG_DIR__"
 NODE_DIR="__NODE_DIR__"
 export PATH="$NODE_DIR:$PATH"
+export SEATALK_LAUNCHER=1
 
 # Launch SeaTalk with CDP if not already running with it
 if ! curl -s -o /dev/null -w "" http://localhost:$CDP_PORT/json 2>/dev/null; then

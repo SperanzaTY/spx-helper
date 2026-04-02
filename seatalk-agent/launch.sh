@@ -9,6 +9,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
+export SEATALK_LAUNCHER=1
+
 while true; do
   echo "[launch] starting agent..."
   npx tsx "${SCRIPT_DIR}/src/main.ts"

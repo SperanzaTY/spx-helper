@@ -867,7 +867,7 @@ async function main() {
       } else if (data.type === 'reinject_ui') {
         log('reinject_ui requested by user');
         try {
-          await injectUI();
+          await doInject();
           log('reinject_ui complete');
         } catch (e) {
           log('reinject_ui failed:', (e as Error).message);
@@ -882,7 +882,7 @@ async function main() {
         }
         killOrphanAgentProcesses();
         await new Promise((r) => setTimeout(r, 500));
-        try { await injectUI(); log('restart_agent: UI re-injected'); } catch (e) { log('restart_agent: UI reinject failed:', (e as Error).message); }
+        try { await doInject(); log('restart_agent: UI re-injected'); } catch (e) { log('restart_agent: UI reinject failed:', (e as Error).message); }
         const ok2 = await startAcp();
         if (ok2) {
           bridge.sendToPanel({ type: 'status', connected: true, text: 'Connected' }).catch(() => {});
@@ -917,8 +917,20 @@ async function main() {
           }
           await bridge.sendToPanel({ type: 'update_done', success: ok }, 3_000);
           if (ok) {
-            log('[updater] messages sent, exiting in 1s');
-            setTimeout(() => { process.exit(42); }, 1_000);
+            if (process.env.SEATALK_LAUNCHER) {
+              log('[updater] launcher detected, exiting with code 42 for restart loop');
+              setTimeout(() => { process.exit(42); }, 1_000);
+            } else {
+              log('[updater] no launcher, spawning detached child to self-restart');
+              const child = spawnChild(process.execPath, process.argv.slice(1), {
+                cwd: process.cwd(),
+                detached: true,
+                stdio: 'ignore',
+                env: { ...process.env },
+              });
+              child.unref();
+              setTimeout(() => { process.exit(0); }, 1_500);
+            }
           }
         })();
       } else if (data.type === 'get_logs') {

@@ -42,6 +42,30 @@
 
 ---
 
+## v3.2.2 — 2026-03-02 — fix: Agent 更新后自动重启（前后端完整重启）
+
+**提交者**: @tianyi.liang
+**Commit Type**: fix
+**修改模块**: SeaTalk Agent
+
+### 变更说明
+- 修复 `injectUI()` 未定义 bug：`reinject_ui` 和 `restart_agent` 操作实际调用的函数从未定义（ReferenceError 被 try-catch 吞掉），替换为 `doInject()`
+- 更新后自动重启：通过 `launch.sh`/`seatalk` 命令启动时用 exit(42) 重启循环；直接 `npx tsx` 启动时 spawn detached 子进程自重启
+- `launch.sh` 和 `install.sh` 设置 `SEATALK_LAUNCHER=1` 环境变量，`main.ts` 据此选择重启策略
+- 新进程启动后 `doInject()` 重新注入所有前端脚本（cursor-ui / sidebar-app / seatalk-send），实现前端代码热更新
+
+### 测试清单
+
+| 测试项 | 状态 | 备注 |
+|--------|------|------|
+| 通过 seatalk 命令启动，更新后自动重启 | ⬜ | 需用户测试 |
+| 通过 npx tsx 直接启动，更新后自动重启 | ⬜ | 需用户测试 |
+| 重启后前端面板更新为新版代码 | ⬜ | 需用户测试 |
+| 设置菜单"重启 Agent"正常工作 | ⬜ | 需用户测试 |
+| 设置菜单"重新注入 UI"正常工作 | ⬜ | 需用户测试 |
+
+---
+
 ## v3.2.1 — 2026-03-02 — chore: 统一文档管理 + Agent UI 优化 + 链接处理修复
 
 **提交者**: @tianyi.liang
