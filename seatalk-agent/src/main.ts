@@ -31,12 +31,41 @@ function gitExec(cmd: string, cwd: string): string {
   return execSync(cmd, { cwd, encoding: 'utf-8', timeout: 30_000 }).trim();
 }
 
+/**
+ * Remote used for `git fetch` / `rebase` against `release`.
+ * - Env `SPX_UPDATE_GIT_REMOTE` wins if set (e.g. only `origin` clone: export SPX_UPDATE_GIT_REMOTE=origin).
+ * - Else `gitlab` when configured (team dual-remote setup).
+ * - Else `origin` when its URL looks like GitLab (garena.com); otherwise still `origin` as last resort.
+ */
+function getUpdateRemoteName(cwd: string): string {
+  const fromEnv = process.env.SPX_UPDATE_GIT_REMOTE?.trim();
+  if (fromEnv) return fromEnv;
+
+  try {
+    gitExec('git remote get-url gitlab', cwd);
+    return 'gitlab';
+  } catch {
+    /* no gitlab remote */
+  }
+
+  try {
+    const url = gitExec('git remote get-url origin', cwd);
+    if (/git\.garena\.com|garena\.com/i.test(url)) return 'origin';
+  } catch {
+    return 'origin';
+  }
+
+  return 'origin';
+}
+
 function checkUpdate(logFn: typeof log): UpdateCheckResult {
   const branch = 'release';
   const result: UpdateCheckResult = { available: false, local: '', remote: '', behind: 0, branch, changelog: '' };
+  const gitRemote = getUpdateRemoteName(PROJECT_ROOT);
+  logFn(`[updater] using git remote: ${gitRemote}`);
 
   try {
-    gitExec(`git fetch gitlab ${branch} --quiet`, PROJECT_ROOT);
+    gitExec(`git fetch ${gitRemote} ${branch} --quiet`, PROJECT_ROOT);
   } catch (e) {
     result.error = `fetch failed: ${(e as Error).message}`;
     logFn(`[updater] ${result.error}`);
@@ -51,7 +80,7 @@ function checkUpdate(logFn: typeof log): UpdateCheckResult {
   }
 
   try {
-    const remoteManifestStr = gitExec(`git show gitlab/${branch}:chrome-extension/manifest.json`, PROJECT_ROOT);
+    const remoteManifestStr = gitExec(`git show ${gitRemote}/${branch}:chrome-extension/manifest.json`, PROJECT_ROOT);
     const remoteManifest = JSON.parse(remoteManifestStr);
     result.remote = remoteManifest.version || result.local;
   } catch {
@@ -59,7 +88,7 @@ function checkUpdate(logFn: typeof log): UpdateCheckResult {
   }
 
   try {
-    result.behind = parseInt(gitExec(`git rev-list --count HEAD..gitlab/${branch}`, PROJECT_ROOT), 10) || 0;
+    result.behind = parseInt(gitExec(`git rev-list --count HEAD..${gitRemote}/${branch}`, PROJECT_ROOT), 10) || 0;
   } catch {
     result.behind = 0;
   }
@@ -68,7 +97,7 @@ function checkUpdate(logFn: typeof log): UpdateCheckResult {
 
   if (result.available) {
     try {
-      const commitLog = gitExec(`git log --oneline HEAD..gitlab/${branch} -10`, PROJECT_ROOT);
+      const commitLog = gitExec(`git log --oneline HEAD..${gitRemote}/${branch} -10`, PROJECT_ROOT);
       result.changelog = commitLog;
     } catch {}
   }
@@ -79,6 +108,8 @@ function checkUpdate(logFn: typeof log): UpdateCheckResult {
 
 function applyUpdate(onProgress: (msg: string) => void, logFn: typeof log): boolean {
   const branch = 'release';
+  const gitRemote = getUpdateRemoteName(PROJECT_ROOT);
+  logFn(`[updater] applyUpdate remote: ${gitRemote}`);
 
   try {
     logFn('[updater] applyUpdate start');
@@ -96,9 +127,9 @@ function applyUpdate(onProgress: (msg: string) => void, logFn: typeof log): bool
     }
     onProgress('✅ 工作区干净');
 
-    onProgress(`🔄 git rebase gitlab/${branch} ...`);
+    onProgress(`🔄 git rebase ${gitRemote}/${branch} ...`);
     try {
-      gitExec(`git rebase gitlab/${branch}`, PROJECT_ROOT);
+      gitExec(`git rebase ${gitRemote}/${branch}`, PROJECT_ROOT);
       onProgress('🔄 rebase ✅');
     } catch (e) {
       onProgress('❌ rebase 失败: ' + (e as Error).message);

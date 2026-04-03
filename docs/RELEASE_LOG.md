@@ -42,6 +42,30 @@
 
 ---
 
+## v3.4.5 — 2026-04-03 — fix(agent): 内置更新兼容仅配置 origin 的 GitLab 克隆
+
+**提交者**: @lidong.zhou
+**Commit Type**: fix
+**修改模块**: SeaTalk Agent
+
+### 变更说明
+- **Updater**：不再写死 `git fetch gitlab release`。按 **`SPX_UPDATE_GIT_REMOTE`** → **`gitlab` remote** → **`origin` 且 URL 为 Garena/GitLab** → 否则 **`origin`** 的顺序选用远程名，修复「仅 `origin` 指向 GitLab 时检查更新报 fetch failed」的问题
+- **文档**：`SEATALK_AGENT.md` 自动更新章节同步说明
+
+### 测试情况
+
+| 测试项 | 结果 | 备注 |
+|--------|------|------|
+| Chrome 扩展加载正常 | N/A | |
+| MCP 工具连接正常 | N/A | |
+| SeaTalk Agent 启动+注入正常 | ⬜ | 需用户重装 Agent 后点「检查更新」验证 |
+| SeaTalk Agent 重启后 UI 恢复 | ⬜ | |
+| 修改的功能正常工作 | ⬜ | 内置更新 remote 解析 |
+| 已有功能未被破坏 | ✅ | 仍可配置 `gitlab` 双远程 |
+| 控制台无新增错误 | ⬜ | |
+
+---
+
 ## v3.4.4 — 2026-04-03 — docs: 更新后 SeaTalk Agent 与 MCP 快速恢复指南
 
 **提交者**: @lidong.zhou
