@@ -1711,21 +1711,51 @@ async function main() {
             }
           }
 
-          if (remoteEnabled) {
-            const remoteCmds = selfCmds.filter((m) => {
-              const t = ((m.text || '') as string).trim();
-              const mm2 = t.match(SYSTEM_CMD_RE);
-              return !(mm2 && mm2[1].toLowerCase() === 'remote');
-            });
-            if (remoteCmds.length > 0) {
-              if (!remoteAgent && remoteAgentSpawning) {
-                remoteLog(`${remoteCmds.length} 条指令已排队 (Agent 启动中)`);
-                pendingRemoteCmds.push(...remoteCmds);
-              } else if (remoteAgent) {
-                await processRemoteCmds(remoteCmds);
-              } else {
-                remoteLog(`${remoteCmds.length} 条指令被忽略 (Agent 未就绪)`, 'warn');
-              }
+          const nonRemoteCmds = selfCmds.filter((m) => {
+            const t = ((m.text || '') as string).trim();
+            const mm2 = t.match(SYSTEM_CMD_RE);
+            return !(mm2 && mm2[1].toLowerCase() === 'remote');
+          });
+
+          const sysCmds: Array<Record<string, unknown>> = [];
+          const plainCmds: Array<Record<string, unknown>> = [];
+          for (const m of nonRemoteCmds) {
+            const t = ((m.text || '') as string).trim();
+            if (SYSTEM_CMD_RE.test(t)) sysCmds.push(m);
+            else plainCmds.push(m);
+          }
+
+          for (const sc of sysCmds) {
+            const scText = ((sc.text || '') as string).trim();
+            const scSession = sc.session as string;
+            const scMid = sc.mid as string;
+            const cmdResult = await handleSystemCommand(scText, scSession);
+            if (cmdResult !== null) {
+              remoteLog(`系统指令: ${scText}`);
+              const time = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+              const formattedCmd =
+                `**Remote Agent**\n` +
+                `━━━━━━━━━━━━━━\n` +
+                `${cmdResult}\n\n` +
+                `━━━━━━━━━━━━━━\n` +
+                `*${time}*`;
+              try {
+                const escapedText = JSON.stringify(formattedCmd.substring(0, 500));
+                await client.evaluate(`window.__seatalkWatch && window.__seatalkWatch.addSentText(${escapedText})`);
+              } catch (_) {}
+              await doSend(scSession, formattedCmd, 'markdown', 'system-cmd');
+              bridge.sendToPanel({ type: 'watch_reply_sent', mid: scMid, session: scSession, replyText: cmdResult }).catch(() => {});
+            }
+          }
+
+          if (remoteEnabled && plainCmds.length > 0) {
+            if (!remoteAgent && remoteAgentSpawning) {
+              remoteLog(`${plainCmds.length} 条指令已排队 (Agent 启动中)`);
+              pendingRemoteCmds.push(...plainCmds);
+            } else if (remoteAgent) {
+              await processRemoteCmds(plainCmds);
+            } else {
+              remoteLog(`${plainCmds.length} 条指令被忽略 (Agent 未就绪)`, 'warn');
             }
           }
         }

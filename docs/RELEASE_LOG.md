@@ -42,6 +42,29 @@
 
 ---
 
+## v3.4.8 — 2026-04-03 — fix: 系统命令不受远程控制开关影响
+
+**提交者**: @tianyi.liang
+**Commit Type**: fix
+**修改模块**: SeaTalk Agent
+
+### 变更说明
+- **修复系统命令被 remote 开关拦截**：关闭远程控制后，`!!ping`、`!!help`、`!!status` 等系统命令不再响应。原因是所有非 `!!remote` 的命令都被包在 `if (remoteEnabled)` 判断内。修复后将消息分为三类独立处理：`!!remote` 始终处理、其他 `!!` 系统命令始终处理、普通文本指令受 remote 开关控制
+
+### 测试情况
+
+| 测试项 | 结果 | 备注 |
+|--------|------|------|
+| Chrome 扩展加载正常 | N/A | |
+| MCP 工具连接正常 | N/A | |
+| SeaTalk Agent 启动+注入正常 | ✅ | |
+| SeaTalk Agent 重启后 UI 恢复 | ✅ | |
+| 修改的功能正常工作 | ✅ | CDP 测试：关闭 remote 后 !!ping/!!help/!!status 均正常响应 |
+| 已有功能未被破坏 | ✅ | |
+| 控制台无新增错误 | ✅ | |
+
+---
+
 ## chore — 2026-04-03 — chore: 添加 GitHub Pages 支持
 
 **提交者**: @tianyi.liang
