@@ -1141,7 +1141,7 @@
           appendUpdateProgress('代码已拉取，Agent 即将重启...');
           setTimeout(function () { appendUpdateProgress('等待 Agent 重新连接...'); }, 2000);
           setTimeout(function () {
-            appendUpdateProgress('如果长时间未重连，请运行 seatalk 命令重启 Agent');
+            appendUpdateProgress('如果长时间未重连，请在 Cursor IDE 中打开 SPX Helper 工作区，让 AI 重启 SeaTalk Agent');
             var applyBtn2 = updateOverlay && updateOverlay.querySelector('[data-act="apply"]');
             if (applyBtn2) { applyBtn2.disabled = false; applyBtn2.textContent = '重新检查'; applyBtn2.dataset.act = 'check'; }
           }, 15000);
@@ -1408,7 +1408,7 @@
       elapsed++;
       if (countdownEl) countdownEl.textContent = '已等待 ' + elapsed + 's — 新进程启动后将自动重连...';
       if (elapsed > 30 && countdownEl) {
-        countdownEl.innerHTML = '已等待 ' + elapsed + 's — <span style="color:#f5a623">如果长时间无响应，请在终端运行 seatalk 命令重启</span>';
+        countdownEl.innerHTML = '已等待 ' + elapsed + 's — <span style="color:#f5a623">如果长时间无响应，请在 Cursor IDE 中打开 SPX Helper 工作区，让 AI 重启 SeaTalk Agent</span>';
       }
     }, 1000);
   }
@@ -2358,7 +2358,6 @@
   // Restore panel open state after re-injection
   try { if (localStorage.getItem('__cursorPanelOpen') === '1' && !panelHandle) showPanel(); } catch (_) {}
 
-  // Detect post-update restart: if update was applied recently, show success notification
   (function checkPostUpdate() {
     try {
       var raw = localStorage.getItem('__cursorUpdateState');
@@ -2366,20 +2365,10 @@
       var state = JSON.parse(raw);
       if ((state.status === 'done' || state.status === 'applying') && Date.now() - state.ts < 120000) {
         localStorage.removeItem('__cursorUpdateState');
-        console.log('[cursor-acp] post-update restart detected, showing success notification');
         setTimeout(function () {
-          if (!panelHandle) showPanel();
-          setTimeout(function () {
-            if (messagesEl) {
-              var notice = document.createElement('div');
-              notice.className = 'cursor-msg system';
-              notice.innerHTML = '<div class="cursor-msg-text" style="color:#4ec9b0;font-weight:500">' + sr.svgIcon('check', 14) + ' 更新成功！Agent 已自动重启到最新版本。</div>';
-              messagesEl.appendChild(notice);
-              messagesEl.scrollTop = messagesEl.scrollHeight;
-            }
-            if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: 'update_check' }));
-          }, 500);
-        }, 1000);
+          if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: 'update_check' }));
+          showNewBadge();
+        }, 1500);
       } else {
         localStorage.removeItem('__cursorUpdateState');
       }
