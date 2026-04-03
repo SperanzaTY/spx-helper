@@ -1142,13 +1142,17 @@
           setTimeout(function () { appendUpdateProgress('等待 Agent 重新连接...'); }, 2000);
           setTimeout(function () {
             appendUpdateProgress('如果长时间未重连，请在 Cursor IDE 中打开 SPX Helper 工作区，让 AI 重启 SeaTalk Agent');
-            var applyBtn2 = updateOverlay && updateOverlay.querySelector('[data-act="apply"]');
-            if (applyBtn2) { applyBtn2.disabled = false; applyBtn2.textContent = '重新检查'; applyBtn2.dataset.act = 'check'; }
+            if (!updateOverlay) return;
+            var actions = updateOverlay.querySelector('.cursor-update-actions');
+            if (actions) actions.innerHTML = '<button class="cursor-update-btn secondary" data-act="check">重新检查</button>';
           }, 15000);
         } else {
           appendUpdateProgress('[err] 更新失败');
-          var applyBtn = updateOverlay && updateOverlay.querySelector('[data-act="apply"]');
-          if (applyBtn) { applyBtn.disabled = false; applyBtn.textContent = '重试更新'; }
+          if (updateOverlay) {
+            var actions2 = updateOverlay.querySelector('.cursor-update-actions');
+            if (actions2) actions2.innerHTML = '<button class="cursor-update-btn primary" data-act="apply">重试更新</button>' +
+              '<button class="cursor-update-btn secondary" data-act="check">重新检查</button>';
+          }
         }
       } else if (d.type === 'send_confirm_request') {
         _grantToggleVisible = true;

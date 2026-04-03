@@ -54,3 +54,6 @@ venv/
 # 备份文件
 *.backup
 *.broken
+
+# Cursor 编辑器粘贴图片自动生成的目录
+**/image/
