@@ -42,6 +42,58 @@
 
 ---
 
+## v3.3.1 — 2026-03-02 — feat: Remote 系统指令 + 消息冻结机制
+
+**提交者**: @tianyi.liang
+**Commit Type**: feat
+**修改模块**: SeaTalk Agent
+
+### 变更说明
+
+#### `!!` 系统指令系统（不经过 ACP Agent，直接响应）
+- `!!ping` — 存活检测，立即回复 pong
+- `!!status` — 查看 Remote Agent 运行状态（运行时长、进程、Session ID、模型、工作区）
+- `!!help` — 显示所有系统指令列表
+- `!!use <model>` — 远程切换 AI 模型（立即生效，无需重建 session）
+- `!!use` — 查看当前使用的模型
+- `!!ls models` — 列出所有可用模型
+- `!!reset` — 重置远程 Agent 会话（cancel 当前 session + 创建新 session）
+- `!!remote on|off` — 远程开关远程控制（不依赖 Agent 进程）
+
+#### 消息冻结机制
+- 当第二条指令到达时，如果第一条正在 ACP prompt 中，第一条消息被"冻结"
+- 冻结后第一条消息完成时跳过回复，第二条指令自动接管执行
+- 新增 `remoteProcessingActive`、`remoteFrozen`、`remoteMessageQueue` 状态变量
+- 系统指令（`!!` 前缀）不受冻结影响，始终立即响应
+
+#### Remote 默认开启
+- `remoteEnabled` 默认值改为 `true`，Agent 启动后自动启动 Remote Agent
+- 注入完成后自动调用 `ensureRemoteAgent()` 启动远程控制
+
+#### Bug 修复
+- 修复 `!!remote on/off` 回复被 watch 二次捕获导致误执行 ACP prompt 的问题（补充 `addSentText` 调用）
+
+### 测试情况
+
+| 测试项 | 结果 | 备注 |
+|--------|------|------|
+| Chrome 扩展加载正常 | N/A | 本次未修改 Chrome 扩展功能代码 |
+| MCP 工具连接正常 | N/A | |
+| SeaTalk Agent 启动+注入正常 | ✅ | Remote Agent 自动启动 |
+| SeaTalk Agent 重启后 UI 恢复 | ✅ | |
+| !!ping / !!status / !!help | ✅ | 系统指令立即响应 |
+| 消息冻结机制 | ✅ | 第一条冻结 + 第二条接管 |
+| !!remote off → 消息被忽略 → !!remote on | ✅ | 开关功能正常 |
+| 已有功能未被破坏 | ✅ | |
+| 控制台无新增错误 | ✅ | |
+
+### 特别注意
+- 系统指令以 `!!` 前缀触发，不会经过 ACP Agent，响应极快
+- 消息冻结只影响普通指令，`!!` 系统指令始终优先处理
+- Remote Agent 现在默认开启，首次注入后自动启动
+
+---
+
 ## v3.3.0 — 2026-03-02 — `56a1e8e` feat: Remote 远程控制功能 + 日志面板 + Markdown 卡片回复
 
 **提交者**: @tianyi.liang

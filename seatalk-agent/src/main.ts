@@ -705,12 +705,15 @@ async function main() {
     mentionsOnly: false,
     keywords: [],
   };
-  let remoteEnabled = false;
+  let remoteEnabled = true;
   let remoteAgent: AgentProcess | null = null;
   let remoteAgentSpawning = false;
   let remoteReplyText = '';
   const pendingRemoteCmds: Array<Record<string, unknown>> = [];
   let acpStarting = false;
+  let remoteProcessingActive = false;
+  let remoteFrozen = false;
+  const remoteMessageQueue: Array<Record<string, unknown>> = [];
 
   function startWatchListening() {
     if (!watchActive) {
@@ -767,57 +770,209 @@ async function main() {
     }
   }
 
+  const SYSTEM_CMD_RE = /^!!(\w+)(?:\s+(.*))?$/;
+  const remoteStartTime = Date.now();
+
+  async function handleSystemCommand(msgText: string, session: string): Promise<string | null> {
+    const m = msgText.trim().match(SYSTEM_CMD_RE);
+    if (!m) return null;
+
+    const cmd = m[1].toLowerCase();
+    const args = m[2]?.trim() ?? '';
+
+    try {
+      switch (cmd) {
+        case 'ping':
+          return 'pong';
+
+        case 'help':
+          return [
+            '!! 系统指令列表：',
+            '',
+            '  !!ping           — 存活检测',
+            '  !!status         — 查看 bot 状态',
+            '  !!remote on|off  — 开关远程控制（不依赖 Agent）',
+            '  !!remote         — 查看远程控制状态',
+            '  !!use <model>    — 切换模型（重建 session）',
+            '  !!use            — 查看当前模型',
+            '  !!ls models      — 列出可用模型',
+            '  !!reset          — 重置远程 Agent 会话',
+            '  !!help           — 显示本帮助',
+          ].join('\n');
+
+        case 'status': {
+          const uptimeMin = Math.floor((Date.now() - remoteStartTime) / 60_000);
+          const ra = remoteAgent;
+          return [
+            'Remote Agent 状态：',
+            `  运行时长: ${uptimeMin} 分钟`,
+            `  Agent 进程: ${ra ? 'alive' : 'dead'}`,
+            `  Session ID: ${ra?.sessionId?.substring(0, 12) ?? 'N/A'}...`,
+            `  当前模型: ${ra?.currentModelId || currentModelId || '(默认)'}`,
+            `  工作区: ${currentWorkspace}`,
+          ].join('\n');
+        }
+
+        case 'use': {
+          if (!args) {
+            const modelId = remoteAgent?.currentModelId || currentModelId || '(默认)';
+            return `当前模型: ${modelId}`;
+          }
+          if (!remoteAgent) return '远程 Agent 未就绪，无法切换模型。';
+          try {
+            await remoteAgent.connection.unstable_setSessionModel({
+              sessionId: remoteAgent.sessionId,
+              modelId: args,
+            });
+            remoteAgent.currentModelId = args;
+            return `已切换到 ${args}，立即生效。`;
+          } catch (e) {
+            return `模型切换失败: ${(e as Error).message}`;
+          }
+        }
+
+        case 'ls': {
+          if (args.trim() !== 'models') return `未知子命令: !!ls ${args}\n支持: !!ls models`;
+          try {
+            const result = await listModels(log);
+            if (!result.models.length) return '无法获取模型列表。';
+            const lines = result.models.map((m) => {
+              const flag = m.modelId === (remoteAgent?.currentModelId || currentModelId) ? ' (current)' : '';
+              return `  ${m.modelId} - ${m.name}${flag}`;
+            });
+            return `可用模型 (${result.models.length}):\n${lines.join('\n')}`;
+          } catch (e) {
+            return `获取模型列表失败: ${(e as Error).message}`;
+          }
+        }
+
+        case 'reset': {
+          if (!remoteAgent) return '远程 Agent 未就绪。';
+          try {
+            await remoteAgent.connection.cancel({ sessionId: remoteAgent.sessionId }).catch(() => {});
+            const res = await remoteAgent.connection.newSession({
+              cwd: currentWorkspace,
+              mcpServers: loadMcpServers(log),
+            });
+            remoteAgent.sessionId = res.sessionId;
+            return '远程 Agent 会话已重置。';
+          } catch (e) {
+            return `重置失败: ${(e as Error).message}`;
+          }
+        }
+
+        default:
+          return `未知指令: !!${cmd}\n输入 !!help 查看可用指令。`;
+      }
+    } catch (e) {
+      return `[指令执行出错] !!${cmd}: ${(e as Error).message}`;
+    }
+  }
+
   async function processRemoteCmds(cmds: Array<Record<string, unknown>>) {
     if (!remoteAgent) return;
-    for (const msg of cmds) {
-      const session = msg.session as string;
-      const mid = msg.mid as string;
-      const msgText = (msg.text || '') as string;
-      if (!session || !msgText) continue;
-      if (msgText.startsWith('Remote Agent')) {
-        log('[remote] skipping own reply echo');
-        continue;
-      }
 
-      remoteLog(`收到指令: "${msgText.substring(0, 80)}"`);
-      bridge.sendToPanel({ type: 'watch_reply_generating', mid, session, sessionName: session, sender: 'self', text: msgText }).catch(() => {});
+    if (remoteProcessingActive) {
+      remoteFrozen = true;
+      remoteMessageQueue.length = 0;
+      remoteMessageQueue.push(...cmds);
+      remoteLog(`冻结当前消息，${cmds.length} 条新指令已排队`);
+      return;
+    }
 
-      try {
-        remoteReplyText = '';
-        remoteLog('Agent 执行中...');
-        const promptText =
-          `你是远程 Cursor 助手。用户通过 SeaTalk 给你发送了指令。\n\n` +
-          `[指令内容]:\n${msgText}\n\n` +
-          `请执行该指令。你拥有完整的工具权限。执行完成后，输出简洁的结果摘要作为回复。`;
-        await remoteAgent.connection.prompt({
-          sessionId: remoteAgent.sessionId,
-          prompt: [{ type: 'text', text: promptText }] as any,
-        });
-        const replyText = remoteReplyText.trim();
-        if (!replyText) {
-          remoteLog('Agent 返回空回复，已跳过', 'warn');
+    remoteProcessingActive = true;
+
+    try {
+      for (const msg of cmds) {
+        const session = msg.session as string;
+        const mid = msg.mid as string;
+        const msgText = (msg.text || '') as string;
+        if (!session || !msgText) continue;
+        if (msgText.startsWith('Remote Agent')) {
+          log('[remote] skipping own reply echo');
           continue;
         }
-        remoteLog(`回复已生成 (${replyText.length} 字)`);
 
-        const time = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-        const formattedReply =
-          `**Remote Agent**\n` +
-          `━━━━━━━━━━━━━━\n` +
-          `**指令**: \`${msgText.substring(0, 100)}\`\n\n` +
-          `${replyText}\n\n` +
-          `━━━━━━━━━━━━━━\n` +
-          `*${time} | ${replyText.length} 字*`;
+        const cmdResult = await handleSystemCommand(msgText, session);
+        if (cmdResult !== null) {
+          remoteLog(`系统指令: ${msgText}`);
+          const time = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+          const formattedCmd =
+            `**Remote Agent**\n` +
+            `━━━━━━━━━━━━━━\n` +
+            `${cmdResult}\n\n` +
+            `━━━━━━━━━━━━━━\n` +
+            `*${time}*`;
+          try {
+            const escapedText = JSON.stringify(formattedCmd.substring(0, 500));
+            await client.evaluate(`window.__seatalkWatch && window.__seatalkWatch.addSentText(${escapedText})`);
+          } catch (_) {}
+          await doSend(session, formattedCmd, 'markdown', 'system-cmd');
+          bridge.sendToPanel({ type: 'watch_reply_sent', mid, session, replyText: cmdResult }).catch(() => {});
+          continue;
+        }
+
+        remoteFrozen = false;
+        remoteLog(`收到指令: "${msgText.substring(0, 80)}"`);
+        bridge.sendToPanel({ type: 'watch_reply_generating', mid, session, sessionName: session, sender: 'self', text: msgText }).catch(() => {});
 
         try {
-          const escapedText = JSON.stringify(formattedReply.substring(0, 500));
-          await client.evaluate(`window.__seatalkWatch && window.__seatalkWatch.addSentText(${escapedText})`);
-        } catch (_) {}
-        await doSend(session, formattedReply, 'markdown', 'watch-self');
-        remoteLog('回复已发送 ✓');
-        bridge.sendToPanel({ type: 'watch_reply_sent', mid, session, replyText }).catch(() => {});
-      } catch (e) {
-        remoteLog(`执行失败: ${(e as Error).message}`, 'error');
+          remoteReplyText = '';
+          remoteLog('Agent 执行中...');
+          const promptText =
+            `你是远程 Cursor 助手。用户通过 SeaTalk 给你发送了指令。\n\n` +
+            `[指令内容]:\n${msgText}\n\n` +
+            `请执行该指令。你拥有完整的工具权限。执行完成后，输出简洁的结果摘要作为回复。`;
+          await remoteAgent.connection.prompt({
+            sessionId: remoteAgent.sessionId,
+            prompt: [{ type: 'text', text: promptText }] as any,
+          });
+
+          if (remoteFrozen) {
+            remoteLog('消息已冻结（被后续消息覆盖），跳过回复');
+            break;
+          }
+
+          const replyText = remoteReplyText.trim();
+          if (!replyText) {
+            remoteLog('Agent 返回空回复，已跳过', 'warn');
+            continue;
+          }
+          remoteLog(`回复已生成 (${replyText.length} 字)`);
+
+          const time = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+          const formattedReply =
+            `**Remote Agent**\n` +
+            `━━━━━━━━━━━━━━\n` +
+            `**指令**: \`${msgText.substring(0, 100)}\`\n\n` +
+            `${replyText}\n\n` +
+            `━━━━━━━━━━━━━━\n` +
+            `*${time} | ${replyText.length} 字*`;
+
+          try {
+            const escapedText = JSON.stringify(formattedReply.substring(0, 500));
+            await client.evaluate(`window.__seatalkWatch && window.__seatalkWatch.addSentText(${escapedText})`);
+          } catch (_) {}
+          await doSend(session, formattedReply, 'markdown', 'watch-self');
+          remoteLog('回复已发送 ✓');
+          bridge.sendToPanel({ type: 'watch_reply_sent', mid, session, replyText }).catch(() => {});
+        } catch (e) {
+          if (remoteFrozen) {
+            remoteLog('消息已冻结（被后续消息覆盖）');
+            break;
+          }
+          remoteLog(`执行失败: ${(e as Error).message}`, 'error');
+        }
+      }
+    } finally {
+      remoteProcessingActive = false;
+
+      if (remoteMessageQueue.length > 0) {
+        const queued = remoteMessageQueue.splice(0);
+        remoteLog(`处理 ${queued.length} 条排队指令...`);
+        processRemoteCmds(queued).catch((e) =>
+          remoteLog(`排队指令处理失败: ${(e as Error).message}`, 'error')
+        );
       }
     }
   }
@@ -1432,16 +1587,57 @@ async function main() {
           log(`watch: ${messages.length} new message(s)`);
           bridge.sendToPanel({ type: 'watch_messages', messages }).catch(() => {});
 
-          if (remoteEnabled) {
-            const selfCmds = messages.filter((m) => !!m.isSelfCommand);
-            if (selfCmds.length > 0) {
-              if (!remoteAgent && remoteAgentSpawning) {
-                remoteLog(`${selfCmds.length} 条指令已排队 (Agent 启动中)`);
-                pendingRemoteCmds.push(...selfCmds);
-              } else if (remoteAgent) {
-                await processRemoteCmds(selfCmds);
+          const selfCmds = messages.filter((m) => !!m.isSelfCommand);
+          for (const cmd of selfCmds) {
+            const text = ((cmd.text || '') as string).trim();
+            const session = cmd.session as string;
+            const mid = cmd.mid as string;
+            const mm = text.match(SYSTEM_CMD_RE);
+            if (mm && mm[1].toLowerCase() === 'remote') {
+              const subArg = (mm[2] || '').trim().toLowerCase();
+              let result: string;
+              if (subArg === 'on') {
+                if (remoteEnabled) {
+                  result = '远程控制已经是开启状态。';
+                } else {
+                  remoteEnabled = true;
+                  remoteLog('远程控制已开启 (via !!remote on)');
+                  try { await ensureRemoteAgent(); } catch (_) { remoteEnabled = false; }
+                  bridge.sendToPanel({ type: 'watch_remote_status', active: remoteEnabled, status: remoteEnabled ? 'ready' : 'error' }).catch(() => {});
+                  result = remoteEnabled ? '远程控制已开启，Agent 就绪。' : '远程控制开启失败，Agent 启动异常。';
+                }
+              } else if (subArg === 'off') {
+                remoteEnabled = false;
+                remoteLog('远程控制已关闭 (via !!remote off)');
+                bridge.sendToPanel({ type: 'watch_remote_status', active: false }).catch(() => {});
+                result = '远程控制已关闭。';
               } else {
-                remoteLog(`${selfCmds.length} 条指令被忽略 (Agent 未就绪)`, 'warn');
+                result = `远程控制: ${remoteEnabled ? '开启' : '关闭'}\n用法: !!remote on | !!remote off`;
+              }
+              try {
+                const escapedResult = JSON.stringify(result.substring(0, 500));
+                await client.evaluate(`window.__seatalkWatch && window.__seatalkWatch.addSentText(${escapedResult})`);
+              } catch (_) {}
+              await doSend(session, result, 'text', 'system-cmd');
+              bridge.sendToPanel({ type: 'watch_reply_sent', mid, session, replyText: result }).catch(() => {});
+              continue;
+            }
+          }
+
+          if (remoteEnabled) {
+            const remoteCmds = selfCmds.filter((m) => {
+              const t = ((m.text || '') as string).trim();
+              const mm2 = t.match(SYSTEM_CMD_RE);
+              return !(mm2 && mm2[1].toLowerCase() === 'remote');
+            });
+            if (remoteCmds.length > 0) {
+              if (!remoteAgent && remoteAgentSpawning) {
+                remoteLog(`${remoteCmds.length} 条指令已排队 (Agent 启动中)`);
+                pendingRemoteCmds.push(...remoteCmds);
+              } else if (remoteAgent) {
+                await processRemoteCmds(remoteCmds);
+              } else {
+                remoteLog(`${remoteCmds.length} 条指令被忽略 (Agent 未就绪)`, 'warn');
               }
             }
           }
@@ -1503,6 +1699,13 @@ async function main() {
     // Always start watch listener on injection
     startWatchListening();
     bridge.sendToPanel({ type: 'watch_remote_status', active: remoteEnabled, status: remoteAgent ? 'ready' : 'off' }).catch(() => {});
+    if (remoteEnabled && !remoteAgent && !remoteAgentSpawning) {
+      ensureRemoteAgent().catch((e) => {
+        remoteLog(`自动启动 Remote Agent 失败: ${(e as Error).message}`, 'warn');
+        remoteEnabled = false;
+        bridge.sendToPanel({ type: 'watch_remote_status', active: false, status: 'error' }).catch(() => {});
+      });
+    }
   }
 
   let injecting = false;
