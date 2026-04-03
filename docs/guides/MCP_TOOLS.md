@@ -185,6 +185,26 @@ AI 直接读写 Google Sheets，用于任务管理和数据整理。
 3. 如果显示红点，点击刷新按钮 ↻
 4. 在 Agent 中输入测试查询，如 `查询 spx_mart.dim_station 表最近一天的数据量`
 
+### SeaTalk 相关 MCP 快速更新（拉代码 / 升 Cursor 后）
+
+**seatalk-reader**、**seatalk-group** 通过 **uvx + Git 子目录** 安装时，Cursor 会在子进程里解析依赖；大版本或仓库更新后应 **在 MCP 设置里对这两项关闭再开启**（与项目规则「`mcp-tools/` 有变更要 toggle MCP」一致）。
+
+**想缩短等待**：若本机已克隆 **spx-helper**，在终端用 **本地目录** 预热/强制重装，通常比反复从 GitLab 拉同一引用快得多：
+
+```bash
+cd /path/to/spx-helper/mcp-tools/seatalk-reader
+uvx --reinstall --from . seatalk-reader-mcp --help >/dev/null
+
+cd ../seatalk-group
+uvx --reinstall --from . seatalk-group-mcp --help >/dev/null
+```
+
+将 `/path/to/spx-helper` 换成你的仓库根路径。然后再到 Cursor **MCP** 页面刷新对应服务。
+
+仅依赖 `git+https://...@release#subdirectory=...` 时，也可执行 `uvx --reinstall --from 'git+https://…'` 强制换新，但 **耗时可达到数分钟**（网络与解析依赖），属正常现象。
+
+完整启动顺序（含侧边栏 Agent、CDP）见 **[SeaTalk Agent 使用指南](./SEATALK_AGENT.md)** 中的「更新仓库 / 升级 Cursor 后：快速恢复」。
+
 ---
 
 ## 五、常见问题

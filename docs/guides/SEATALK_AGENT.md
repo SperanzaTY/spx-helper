@@ -124,6 +124,76 @@ curl -s http://127.0.0.1:19222/json
 
 ---
 
+## 更新仓库 / 升级 Cursor 后：快速恢复
+
+你在 **拉取 spx-helper、或 Cursor 大版本升级** 后，可按下面顺序恢复 SeaTalk 侧边栏与 Cursor 里的 SeaTalk MCP，**无需在脚本里人为 `sleep` 很久**：进程启动快慢主要取决于 **CDP 是否已监听** 与 **ACP 认证/建会话**，不是「多睡几秒」能解决的。
+
+### 1. 同步代码与 Agent 依赖
+
+```bash
+cd spx-helper   # 仓库根目录
+git pull origin release   # 或你的工作流所用分支
+
+cd seatalk-agent
+npm install
+# 若 install.sh / LaunchAgent / AGENT_DIR 有变更，再执行：
+# bash install.sh
+```
+
+### 2. Cursor 里的 SeaTalk MCP（seatalk-reader / seatalk-group）
+
+侧边栏发消息、读会话等能力在 Agent 注入脚本里；**在 Cursor Chat / Agent 里调 MCP 工具**则走 `~/.cursor/mcp.json` 的 **uvx** 配置。
+
+- **必做**：Cursor → **Settings → MCP**，对 **seatalk-reader**、**seatalk-group**（以及本次有更新的其他 MCP）各 **关闭再开启** 一次，否则会沿用旧子进程。
+- **推荐（已克隆本仓库时，刷新最快）**：用**本地路径**预热 uv 缓存，避免仅从 GitLab 拉取时 `uvx --reinstall` 卡住一到数分钟：
+
+```bash
+cd spx-helper/mcp-tools/seatalk-reader
+uvx --reinstall --from . seatalk-reader-mcp --help >/dev/null
+
+cd ../seatalk-group
+uvx --reinstall --from . seatalk-group-mcp --help >/dev/null
+```
+
+若 `mcp.json` 里仍是 `git+https://git.garena.com/.../spx-helper@release#subdirectory=mcp-tools/...`，也可在终端对同一 URL 执行 `uvx --reinstall --from 'git+...'` **强制重装**，但依赖网络与 Git，**往往比 `--from .` 慢很多**。
+
+更细的 MCP 说明见 **[MCP 工具使用指南](./MCP_TOOLS.md)**。
+
+### 3. 重启 seatalk-agent（注入与 ACP）
+
+```bash
+# 结束旧实例（有则杀；无则忽略报错）
+pkill -f 'launch-seatalk\.sh' 2>/dev/null || true
+pkill -f 'tsx src/main\.ts' 2>/dev/null || true
+
+seatalk
+```
+
+若希望不占终端：
+
+```bash
+nohup bash ~/.seatalk-agent/launch-seatalk.sh >> ~/.seatalk-agent/logs/launcher-nohup.log 2>&1 &
+```
+
+**刚启动后立刻执行** `curl http://127.0.0.1:19222/json` **可能仍失败**，属于 SeaTalk / CDP 尚未就绪；**几秒后再试**即可。排障看：
+
+```bash
+tail -f ~/.seatalk-agent/logs/agent.log
+```
+
+出现 **`injection complete!`** 表示页面注入完成；若 **`SPA ready` 很快但注入很晚**，多半是 **`authenticating` / 建 session / 加载 mcp.json** 阶段较慢（与网络、Cursor 服务有关）。
+
+### 4. 运行时大概有哪些进程（便于排查）
+
+| 角色 | 说明 |
+|------|------|
+| `launch-seatalk.sh`（bash） | 可选；负责在需要时以 CDP 拉起 SeaTalk 并循环启动 `tsx src/main.ts` |
+| `npm exec tsx` / `node … tsx … main.ts` | seatalk-agent 主进程，连 CDP、注入脚本、管 Bridge |
+| `~/.local/bin/agent` | ACP 子进程，对接 Cursor 能力与 MCP |
+| SeaTalk 自身 | Electron 多进程（主进程、GPU、网络、Renderer 等），**多个属正常** |
+
+---
+
 ## 技术架构概览
 
 ```

@@ -42,6 +42,30 @@
 
 ---
 
+## v3.4.4 — 2026-04-03 — docs: 更新后 SeaTalk Agent 与 MCP 快速恢复指南
+
+**提交者**: @lidong.zhou
+**Commit Type**: docs
+**修改模块**: 文档
+
+### 变更说明
+- **SEATALK_AGENT.md**：新增「更新仓库 / 升级 Cursor 后：快速恢复」— 拉代码、`npm install`、MCP toggle、`uvx --reinstall --from .` 预热、重启 Agent、进程说明与启动耗时常在 CDP/ACP 的原因
+- **MCP_TOOLS.md**：新增「SeaTalk 相关 MCP 快速更新」— 与上篇指南交叉引用
+
+### 测试情况
+
+| 测试项 | 结果 | 备注 |
+|--------|------|------|
+| Chrome 扩展加载正常 | N/A | |
+| MCP 工具连接正常 | N/A | |
+| SeaTalk Agent 启动+注入正常 | N/A | |
+| SeaTalk Agent 重启后 UI 恢复 | N/A | |
+| 修改的功能正常工作 | N/A | 文档变更 |
+| 已有功能未被破坏 | ✅ | |
+| 控制台无新增错误 | N/A | |
+
+---
+
 ## v3.4.4 — 2026-04-03 — fix(ui): 更新面板 UI 优化
 
 **提交者**: @tianyi.liang
