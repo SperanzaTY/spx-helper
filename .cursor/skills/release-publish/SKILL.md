@@ -130,6 +130,10 @@ grep '"version"' package.json chrome-extension/manifest.json seatalk-agent/packa
 当本次发版修改了 `seatalk-agent/src/` 下的代码时，**必须通过 CDP 进行功能验证**。
 未修改 Agent 代码则跳过此步。
 
+> **自动化说明**：`pre-push` hook 会在检测到 `seatalk-agent/src/` 变更时**自动运行**
+> `scripts/verify-cdp.js`，验证不通过将阻止推送。以下步骤可用于发版前的手动预检，
+> 避免在 push 阶段才发现问题。
+
 ### 5.1 确认 Agent 运行 & CDP 可用
 
 ```bash
@@ -150,41 +154,24 @@ cd seatalk-agent && npx tsc --noEmit
 
 **必须零错误。** 有编译错误则修复后才能继续。
 
-### 5.3 CDP 注入验证
+### 5.3 运行 CDP 验证脚本（推荐在 push 前手动预检）
 
-通过 CDP 执行以下检查脚本，确认前端注入正常：
+```bash
+# 手动运行（与 pre-push hook 执行的是同一脚本）
+node scripts/verify-cdp.js
 
-```javascript
-// 1. UI 组件存在性
-JSON.stringify({
-  cursorUI: !!window.__cursorUI,
-  agentReceive: !!window.__agentReceive,
-  agentSend: !!window.__agentSend,
-  agentToggle: !!window.__agentToggle,
-  seatalkWatch: !!window.__seatalkWatch,
-  seatalkSend: !!window.__seatalkSend,
-  sidebarCleanup: !!window.__cursorSidebarCleanup,
-})
-
-// 2. Sidebar 按钮存在
-JSON.stringify({
-  cursorBtn: !!document.getElementById('cursor-sidebar-btn'),
-  remoteBtn: !!document.getElementById('cursor-watch-sidebar-btn'),
-})
-
-// 3. 无重复 UI 元素
-JSON.stringify({
-  panelCount: document.querySelectorAll('#cursor-panel').length,
-  cursorBtnCount: document.querySelectorAll('#cursor-sidebar-btn').length,
-  remoteBtnCount: document.querySelectorAll('#cursor-watch-sidebar-btn').length,
-  popoverCount: document.querySelectorAll('#cursor-remote-popover').length,
-})
+# 或通过 npm
+npm run verify:cdp
 ```
 
-**验证标准**：
-- 所有全局函数存在（值为 `true`）
-- 两个 sidebar 按钮存在
-- 所有 UI 元素 count 为 0 或 1，**不能 >1**（重复 = re-inject 去重失败）
+脚本自动检查以下内容：
+- **全局函数存在性**：`__cursorUI`, `__agentReceive`, `__agentSend`, `__agentToggle`,
+  `__seatalkWatch`, `__seatalkSend`, `__cursorSidebarCleanup`
+- **Sidebar 按钮存在**：`#cursor-sidebar-btn`, `#cursor-watch-sidebar-btn`
+- **无重复 UI 元素**：`#cursor-panel`, sidebar 按钮, `#cursor-remote-popover` 的 count
+  必须 ≤ 1（>1 表示 re-inject 去重失败）
+
+退出码：`0` 全部通过 / `1` 有失败项 / `2` CDP 不可达
 
 ### 5.4 功能性验证（按需）
 
@@ -287,12 +274,13 @@ git ls-remote origin release | head -1  # GitHub 远程 HEAD（可能滞后）
 若被 hook 拦截，根据错误信息回到对应步骤修复后重新提交推送。
 
 Hook 检查项：
-1. 远程无新提交（本地不落后）
+1. 远程无新提交（本地不落后，**必须先合并远程 release**）
 2. `docs/RELEASE_LOG.md` 在最新 commit 中被修改
 3. 三处版本号一致
 4. 模块代码 ↔ 文档联动
 5. `feat`/`fix` 类型 commit 必须升版本号
-6. 所有 commit 符合 Conventional Commit 格式
+6. **CDP 功能验证**（仅 `seatalk-agent/src/` 有变更时，自动运行 `scripts/verify-cdp.js`）
+7. 所有 commit 符合 Conventional Commit 格式
 
 ---
 
@@ -306,6 +294,8 @@ Hook 检查项：
 | "修改了 X 但未更新文档" | 缺少联动文档 | 补充对应文档后 amend |
 | "feat/fix 未升版本号" | 有功能/修复但没升版 | 升版本号后 amend |
 | "commit message 格式不符" | 缺少 type 前缀 | `git commit --amend` 修改消息 |
+| "CDP 端口不可达" | SeaTalk/Agent 未启动 | 启动 Agent: `cd seatalk-agent && npx tsx src/main.ts` |
+| "CDP 功能验证失败" | 注入异常或 UI 重复 | 运行 `node scripts/verify-cdp.js` 定位问题，修复后重试 |
 
 > amend 仅限本地未推送的 commit，已推送到远程的不要 amend。
 

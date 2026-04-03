@@ -9,7 +9,8 @@
     "setup": "bash scripts/setup-hooks.sh",
     "lint": "eslint *.js",
     "format": "prettier --write \"**/*.{js,html,css,json,md}\"",
-    "build:icons": "node scripts/build-icons.js"
+    "build:icons": "node scripts/build-icons.js",
+    "verify:cdp": "node scripts/verify-cdp.js"
   },
   "keywords": [
     "chrome-extension",

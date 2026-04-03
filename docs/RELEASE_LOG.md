@@ -42,6 +42,32 @@
 
 ---
 
+## v3.4.2 — 2026-04-03 — chore(hooks): pre-push CDP 自动验证
+
+**提交者**: @tianyi.liang
+**Commit Type**: chore
+**修改模块**: Git Hooks / Cursor Skill / 其他
+
+### 变更说明
+- **新增 `scripts/verify-cdp.js`**：Node.js CDP 自动验证脚本，通过 CDP 远程调试协议检查 SeaTalk 前端注入状态（全局函数存在性、Sidebar 按钮、无重复 UI 元素），退出码 0/1/2 区分结果
+- **pre-push hook 新增 CDP 验证步骤**（Step 2.7）：当 `seatalk-agent/src/` 有代码变更时自动运行 `verify-cdp.js`，验证不通过阻止推送
+- **更新 release-publish Skill Step 5**：标注 CDP 验证已由 hook 自动化，提供手动预检指引，更新 Hook 检查清单和常见错误表
+- **新增 `npm run verify:cdp`** 入口，方便开发者手动运行 CDP 验证
+
+### 测试情况
+
+| 测试项 | 结果 | 备注 |
+|--------|------|------|
+| Chrome 扩展加载正常 | N/A | |
+| MCP 工具连接正常 | N/A | |
+| SeaTalk Agent 启动+注入正常 | ✅ | CDP 验证脚本在真实环境全部通过 |
+| SeaTalk Agent 重启后 UI 恢复 | N/A | |
+| 修改的功能正常工作 | ✅ | verify-cdp.js 运行通过，pre-push hook bash 语法验证通过 |
+| 已有功能未被破坏 | ✅ | |
+| 控制台无新增错误 | ✅ | |
+
+---
+
 ## v3.4.2 — 2026-04-03 — fix(agent): Remote 回复显示模型+工作区、重启进度日志
 
 **提交者**: @tianyi.liang
