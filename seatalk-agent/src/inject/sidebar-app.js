@@ -1747,7 +1747,11 @@
     if (cachedUpdate.available) {
       verBadgeEl.classList.add('has-update');
       var behind = cachedUpdate.behind > 9 ? '9+' : String(cachedUpdate.behind);
-      verBadgeEl.innerHTML = '<span class="ver-dot"></span>v' + escapeHtml(cachedUpdate.local) + ' → v' + escapeHtml(cachedUpdate.remote);
+      if (cachedUpdate.local !== cachedUpdate.remote) {
+        verBadgeEl.innerHTML = '<span class="ver-dot"></span>v' + escapeHtml(cachedUpdate.local) + ' → v' + escapeHtml(cachedUpdate.remote);
+      } else {
+        verBadgeEl.innerHTML = '<span class="ver-dot"></span>v' + escapeHtml(cachedUpdate.local) + ' +' + behind;
+      }
       verBadgeEl.title = '有新版本可用 (落后 ' + cachedUpdate.behind + ' 个提交)，点击查看';
     } else {
       verBadgeEl.classList.remove('has-update');
@@ -1761,9 +1765,10 @@
     var body = updateOverlay.querySelector('.cursor-update-body');
     if (!body) return;
     if (cachedUpdate.available) {
+      var verChanged = cachedUpdate.local !== cachedUpdate.remote;
       var html = '<div class="cursor-update-info">' +
         '<div>当前版本: <span class="ver-current">v' + escapeHtml(cachedUpdate.local) + '</span></div>' +
-        '<div>最新版本: <span class="ver-new">v' + escapeHtml(cachedUpdate.remote) + '</span></div>' +
+        (verChanged ? '<div>最新版本: <span class="ver-new">v' + escapeHtml(cachedUpdate.remote) + '</span></div>' : '') +
         '<div>落后: <span class="ver-behind">' + cachedUpdate.behind + ' 个提交</span></div>' +
         '</div>';
       if (cachedUpdate.changelog) {

@@ -64,7 +64,7 @@ function checkUpdate(logFn: typeof log): UpdateCheckResult {
     result.behind = 0;
   }
 
-  result.available = result.behind > 0 && result.remote !== result.local;
+  result.available = result.behind > 0;
 
   if (result.available) {
     try {
