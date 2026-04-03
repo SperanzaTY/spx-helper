@@ -960,22 +960,19 @@ async function main() {
             continue;
           }
 
-          const turnUsage = (promptResult as any).usage as { inputTokens?: number; outputTokens?: number; totalTokens?: number } | null;
           const durationStr = elapsed < 60_000
             ? `${(elapsed / 1000).toFixed(1)}s`
             : `${Math.floor(elapsed / 60_000)}m${Math.round((elapsed % 60_000) / 1000)}s`;
-          const tokenStr = turnUsage
-            ? `${turnUsage.inputTokens ?? 0}↓ ${turnUsage.outputTokens ?? 0}↑`
-            : `${replyText.length} 字`;
-          remoteLog(`回复已生成 (${durationStr}, ${tokenStr})`);
+          remoteLog(`回复已生成 (${durationStr})`);
 
+          const modelLabel = remoteAgent?.currentModelId || agent?.currentModelId || currentModelId || 'default';
           const formattedReply =
-            `**Remote Agent**\n` +
+            `**Remote Agent** · \`${modelLabel}\`\n` +
             `━━━━━━━━━━━━━━\n` +
             `**指令**: \`${msgText.substring(0, 100)}\`\n\n` +
             `${replyText}\n\n` +
             `━━━━━━━━━━━━━━\n` +
-            `*⏱ ${durationStr} | ${tokenStr}*`;
+            `*⏱ ${durationStr} · ${path.basename(currentWorkspace)}*`;
 
           try {
             const escapedText = JSON.stringify(formattedReply.substring(0, 500));
@@ -1343,25 +1340,37 @@ async function main() {
       } else if (data.type === 'restart_agent') {
         if (acpStarting) { log('restart_agent ignored: already starting'); return; }
         log('restart_agent requested by user');
+
+        const restartLog = (msg: string) => {
+          log(`[restart] ${msg}`);
+          bridge.sendToPanel({ type: 'restart_progress', text: msg }).catch(() => {});
+        };
+
+        restartLog('开始重启 Agent...');
         bridge.sendToPanel({ type: 'status', connected: false, text: '重启中...' }).catch(() => {});
 
         if (agent) {
+          restartLog('正在停止主 Agent 进程...');
           agent.proc.removeAllListeners('exit');
           killAgent(agent.proc);
           agent = null;
+          restartLog('主 Agent 已停止');
         }
         if (remoteAgent) {
+          restartLog('正在停止 Remote Agent 进程...');
           remoteAgent.proc.removeAllListeners('exit');
           killAgent(remoteAgent.proc);
           remoteAgent = null;
+          restartLog('Remote Agent 已停止');
         }
         remoteEnabled = false;
 
         if (process.env.SEATALK_LAUNCHER) {
-          log('restart_agent: launcher detected, exiting with code 42 for auto-restart');
-          setTimeout(() => { process.exit(42); }, 500);
+          restartLog('检测到 launch.sh 守护进程，将通过 exit(42) 自动重启');
+          restartLog('进程即将退出，等待 launch.sh 拉起新进程...');
+          setTimeout(() => { process.exit(42); }, 800);
         } else {
-          log('restart_agent: no launcher, spawning new process with log file');
+          restartLog('独立模式：正在启动新进程...');
           const agentLogDir = path.join(os.homedir(), '.seatalk-agent', 'logs');
           try { fs.mkdirSync(agentLogDir, { recursive: true }); } catch {}
           const logFile = path.join(agentLogDir, 'restart.log');
@@ -1376,8 +1385,9 @@ async function main() {
           });
           child.unref();
           fs.closeSync(logFd);
-          log(`restart_agent: spawned pid=${child.pid}, log=${logFile}`);
-          setTimeout(() => { process.exit(0); }, 500);
+          restartLog(`新进程已启动 (pid=${child.pid})，日志: ${logFile}`);
+          restartLog('当前进程即将退出，新进程将自动注入 UI...');
+          setTimeout(() => { process.exit(0); }, 800);
         }
       } else if (data.type === 'update_check') {
         log('update_check requested by user');

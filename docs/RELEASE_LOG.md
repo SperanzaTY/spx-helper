@@ -42,6 +42,40 @@
 
 ---
 
+## v3.4.2 — 2026-04-03 — fix(agent): Remote 回复显示模型+工作区、重启进度日志
+
+**提交者**: @tianyi.liang
+**Commit Type**: fix
+**修改模块**: SeaTalk Agent
+
+### 变更说明
+
+#### Remote 回复信息增强
+- 标题行显示当前使用的 AI 模型名称（如 `Remote Agent · composer-2-fast`）
+- 尾部显示回复时长和当前工作区名（如 `⏱ 9.4s · SpxMgmtAppSop`）
+- 移除不可用的 token 消耗显示（CDP 调试确认 Cursor Agent CLI 的 `PromptResponse` 不返回 `usage` 字段）
+
+#### 重启 Agent 进度日志
+- 点击"重启 Agent"后在消息区域展示分步进度面板，包括：
+  - 后端分步日志（停止主/Remote Agent → 启动方式 → 新进程 PID）
+  - 自动计时器（已等待 Ns），30 秒后提示手动重启方式
+  - 重连成功后自动显示"✓ Agent 已重新连接！"
+- 后端 `restart_agent` 改为使用 `restartLog()` 分步推送 `restart_progress` 事件
+
+#### 主题适配
+- 重启日志颜色使用 CSS 变量（`--cp-text-dim` / `--cp-text-dim2`），适配深色/浅色主题
+
+### 测试验证
+
+| 模块 | 状态 |
+|------|------|
+| SeaTalk Agent | ✅ |
+| Chrome 扩展 | N/A |
+| MCP 工具 | N/A |
+| Cursor Skill | N/A |
+
+---
+
 ## v3.4.1 — 2026-03-02 — feat(agent): Remote 回复优化 + 前端注入去重 + 发版 Skill
 
 **提交者**: @tianyi.liang

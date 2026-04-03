@@ -1053,12 +1053,21 @@
           else { rcBtn.classList.add('show'); rcBtn.textContent = '重连'; }
         }
         updateSidebarBtnStatus();
+        if (wasDisconnected && cachedStatus.connected && _restartTimer) {
+          clearInterval(_restartTimer);
+          _restartTimer = null;
+          appendRestartLog('✓ Agent 已重新连接！');
+          var cdEl = messagesEl && messagesEl.querySelector('.restart-countdown');
+          if (cdEl) cdEl.style.display = 'none';
+        }
         // After update restart: detect reconnection and auto-close update overlay
         if (wasDisconnected && cachedStatus.connected && updateOverlay && updateOverlay.classList.contains('show')) {
           appendUpdateProgress('[ok] Agent 已重新连接！更新成功。');
           if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: 'update_check' }));
           setTimeout(function () { updateOverlay.classList.remove('show'); }, 3000);
         }
+      } else if (d.type === 'restart_progress') {
+        appendRestartLog(d.text || '');
       } else if (d.type === 'logs') {
         showLogsOverlay(d.lines || []);
       } else if (d.type === 'diagnostics') {
@@ -1356,6 +1365,50 @@
     if (!cachedUpdate.local) {
       if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: 'update_check' }));
     }
+  }
+
+  var _restartLogEl = null;
+  var _restartTimer = null;
+
+  function showRestartProgress() {
+    if (!messagesEl) return;
+    var existing = messagesEl.querySelector('.cursor-restart-progress');
+    if (existing) existing.remove();
+
+    var wrap = document.createElement('div');
+    wrap.className = 'cursor-restart-progress';
+    wrap.style.cssText = 'margin:12px 0;padding:12px 14px;background:rgba(78,201,176,0.08);border:1px solid rgba(78,201,176,0.25);border-radius:8px;font-size:12px;line-height:1.6;';
+    wrap.innerHTML =
+      '<div style="font-weight:600;color:#4ec9b0;margin-bottom:6px">⟳ Agent 重启中</div>' +
+      '<div class="restart-log-lines" style="color:var(--cp-text-dim);font-family:monospace;font-size:11px;max-height:180px;overflow-y:auto"></div>' +
+      '<div class="restart-countdown" style="color:var(--cp-text-dim2);margin-top:8px;font-size:11px"></div>';
+    messagesEl.appendChild(wrap);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+    _restartLogEl = wrap.querySelector('.restart-log-lines');
+
+    var countdownEl = wrap.querySelector('.restart-countdown');
+    var elapsed = 0;
+    if (_restartTimer) clearInterval(_restartTimer);
+    _restartTimer = setInterval(function () {
+      elapsed++;
+      if (countdownEl) countdownEl.textContent = '已等待 ' + elapsed + 's — 新进程启动后将自动重连...';
+      if (elapsed > 30 && countdownEl) {
+        countdownEl.innerHTML = '已等待 ' + elapsed + 's — <span style="color:#f5a623">如果长时间无响应，请在终端运行 seatalk 命令重启</span>';
+      }
+    }, 1000);
+  }
+
+  function appendRestartLog(text) {
+    if (!_restartLogEl) return;
+    var line = document.createElement('div');
+    var now = new Date();
+    var ts = [now.getHours(), now.getMinutes(), now.getSeconds()].map(function (n) { return n < 10 ? '0' + n : '' + n; }).join(':');
+    line.textContent = ts + '  ' + text;
+    line.style.cssText = 'padding:1px 0;opacity:0;transition:opacity 0.3s';
+    _restartLogEl.appendChild(line);
+    requestAnimationFrame(function () { line.style.opacity = '1'; });
+    _restartLogEl.scrollTop = _restartLogEl.scrollHeight;
+    if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight;
   }
 
   function showLogsOverlay(lines) {
@@ -2185,7 +2238,10 @@
       if (!item) return;
       var action = item.dataset.action;
       settingsDd.classList.remove('show');
-      if (action === 'reconnect_acp' || action === 'reinject_ui' || action === 'restart_agent') {
+      if (action === 'restart_agent') {
+        showRestartProgress();
+        if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: action }));
+      } else if (action === 'reconnect_acp' || action === 'reinject_ui') {
         if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: action }));
       } else if (action === 'show_logs') {
         if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: 'get_logs' }));
