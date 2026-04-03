@@ -31,6 +31,16 @@ def _load_cookies(force: bool = False) -> Dict[str, str]:
     return get_cookies(domain=DOMAIN, force=force)
 
 
+def _cookie_diagnostic(cookies: Dict[str, str]) -> str:
+    total = len(cookies)
+    if total == 0:
+        return "未读取到任何 Cookie（browser_cookie3 可能无法访问 Chrome Cookie 数据库）"
+    missing = [k for k in ("CSRF-TOKEN", "JSESSIONID", "DATA-SUITE-AUTH-userToken-v4") if k not in cookies]
+    if missing:
+        return f"读到 {total} 个 Cookie，但缺少关键认证 Cookie: {', '.join(missing)}"
+    return f"Cookie 完整（{total} 个），可能是 Cookie 已过期"
+
+
 # ──────────────────────────── HTTP 客户端 ────────────────────────────
 
 BASE_URL = f"https://{DOMAIN}"
@@ -88,12 +98,19 @@ def _request(method: str, path: str, params: dict = None, json_body: dict = None
                 headers=headers,
                 timeout=30,
             )
-            if resp.status_code in (401, 403) and attempt < MAX_RETRIES:
-                logger.warning(f"{resp.status_code} 重试中，刷新 cookie...")
-                cookies = _load_cookies(force=True)
-                if "CSRF-TOKEN" in cookies:
-                    headers["x-csrf-token"] = cookies["CSRF-TOKEN"]
-                continue
+            if resp.status_code in (401, 403):
+                if attempt < MAX_RETRIES:
+                    logger.warning(f"{resp.status_code} 重试中，刷新 cookie...")
+                    cookies = _load_cookies(force=True)
+                    if "CSRF-TOKEN" in cookies:
+                        headers["x-csrf-token"] = cookies["CSRF-TOKEN"]
+                    continue
+                diag = _cookie_diagnostic(cookies)
+                raise RuntimeError(
+                    f"请求 {path} 失败: {resp.status_code}\n"
+                    f"Cookie 诊断: {diag}\n"
+                    f"这通常是 Chrome 登录态问题，不是代码 bug。请在 Chrome 中打开 {BASE_URL} 确认已登录。"
+                )
             resp.raise_for_status()
             return resp.json()
         except requests.RequestException as e:

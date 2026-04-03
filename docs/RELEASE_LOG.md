@@ -42,6 +42,35 @@
 
 ---
 
+## v3.4.11 — 2026-03-02 — fix(mcp): Cookie 类 MCP 401 错误增加诊断信息
+
+**提交者**: @tianyi.liang
+**Commit Type**: fix
+**修改模块**: MCP 工具
+
+### 变更说明
+
+- datamap-query、scheduler-query、datastudio-mcp 三个 Cookie 认证的 MCP，在 401/403 重试耗尽后返回 Cookie 诊断信息
+- 诊断内容包括：读到几个 Cookie、缺少哪些关键 Cookie（CSRF-TOKEN / JSESSIONID / DATA-SUITE-AUTH-userToken-v4）
+- 明确提示"这通常是 Chrome 登录态问题，不是代码 bug"，避免 AI Agent 误判为代码问题而过度修改
+
+### 测试情况
+
+| 测试项 | 结果 | 备注 |
+|--------|------|------|
+| Chrome 扩展加载正常 | N/A | 未改动扩展代码 |
+| MCP 工具连接正常 | ✅ | datamap / scheduler / datastudio 三个 MCP 均测试通过 |
+| SeaTalk Agent 启动+注入正常 | N/A | |
+| SeaTalk Agent 重启后 UI 恢复 | N/A | |
+| 修改的功能正常工作 | ✅ | 正常情况下不影响，401 时会输出诊断 |
+| 已有功能未被破坏 | ✅ | 只改了错误路径的消息，不影响正常请求 |
+| 控制台无新增错误 | ✅ | |
+
+### 特别注意
+- 仅改错误消息，不改认证逻辑和重试逻辑
+
+---
+
 ## v3.4.10 — 2026-03-02 — feat(seatalk): send_seatalk_message 线程回复优化 + README 版本同步 hook
 
 **提交者**: @tianyi.liang

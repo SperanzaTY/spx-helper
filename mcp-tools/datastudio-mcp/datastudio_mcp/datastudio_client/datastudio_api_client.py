@@ -149,27 +149,33 @@ class DataStudioAPIClient:
                     logger.warning(f"收到401未授权响应，尝试刷新cookie（环境: {self.environment}）")
                     if self.auto_refresh and self.cookie_manager.import_from_browser('chrome', environment=self.environment):
                         self._update_session_cookies()
-                        continue  # 重试
+                        continue
                     else:
-                        last_exception = requests.exceptions.HTTPError(f"401 Unauthorized: {response.text}")
                         if attempt < self.max_retries - 1:
                             time.sleep(self.retry_delay * (attempt + 1))
                             continue
-                        else:
-                            raise last_exception
+                        diag = self._cookie_diagnostic()
+                        raise requests.exceptions.HTTPError(
+                            f"401 Unauthorized\n"
+                            f"Cookie 诊断: {diag}\n"
+                            f"这通常是 Chrome 登录态问题，不是代码 bug。请在 Chrome 中打开 DataSuite 确认已登录。"
+                        )
                 
                 elif response.status_code == 403:
                     logger.warning(f"收到403禁止访问响应，可能需要更新CSRF token（环境: {self.environment}）")
                     if self.auto_refresh and self.cookie_manager.import_from_browser('chrome', environment=self.environment):
                         self._update_session_cookies()
-                        continue  # 重试
+                        continue
                     else:
-                        last_exception = requests.exceptions.HTTPError(f"403 Forbidden: {response.text}")
                         if attempt < self.max_retries - 1:
                             time.sleep(self.retry_delay * (attempt + 1))
                             continue
-                        else:
-                            raise last_exception
+                        diag = self._cookie_diagnostic()
+                        raise requests.exceptions.HTTPError(
+                            f"403 Forbidden\n"
+                            f"Cookie 诊断: {diag}\n"
+                            f"这通常是 Chrome 登录态问题，不是代码 bug。请在 Chrome 中打开 DataSuite 确认已登录。"
+                        )
                 
                 # 检查是否成功
                 response.raise_for_status()
@@ -197,6 +203,16 @@ class DataStudioAPIClient:
         
         raise last_exception
     
+    def _cookie_diagnostic(self) -> str:
+        cookies = self.cookie_manager.get_cookies(environment=self.environment)
+        total = len(cookies)
+        if total == 0:
+            return "未读取到任何 Cookie（browser_cookie3 可能无法访问 Chrome Cookie 数据库）"
+        missing = [k for k in ("CSRF-TOKEN", "JSESSIONID", "DATA-SUITE-AUTH-userToken-v4") if k not in cookies]
+        if missing:
+            return f"读到 {total} 个 Cookie，但缺少关键认证 Cookie: {', '.join(missing)}"
+        return f"Cookie 完整（{total} 个），可能是 Cookie 已过期"
+
     def update_cookies_from_browser(self, browser: str = 'chrome') -> bool:
         """
         手动从浏览器更新cookies
