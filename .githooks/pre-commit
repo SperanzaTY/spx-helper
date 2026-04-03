@@ -152,6 +152,20 @@ if [ "$SECRETS_FOUND" -eq 1 ]; then
   echo ""
 fi
 
+# ── 5. README 版本号自动同步 ──
+
+if echo "$STAGED_FILES" | grep -q "chrome-extension/manifest.json"; then
+  NEW_VER=$(grep '"version"' chrome-extension/manifest.json | head -1 | sed 's/.*"\([0-9.]*\)".*/\1/')
+  if [ -n "$NEW_VER" ] && [ -f "README.md" ]; then
+    OLD_BADGE=$(grep -o 'version-[0-9.]*' README.md | head -1 | sed 's/version-//')
+    if [ -n "$OLD_BADGE" ] && [ "$OLD_BADGE" != "$NEW_VER" ]; then
+      sed -i '' "s/version-${OLD_BADGE}-blue/version-${NEW_VER}-blue/" README.md
+      git add README.md
+      echo "  📌 README.md version badge 已自动同步: v${OLD_BADGE} → v${NEW_VER}"
+    fi
+  fi
+fi
+
 # ── 结果 ──
 
 if [ "$HAS_ERRORS" -eq 1 ]; then

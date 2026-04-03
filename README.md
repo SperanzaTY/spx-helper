@@ -2,7 +2,7 @@
 
 > **Shopee 大数据开发助手** — Chrome 扩展 + MCP 工具套件 + SeaTalk AI Agent
 
-[![Version](https://img.shields.io/badge/version-3.2.1-blue.svg)](https://github.com/SperanzaTY/spx-helper/releases)
+[![Version](https://img.shields.io/badge/version-3.4.10-blue.svg)](https://github.com/SperanzaTY/spx-helper/releases)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 SPX Helper 是一套为 Shopee 大数据开发工程师打造的效率工具集，包含四个核心模块：
@@ -54,10 +54,10 @@ git clone https://github.com/SperanzaTY/spx-helper.git
 | 工具 | 凭证来源 | 获取方式 |
 | ---- | -------- | -------- |
 | presto-query / api-trace | Personal Token + 用户名 | [DataSuite API 管理](https://datasuite.shopee.io/dataservice/ds_api_management) → ☰ → Personal Token |
-| spark-query | DMP BigData Account | [DataSuite](https://datasuite.shopee.io) → **RAM** → Profile → BigData Account |
+| spark-query | BigData Account | [DataSuite RAM Profile](https://datasuite.shopee.io/ram/personal/profile) → BigData Account |
 | ck-query | 团队统一配置 | 密码已配置在 `ck_mcp_server.py` 中 |
 | seatalk-reader | 无需凭证 | 需 SeaTalk 开启 CDP |
-| scheduler-query | 无需凭证 | 通过浏览器 Cookie 自动认证 |
+| scheduler-query / datamap-query / datastudio-mcp | 无需凭证 | 通过 chrome-auth 自动从浏览器 Cookie 认证 |
 | seatalk-group | InfraBot Token | 找 @tianyi.liang 获取 |
 
 详见 [MCP 工具指南 — 凭证获取](docs/guides/MCP_TOOLS.md#三凭证获取)。
@@ -71,13 +71,16 @@ spx-helper/
 ├── chrome-extension/        # Chrome 扩展
 ├── seatalk-agent/           # SeaTalk AI Agent（Node + TypeScript）
 ├── mcp-tools/               # MCP 工具套件
+│   ├── chrome-auth/         # 共享认证库（Cookie + CDP）
 │   ├── presto-query/        # Presto 查询
 │   ├── ck-query/            # ClickHouse 查询
 │   ├── spark-query/         # Spark SQL（Livy）
 │   ├── api-trace/           # API 血缘溯源
 │   ├── seatalk-reader/      # SeaTalk 消息读取/发送
 │   ├── seatalk-group/       # SeaTalk 群组管理
-│   └── scheduler-query/     # Scheduler 任务查询
+│   ├── scheduler-query/     # Scheduler 任务查询
+│   ├── datamap-query/       # DataMap 数据资产查询
+│   └── datastudio-mcp/      # DataStudio Workflow/Notebook
 ├── .cursor/skills/          # Cursor Skills
 ├── .githooks/               # Git Hooks（commit-msg, pre-commit, pre-push）
 ├── scripts/                 # 构建/发布/测试脚本

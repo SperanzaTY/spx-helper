@@ -42,6 +42,48 @@
 
 ---
 
+## v3.4.10 — 2026-03-02 — feat(seatalk): send_seatalk_message 线程回复优化 + README 版本同步 hook
+
+**提交者**: @tianyi.liang
+**Commit Type**: feat
+**修改模块**: MCP 工具 / Git Hooks / 文档
+
+### 变更说明
+
+#### SeaTalk 线程回复优化（seatalk-reader MCP）
+- `send_seatalk_message` 新增 `reply_to_keyword` 和 `reply_to_sender` 参数
+- 传入关键词后，内部通过 SQLite 一次 CDP 往返自动查到目标消息的 `mid`，直接发送线程回复
+- 原来需要 3 步 MCP 调用（query_messages_sqlite → AI 提取 mid → send_seatalk_message），现在 1 步完成
+- `root_mid` 参数保留，向后兼容；同时提供 `root_mid` 时优先使用 `root_mid`
+- 发送者过滤支持模糊匹配名字
+
+#### README 版本号自动同步 hook
+- `pre-commit` hook 新增第 5 步：当 `chrome-extension/manifest.json` 在暂存区时，自动将 `README.md` 中的 version badge 同步为最新版本号
+- 使用 macOS 兼容的 `grep -o`（不依赖 `grep -oP`）
+
+#### README.md 内容更新
+- 版本 badge 3.2.1 → 3.4.10
+- 凭证表：spark-query 凭证来源改为 "BigData Account"，新增 datamap-query / datastudio-mcp
+- 项目结构：补充 chrome-auth、datamap-query、datastudio-mcp 目录
+
+### 测试情况
+
+| 测试项 | 结果 | 备注 |
+|--------|------|------|
+| Chrome 扩展加载正常 | N/A | 本次未改动扩展代码 |
+| MCP 工具连接正常 | ✅ | seatalk-reader MCP CDP 测试通过 |
+| SeaTalk Agent 启动+注入正常 | N/A | 未改动 Agent 代码 |
+| SeaTalk Agent 重启后 UI 恢复 | N/A | |
+| 修改的功能正常工作 | ✅ | CDP 实测 SQLite mid 查询+发送者过滤均正确返回 |
+| 已有功能未被破坏 | ✅ | root_mid 向后兼容，不影响原有发送流程 |
+| 控制台无新增错误 | ✅ | |
+
+### 特别注意
+- MCP server 需重启才能加载新参数（`reply_to_keyword` / `reply_to_sender`）
+- `reply_to_keyword` 依赖 SeaTalk SQLite（`window.sqlite`），SeaTalk 刚启动时可能不可用
+
+---
+
 ## v3.4.9 — 2026-04-03 — feat(mcp): chrome-auth 共享库 + datastudio-mcp + datamap 修复 + 推送策略
 
 **提交者**: @tianyi.liang

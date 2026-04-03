@@ -1817,6 +1817,8 @@ async def send_seatalk_message(
     format: str = "text",
     session_name: str = "",
     root_mid: str = "",
+    reply_to_keyword: str = "",
+    reply_to_sender: str = "",
 ) -> str:
     """向指定的 SeaTalk 会话发送消息（需用户确认）。
 
@@ -1849,13 +1851,15 @@ async def send_seatalk_message(
     1. 先用 list_seatalk_chats 获取会话列表，确定 session 格式
     2. session 格式为 "group-123456" 或 "buddy-123456"
     3. 如果不确定 session ID，可以用 session_name 模糊匹配
-    4. 要在某条消息的线程中回复，传入 root_mid 参数（消息的 mid）
+    4. 要在某条消息的线程中回复，有两种方式（见下方"线程回复"）
     5. 私聊前请确认对方是好友（search_seatalk_users 返回的 isFavorite 字段）
 
-    线程回复：
-    - root_mid 为目标消息的 mid，发送后消息将出现在该消息的线程（Thread）中
-    - 可通过 query_messages_sqlite 或 read_current_chat 获取消息的 mid
-    - 不传 root_mid 则为普通消息发送
+    线程回复（两种方式）：
+    - 方式1（推荐）：传 reply_to_keyword="关键词"，自动在目标会话中查找包含该关键词的最近消息并回复其线程。
+      可选加 reply_to_sender="发送者名字" 进一步限定。一步完成，无需先查 mid。
+    - 方式2：先用 query_messages_sqlite 获取 mid，再传 root_mid="消息mid"
+    - 如果同时提供 root_mid 和 reply_to_keyword，root_mid 优先
+    - 不传 root_mid 和 reply_to_keyword 则为普通消息发送
 
     Args:
         session: 目标会话，格式 "group-{id}" 或 "buddy-{id}"
@@ -1863,6 +1867,9 @@ async def send_seatalk_message(
         format: "text"(纯文本) 或 "markdown"(支持加粗、斜体、代码等)
         session_name: 会话名称（模糊匹配，如果没有 session 参数则用这个查找）
         root_mid: 线程回复的目标消息 mid（可选，传入后消息将作为该消息的线程回复）
+        reply_to_keyword: 线程回复关键词（可选）。自动在目标会话的 SQLite 中搜索包含该关键词的最近消息，
+            取其 mid 作为线程回复目标。比手动查 mid 更快捷。
+        reply_to_sender: 配合 reply_to_keyword 使用（可选）。限定搜索范围到特定发送者（模糊匹配名字）。
     """
     if not text:
         return "请提供 text（消息内容）参数"
@@ -1923,6 +1930,50 @@ async def send_seatalk_message(
         sess_name = await _eval_js(name_js) or session
     except Exception:
         sess_name = session
+
+    # Auto-lookup mid via SQLite when reply_to_keyword is provided
+    if not root_mid and reply_to_keyword and session:
+        safe_kw = json.dumps(f"%{reply_to_keyword}%")
+        sender_filter = ""
+        if reply_to_sender:
+            sender_filter = f"""
+                var senderKw = {json.dumps(reply_to_sender)}.toLowerCase();
+                rows = rows.filter(function(r) {{
+                    var uName = (info[r.u] || {{}}).name || '';
+                    return uName.toLowerCase().indexOf(senderKw) >= 0;
+                }});"""
+
+        lookup_js = f"""(function(){{
+            if (!window.sqlite || typeof window.sqlite.all !== 'function')
+                return JSON.stringify({{error: 'sqlite not available'}});
+            return window.sqlite.all(
+                "SELECT mid, u, c, ts FROM chat_message WHERE sid = ? AND c LIKE ? ORDER BY ts DESC LIMIT 20",
+                [{json.dumps(session)}, {safe_kw}]
+            ).then(function(rows) {{
+                var info = window.store.getState().contact.userInfo || {{}};
+                {sender_filter}
+                if (!rows.length) return JSON.stringify({{error: 'no match'}});
+                var best = rows[0];
+                var senderName = (info[best.u] || {{}}).name || String(best.u);
+                var parsed = {{}};
+                try {{ parsed = JSON.parse(best.c); }} catch(_) {{}}
+                var text = parsed.c || parsed.text || '';
+                return JSON.stringify({{mid: best.mid, sender: senderName, text: String(text).substring(0, 100), ts: best.ts}});
+            }});
+        }})()"""
+
+        try:
+            raw = await _eval_js(lookup_js)
+            lookup = json.loads(raw) if isinstance(raw, str) else raw
+            if isinstance(lookup, dict) and lookup.get("mid"):
+                root_mid = str(lookup["mid"])
+            elif isinstance(lookup, dict) and lookup.get("error") == "no match":
+                scope = f" (发送者: {reply_to_sender})" if reply_to_sender else ""
+                return f"在 {sess_name} ({session}) 中未找到包含 '{reply_to_keyword}' 的消息{scope}。"
+            elif isinstance(lookup, dict) and lookup.get("error"):
+                return f"SQLite 查询失败: {lookup['error']}"
+        except Exception as e:
+            return f"查找线程目标消息失败: {e}"
 
     # Build bridge payload
     payload_fields = {
