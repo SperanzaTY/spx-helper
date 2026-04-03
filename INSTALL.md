@@ -74,10 +74,10 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 |------|---------|
 | **Presto Personal Token** | [DataSuite API 管理](https://datasuite.shopee.io/dataservice/ds_api_management) → ☰ → Personal Token |
 | **Shopee 用户名** | 你的用户名（**不是邮箱**），格式如 `john.doe` |
-| **DMP 用户名/密码**（可选，Spark 用） | [DataSuite](https://datasuite.shopee.io) → **RAM** → Profile → BigData Account（点 View 查看） |
+| **BigData Account**（可选，Spark 用） | [DataSuite RAM Profile](https://datasuite.shopee.io/ram/personal/profile) → **BigData Account** 区域 → Account 即用户名，Password 点 View 查看 |
 | **InfraBot Token**（可选，群管理用） | 找 @tianyi.liang 获取 |
 
-> Presto 用户名和 DMP 用户名可能不同。Presto 用 Shopee 用户名，DMP 用 BigData Account 里的用户名。
+> Presto 用户名和 BigData Account 用户名可能不同。Presto 用 Shopee 用户名，Spark 用 BigData Account 里的用户名。
 
 #### A.3 配置 MCP
 
@@ -107,8 +107,8 @@ cursor ~/.cursor/mcp.json
       "command": "uvx",
       "args": ["--from", "git+https://git.garena.com/tianyi.liang/spx-helper@release#subdirectory=mcp-tools/spark-query", "spark-query-mcp"],
       "env": {
-        "LIVY_USERNAME": "替换为DMP用户名",
-        "LIVY_PASSWORD": "替换为DMP密码"
+        "LIVY_USERNAME": "替换为 BigData Account 用户名",
+        "LIVY_PASSWORD": "替换为 BigData Account 密码"
       }
     },
     "api-trace": {

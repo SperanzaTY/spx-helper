@@ -1,0 +1,55 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "datastudio-mcp"
+version = "0.1.0"
+description = "A MCP server for DataStudio asset management in Cursor (Shopee Internal)"
+readme = "README.md"
+requires-python = ">=3.12"
+license = {text = "Internal Use Only"}  # 如果是内部项目
+authors = [
+    {name = "jialiang.nie", email = "jialiang.nie@shopee.com"}
+]
+keywords = ["mcp", "datastudio", "cursor", "shopee", "seamoney"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries",
+    "Private :: Do Not Upload",  # 标记为内部项目
+]
+
+dependencies = [
+    "fastmcp>=2.13.1",
+    "requests>=2.32.0",
+    "PyJWT>=2.8.0",
+    "cryptography>=3.4.8",
+    "browser-cookie3>=0.19.1",
+    "python-dateutil>=2.8.2",
+    "chrome-auth",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "ruff>=0.1.0",
+]
+
+[project.urls]
+Homepage = "https://git.garena.com/shopee/seamoney-data/data-mart/datastudio_mcp"
+Repository = "https://git.garena.com/shopee/seamoney-data/data-mart/datastudio_mcp.git"
+Issues = "https://git.garena.com/shopee/seamoney-data/data-mart/datastudio_mcp/-/issues"
+Documentation = "https://git.garena.com/shopee/seamoney-data/data-mart/datastudio_mcp/-/blob/main/README.md"
+
+[project.scripts]
+datastudio-mcp = "datastudio_mcp.mcp_server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["datastudio_mcp"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"

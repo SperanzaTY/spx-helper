@@ -111,8 +111,8 @@ spx-helper/
 GitLab（主仓库）：https://git.garena.com/tianyi.liang/spx-helper
 GitHub（备份）  ：https://github.com/SperanzaTY/spx-helper
 
-推送时必须同步：
-git push gitlab release && git push origin release
+推送策略：推送 GitLab 后自动尝试同步 GitHub（失败不阻塞）
+git push gitlab release
 ```
 
 ---

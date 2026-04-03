@@ -51,9 +51,9 @@ python3 -c "import asyncio; from <module> import mcp; asyncio.run(mcp.list_tools
 - **详细文档**：`mcp-tools/presto-query/README.md`
 
 ### spark-query — Spark SQL 查询
-- **用途**：通过 Livy REST API 提交 Spark SQL 到 DMP 集群
+- **用途**：通过 Livy REST API 提交 Spark SQL
 - **认证**：环境变量 `LIVY_USERNAME` + `LIVY_PASSWORD`
-- **凭证获取**：https://datasuite.shopee.io → 右上角头像 → Profile → BigData Account
+- **凭证获取**：[DataSuite RAM Profile](https://datasuite.shopee.io/ram/personal/profile) → BigData Account
 - **核心工具**：
   - `spark_sql(sql, session_name?)` — 执行 Spark SQL
   - `list_sessions()` — 列出活跃 Livy Session

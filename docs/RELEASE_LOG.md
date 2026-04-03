@@ -42,6 +42,48 @@
 
 ---
 
+## v3.4.9 — 2026-04-03 — feat(mcp): chrome-auth 共享库 + datastudio-mcp + datamap 修复 + 推送策略
+
+**提交者**: @tianyi.liang
+**Commit Type**: feat
+**修改模块**: MCP 工具 / Git Hooks / 文档
+
+### 变更说明
+
+#### 推送策略调整
+- **pre-push hook 重构**：所有检查以 `gitlab/release` 为基准；推送 GitLab 成功后自动尝试同步 GitHub（失败不阻塞）；推送非 GitLab remote 时跳过检查直接放行
+- **配套文档/规则同步**：`.cursorrules`、`git-workflow.mdc`、`release-publish/SKILL.md`、`README.md` 推送策略描述统一更新
+
+#### 文档凭证描述修正
+- **DMP → BigData Account**：`INSTALL.md`、`MCP_TOOLS.md`、`spark-query/README.md`、`mcp_config_template.json`、`mcp-tools.mdc` 中所有 "DMP 用户名/密码" 描述修正为 "BigData Account"，获取路径统一为 `datasuite.shopee.io/ram/personal/profile`
+- **Remote 描述与代码对齐**：`seatalk-agent.mdc` 中 `git fetch origin release` 改为描述 `getUpdateRemoteName()` 优先级逻辑；`seatalk-troubleshoot/tools-reference.md` 排查命令改为以 gitlab 为基准
+
+#### DataMap MCP 修复（前次未提交）
+- `search_global` 改用 `/datamap/searchcenter/api/v1/global/preview_search` 端点
+- `get_table_audit_log` 补充必需的 `version=1` 参数
+- `get_table_score` 恢复原始实现
+- chrome-auth 共享库：CDP `suppress_origin=True` 修复 403
+
+#### 其他
+- `.gitignore` 新增 `seatalk-agent/.config/` 排除加密凭证文件
+
+### 测试情况
+
+| 测试项 | 结果 | 备注 |
+|--------|------|------|
+| Chrome 扩展加载正常 | N/A | |
+| MCP 工具连接正常 | ✅ | datamap-query、scheduler-query 通过 CDP 验证 |
+| SeaTalk Agent 启动+注入正常 | N/A | |
+| 修改的功能正常工作 | ✅ | pre-push hook 语法检查通过 |
+| 已有功能未被破坏 | ✅ | |
+| 控制台无新增错误 | ✅ | |
+
+### 特别注意
+- pre-push hook 通过 `trap EXIT` 实现 GitHub 自动同步，在 GitLab 推送完成后执行
+- DataMap API 非官方，端点可能随平台更新变化
+
+---
+
 ## v3.4.8 — 2026-04-03 — fix: 系统命令不受远程控制开关影响
 
 **提交者**: @tianyi.liang

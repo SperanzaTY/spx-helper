@@ -1,9 +1,17 @@
 #!/bin/bash
 # pre-push hook — 推送到 release 分支前的检查
 # 安装：git config core.hooksPath .githooks
+# git 会传入: $1=remote名称  $2=remote URL
+#
+# 推送策略：
+#   GitLab (gitlab) 是主仓库，所有检查以 gitlab/release 为基准
+#   推送 GitLab 通过后，自动尝试推送 GitHub（失败不阻塞）
+#   推送 GitHub 时跳过检查（已在 GitLab 推送时检查过）
 
 set -e
 
+PUSH_REMOTE="$1"
+PUSH_URL="$2"
 BRANCH=$(git rev-parse --abbrev-ref HEAD)
 
 # 完全阻止向 main 分支推送 — main 只能通过 MR 从 release 合入
@@ -21,6 +29,16 @@ if [ "$BRANCH" != "release" ]; then
   exit 0
 fi
 
+PRIMARY_REMOTE="gitlab"
+
+# 推送非 GitLab remote 时，跳过检查直接放行
+if [ "$PUSH_REMOTE" != "$PRIMARY_REMOTE" ]; then
+  echo ""
+  echo "📌 推送到 ${PUSH_REMOTE}，跳过检查（检查以 ${PRIMARY_REMOTE} 为基准）"
+  echo ""
+  exit 0
+fi
+
 RELEASE_LOG="docs/RELEASE_LOG.md"
 VERSION=$(grep '"version"' chrome-extension/manifest.json | head -1 | sed 's/.*"\([0-9.]*\)".*/\1/')
 COMMIT_SHORT=$(git log -1 --format='%h')
@@ -32,36 +50,32 @@ echo "║  SPX Helper — Release 分支推送检查                      ║"
 echo "╠══════════════════════════════════════════════════════════╣"
 echo "║  当前版本: v${VERSION}"
 echo "║  最新提交: ${COMMIT_SHORT} ${COMMIT_MSG}"
+echo "║  推送目标: ${PUSH_REMOTE} (${PUSH_URL})"
 echo "╚══════════════════════════════════════════════════════════╝"
 echo ""
 
 HAS_ERRORS=0
 
-# 0. 检查远程是否有新提交（防止覆盖他人代码）
-echo "🔍 正在检查远程仓库..."
-for REMOTE in $(git remote); do
-  git fetch "$REMOTE" release --quiet 2>/dev/null || true
-done
-
-for REMOTE in $(git remote); do
-  REMOTE_REF="$REMOTE/release"
-  if git rev-parse --verify "$REMOTE_REF" >/dev/null 2>&1; then
-    BEHIND=$(git rev-list --count HEAD.."$REMOTE_REF" 2>/dev/null || echo "0")
-    if [ "$BEHIND" -gt 0 ]; then
-      REMOTE_VER=$(git show "$REMOTE_REF:chrome-extension/manifest.json" 2>/dev/null | grep '"version"' | head -1 | sed 's/.*"\([0-9.]*\)".*/\1/' || echo "?")
-      echo "❌ 本地落后于 ${REMOTE}/release ${BEHIND} 个提交！(远程版本: v${REMOTE_VER})"
-      echo "   有人在你开发期间推送了新版本。"
-      echo ""
-      echo "   请先执行："
-      echo "     git pull --rebase ${REMOTE} release"
-      echo "   解决可能的冲突后再推送。"
-      echo ""
-      HAS_ERRORS=1
-    fi
+# 0. 检查 GitLab 远程是否有新提交
+echo "🔍 正在检查 ${PRIMARY_REMOTE}/release ..."
+git fetch "$PRIMARY_REMOTE" release --quiet 2>/dev/null || true
+REMOTE_REF="$PRIMARY_REMOTE/release"
+if git rev-parse --verify "$REMOTE_REF" >/dev/null 2>&1; then
+  BEHIND=$(git rev-list --count HEAD.."$REMOTE_REF" 2>/dev/null || echo "0")
+  if [ "$BEHIND" -gt 0 ]; then
+    REMOTE_VER=$(git show "$REMOTE_REF:chrome-extension/manifest.json" 2>/dev/null | grep '"version"' | head -1 | sed 's/.*"\([0-9.]*\)".*/\1/' || echo "?")
+    echo "❌ 本地落后于 ${PRIMARY_REMOTE}/release ${BEHIND} 个提交！(远程版本: v${REMOTE_VER})"
+    echo "   有人在你开发期间推送了新版本。"
+    echo ""
+    echo "   请先执行："
+    echo "     git pull --rebase ${PRIMARY_REMOTE} release"
+    echo "   解决可能的冲突后再推送。"
+    echo ""
+    HAS_ERRORS=1
   fi
-done
+fi
 if [ "$HAS_ERRORS" -eq 0 ]; then
-  echo "✅ 远程仓库无新提交"
+  echo "✅ ${PRIMARY_REMOTE}/release 无新提交"
 fi
 
 # 1. 检查 RELEASE_LOG 在最新一次提交中是否被修改
@@ -155,27 +169,24 @@ if [ "$DOC_ERRORS" -eq 0 ]; then
   fi
 fi
 
-# 2.6 检查 feat/fix 类型提交是否升了版本号
-for REMOTE in $(git remote); do
-  REMOTE_REF="$REMOTE/release"
-  if git rev-parse --verify "$REMOTE_REF" >/dev/null 2>&1; then
-    REMOTE_VER=$(git show "$REMOTE_REF:chrome-extension/manifest.json" 2>/dev/null | grep '"version"' | head -1 | sed 's/.*"\([0-9.]*\)".*/\1/' || echo "")
-    if [ -n "$REMOTE_VER" ] && [ "$REMOTE_VER" = "$VERSION" ]; then
-      FEAT_FIX_COUNT=$(git log --oneline "$REMOTE_REF"..HEAD --grep='^feat' --grep='^fix' --extended-regexp 2>/dev/null | wc -l | tr -d ' ')
-      if [ "$FEAT_FIX_COUNT" -gt 0 ]; then
-        echo "❌ 检测到 feat/fix 类型提交但未升级版本号！"
-        echo "   远程版本: v${REMOTE_VER}  →  本地版本: v${VERSION}（未变化）"
-        echo "   包含 ${FEAT_FIX_COUNT} 个 feat/fix 提交:"
-        git log --oneline "$REMOTE_REF"..HEAD --grep='^feat' --grep='^fix' --extended-regexp 2>/dev/null | sed 's/^/     /'
-        echo ""
-        echo "   请升级版本号（修改 manifest.json + package.json + seatalk-agent/package.json）"
-        echo ""
-        HAS_ERRORS=1
-      fi
+# 2.6 检查 feat/fix 类型提交是否升了版本号（对比 GitLab）
+REMOTE_REF="$PRIMARY_REMOTE/release"
+if git rev-parse --verify "$REMOTE_REF" >/dev/null 2>&1; then
+  REMOTE_VER=$(git show "$REMOTE_REF:chrome-extension/manifest.json" 2>/dev/null | grep '"version"' | head -1 | sed 's/.*"\([0-9.]*\)".*/\1/' || echo "")
+  if [ -n "$REMOTE_VER" ] && [ "$REMOTE_VER" = "$VERSION" ]; then
+    FEAT_FIX_COUNT=$(git log --oneline "$REMOTE_REF"..HEAD --grep='^feat' --grep='^fix' --extended-regexp 2>/dev/null | wc -l | tr -d ' ')
+    if [ "$FEAT_FIX_COUNT" -gt 0 ]; then
+      echo "❌ 检测到 feat/fix 类型提交但未升级版本号！"
+      echo "   远程版本: v${REMOTE_VER}  →  本地版本: v${VERSION}（未变化）"
+      echo "   包含 ${FEAT_FIX_COUNT} 个 feat/fix 提交:"
+      git log --oneline "$REMOTE_REF"..HEAD --grep='^feat' --grep='^fix' --extended-regexp 2>/dev/null | sed 's/^/     /'
+      echo ""
+      echo "   请升级版本号（修改 manifest.json + package.json + seatalk-agent/package.json）"
+      echo ""
+      HAS_ERRORS=1
     fi
-    break
   fi
-done
+fi
 
 # 2.7 CDP 功能验证（仅在 seatalk-agent/src/ 有变更时）
 AGENT_SRC_CHANGED=$(echo "$CHANGED_FILES" | grep -cE "^seatalk-agent/src/" || true)
@@ -222,13 +233,10 @@ CC_PATTERN="^(${VALID_TYPES})(\([a-zA-Z0-9_-]+\))?\!?:\ .+"
 MERGE_PATTERN="^(Merge |Revert |fixup! |squash! |amend! )"
 
 BASE_REF=""
-for REMOTE in $(git remote); do
-  REF="$REMOTE/release"
-  if git rev-parse --verify "$REF" >/dev/null 2>&1; then
-    BASE_REF="$REF"
-    break
-  fi
-done
+REMOTE_REF="$PRIMARY_REMOTE/release"
+if git rev-parse --verify "$REMOTE_REF" >/dev/null 2>&1; then
+  BASE_REF="$REMOTE_REF"
+fi
 
 if [ -n "$BASE_REF" ]; then
   BAD_COMMITS=""
@@ -257,23 +265,11 @@ if [ -n "$BASE_REF" ]; then
 fi
 
 # 4. 提醒：SeaTalk Agent 修改需要重启
-AGENT_CHANGED=$(git diff --name-only origin/release...HEAD 2>/dev/null | grep -c "^seatalk-agent/" || true)
+AGENT_CHANGED=$(git diff --name-only "$PRIMARY_REMOTE/release"...HEAD 2>/dev/null | grep -c "^seatalk-agent/" || true)
 if [ "$AGENT_CHANGED" -gt 0 ]; then
   echo ""
   echo "⚠️  本次推送包含 SeaTalk Agent 修改（${AGENT_CHANGED} 个文件）"
   echo "   提醒：其他团队成员需要重启 Agent 才能生效。"
-fi
-
-# 5. 双仓库推送提醒
-REMOTES=$(git remote)
-REMOTE_COUNT=$(echo "$REMOTES" | wc -l | tr -d ' ')
-if [ "$REMOTE_COUNT" -gt 1 ]; then
-  echo ""
-  echo "📌 提醒：本项目维护双仓库，请确保同时推送到两个 remote："
-  for R in $REMOTES; do
-    R_URL=$(git remote get-url "$R" 2>/dev/null || echo "?")
-    echo "     git push $R release  ($R_URL)"
-  done
 fi
 
 echo ""
@@ -290,3 +286,18 @@ fi
 
 echo "✅ 所有检查通过，正在推送..."
 echo ""
+
+# GitLab 推送成功后，自动尝试同步到 GitHub（失败不阻塞）
+# 注意：这段在 git push gitlab 成功后执行（hook exit 0 后 git 完成推送）
+# 因为 pre-push 在推送前执行，所以用 trap 在 hook 正常退出后安排后台同步
+sync_github() {
+  if git remote get-url origin >/dev/null 2>&1; then
+    echo "📌 自动同步到 GitHub (origin)..."
+    if git push origin release 2>/dev/null; then
+      echo "✅ GitHub 同步成功"
+    else
+      echo "⚠️  GitHub 同步失败（不影响本次发版，owner 会后续同步）"
+    fi
+  fi
+}
+trap sync_github EXIT

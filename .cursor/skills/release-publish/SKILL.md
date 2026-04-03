@@ -38,13 +38,12 @@ description: >-
 # 确认分支
 git rev-parse --abbrev-ref HEAD   # 必须是 release
 
-# 拉取远程最新
-git fetch gitlab release && git fetch origin release
+# 拉取远程最新（以 GitLab 为基准）
+git fetch gitlab release
 
 # 检查是否落后
 git rev-list --count HEAD..gitlab/release
-git rev-list --count HEAD..origin/release
-# 若 >0，必须先 git pull --rebase <remote> release
+# 若 >0，必须先 git pull --rebase gitlab release
 ```
 
 **阻断条件**：不在 release 分支、本地落后于远程 → 必须先解决。
@@ -236,35 +235,31 @@ git commit -m "<type>: <description>"
 
 ## Step 8：推送到远程仓库
 
-本项目维护两个远程仓库，**GitLab 是主仓库，必须推送成功**：
+推送到 GitLab，pre-push hook 会自动尝试同步 GitHub：
 
 ```bash
-# 1. 主仓库（必须成功）
 git push gitlab release
-
-# 2. 备份仓库（尽力推送，失败不阻断）
-git push origin release || echo "⚠️ GitHub 推送失败（可能无权限），已跳过"
 ```
 
-| Remote | 地址 | 优先级 |
-|--------|------|--------|
-| gitlab | `https://git.garena.com/tianyi.liang/spx-helper.git` | **必须成功** — 主仓库，自动更新追踪源 |
-| origin | `https://github.com/SperanzaTY/spx-helper.git` | 尽力推送 — 备份仓库，部分同事可能无权限 |
+| Remote | 地址 | 说明 |
+|--------|------|------|
+| gitlab | `https://git.garena.com/tianyi.liang/spx-helper.git` | 主仓库，检查基准 |
+| origin | `https://github.com/SperanzaTY/spx-helper.git` | 自动同步，失败不阻塞 |
 
-- GitLab 推送失败 → **阻断发版**，必须排查原因
-- GitHub 推送失败 → 告知用户，由仓库 owner 后续手动同步即可
+- GitLab 推送失败 → 阻断发版，排查原因
+- GitHub 自动同步失败 → 不阻塞，owner 会后续同步
 
 ## Step 9：推送后验证
 
 ```bash
 git log --oneline -3                    # 确认提交记录
 git rev-parse HEAD                      # 本地 HEAD
-git ls-remote gitlab release | head -1  # GitLab 远程 HEAD（必须一致）
-git ls-remote origin release | head -1  # GitHub 远程 HEAD（可能滞后）
+git ls-remote gitlab release | head -1  # GitLab 远程 HEAD
+git ls-remote origin release | head -1  # GitHub 远程 HEAD（可能已自动同步）
 ```
 
-- 本地 HEAD 与 GitLab HEAD **必须一致**，不一致则立即告知用户
-- GitHub HEAD 可能滞后（同事无推送权限），记录状态即可
+- GitLab HEAD 与本地 HEAD 一致 → 推送成功
+- GitHub HEAD 一致 → 自动同步成功；不一致 → owner 后续同步
 
 ---
 
@@ -304,7 +299,7 @@ Hook 检查项：
 ## 禁止事项
 
 - **禁止跳过测试直接发版**（测试情况表不能全空）
-- **禁止不推 GitLab**（GitLab 是主仓库，必须推送成功）
+- **禁止只推 GitHub 不推 GitLab**（GitLab 是检查基准，GitHub 是自动同步）
 - **禁止在未经用户确认的情况下 git commit / git push**
 - **禁止直接推送到 main 分支**（main 只通过 MR 合入）
 - **禁止使用 `--no-verify` 跳过 hook**（除非用户明确指示紧急情况）

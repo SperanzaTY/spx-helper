@@ -42,7 +42,8 @@ seatalk-agent/
 ## 自动更新机制
 
 - 基于 `chrome-extension/manifest.json` 的 version 对比
-- `git fetch origin release` → 对比本地 vs 远程 manifest version
+- `getUpdateRemoteName()` 自动选择 remote（优先级：`SPX_UPDATE_GIT_REMOTE` 环境变量 → `gitlab` remote → `origin`）
+- `git fetch <remote> release` → 对比本地 vs 远程 manifest version
 - 版本不一致 + commit 落后 → 前端显示更新通知
 - `silentUpdateCheck` 无条件发送版本状态给前端
 

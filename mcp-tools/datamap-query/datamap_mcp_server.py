@@ -13,7 +13,7 @@ import base64
 from typing import Dict, Any, Optional, List
 
 import requests
-import browser_cookie3
+from chrome_auth import get_cookies
 from mcp.server.fastmcp import FastMCP
 
 logging.basicConfig(level=logging.INFO)
@@ -22,36 +22,17 @@ logger = logging.getLogger(__name__)
 # ──────────────────────────── Cookie 管理 ────────────────────────────
 
 DOMAIN = "datasuite.shopee.io"
-_cookie_cache: Dict[str, str] = {}
-_cookie_ts: float = 0
-COOKIE_TTL = 1800  # 30 min
 
 
 def _load_cookies(force: bool = False) -> Dict[str, str]:
-    global _cookie_cache, _cookie_ts
-    if not force and _cookie_cache and (time.time() - _cookie_ts < COOKIE_TTL):
-        return _cookie_cache
-    try:
-        cj = browser_cookie3.chrome(domain_name="shopee.io")
-        cookies: Dict[str, str] = {}
-        for c in cj:
-            if c.domain in (DOMAIN, f".{DOMAIN}"):
-                cookies[c.name] = c.value
-        if cookies:
-            _cookie_cache = cookies
-            _cookie_ts = time.time()
-            logger.info(f"从 Chrome 加载了 {len(cookies)} 个 datasuite cookie")
-        else:
-            logger.warning("Chrome 中未找到 datasuite cookie，请先在浏览器登录 DataSuite")
-    except Exception as e:
-        logger.error(f"读取 Chrome cookie 失败: {e}")
-    return _cookie_cache
+    return get_cookies(domain=DOMAIN, force=force)
 
 
 # ──────────────────────────── HTTP 客户端 ────────────────────────────
 
 BASE_URL = f"https://{DOMAIN}"
 API_PREFIX = "/datamap/api/v3"
+SEARCHCENTER_PREFIX = "/datamap/searchcenter/api/v1"
 
 HEADERS = {
     "accept": "application/json, text/plain, */*",
@@ -70,9 +51,9 @@ HEADERS = {
 MAX_RETRIES = 2
 
 
-def _request(method: str, path: str, params: dict = None, json_body: dict = None) -> Any:
+def _request(method: str, path: str, params: dict = None, json_body: dict = None, *, prefix: str = None) -> Any:
     """Send request and unwrap the DataSuite response envelope {success, code, data}."""
-    url = BASE_URL + API_PREFIX + path
+    url = BASE_URL + (prefix or API_PREFIX) + path
     cookies = _load_cookies()
     headers = HEADERS.copy()
     headers["referer"] = f"{BASE_URL}/datamap"
@@ -480,7 +461,10 @@ def list_tables(database: str, engine: str = "HIVE") -> str:
         list_tables("spx_mart")
     """
     try:
-        data = _request("GET", f"/dataWarehouse/{engine}/tables", params={"schema": database})
+        data = _request("GET", f"/dataWarehouse/{engine}/tables", params={
+            "schema": database,
+            "keyword": "",
+        })
         tables = data if isinstance(data, list) else []
         return json.dumps({
             "database": database,
@@ -547,10 +531,28 @@ def search_global(keyword: str) -> str:
         search_global("delivery_trajectory")
     """
     try:
-        data = _request("GET", "/global/preview_search", params={"keyword": keyword})
+        data = _request(
+            "GET", "/global/preview_search",
+            params={"keyword": keyword},
+            prefix=SEARCHCENTER_PREFIX,
+        )
+
+        results = []
+        if isinstance(data, list):
+            for item in data:
+                results.append({
+                    "qualifiedName": item.get("qualifiedName", ""),
+                    "serviceType": item.get("serviceType", ""),
+                    "displayName": item.get("displayName", ""),
+                    "description": item.get("description", ""),
+                    "columnNames": item.get("columnNames", []),
+                    "extra": item.get("extra", {}),
+                })
+
         return json.dumps({
             "keyword": keyword,
-            "results": data,
+            "result_count": len(results),
+            "results": results,
         }, ensure_ascii=False, indent=2)
     except Exception as e:
         return json.dumps({"error": str(e)}, ensure_ascii=False)
@@ -574,6 +576,7 @@ def get_table_audit_log(table_ref: str, engine: str = "HIVE", page_size: int = 2
         qn = _qualified_name(database, table)
         data = _request("GET", f"/dataWarehouse/{engine}/auditLog", params={
             "qualifiedName": qn,
+            "version": 1,
             "pageSize": page_size,
             "pageNum": 1,
         })

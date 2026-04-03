@@ -34,9 +34,9 @@
 | 命令 | 用途 |
 |------|------|
 | `grep '"version"' chrome-extension/manifest.json` | 本地版本号 |
-| `git show origin/release:chrome-extension/manifest.json \| grep '"version"'` | 远程版本号 |
-| `git rev-list --count HEAD..origin/release` | 落后 commit 数 |
-| `git fetch origin release` | 拉取远程最新信息 |
+| `git show gitlab/release:chrome-extension/manifest.json \| grep '"version"'` | 远程版本号（GitLab 基准） |
+| `git rev-list --count HEAD..gitlab/release` | 落后 commit 数 |
+| `git fetch gitlab release` | 拉取远程最新信息 |
 | `git log --oneline -5` | 最近提交 |
 | `git status --short` | 工作区状态 |
 | `git diff --stat` | 修改文件列表 |

@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List
 
 import requests
-import browser_cookie3
+from chrome_auth import get_cookies
 from mcp.server.fastmcp import FastMCP
 
 logging.basicConfig(level=logging.INFO)
@@ -24,43 +24,11 @@ logger = logging.getLogger(__name__)
 # ──────────────────────────── Cookie 管理 ────────────────────────────
 
 DOMAIN = "datasuite.shopee.io"
-_cookie_cache: Dict[str, str] = {}
-_presto_cookie_cache: Dict[str, str] = {}
-_cookie_ts: float = 0
-COOKIE_TTL = 1800  # 30 min
-
-
-def _load_all_cookies(force: bool = False) -> None:
-    """一次性从 Chrome 读取 shopee.io 域下所有 cookie，分别缓存 datasuite 和 presto 部分。"""
-    global _cookie_cache, _presto_cookie_cache, _cookie_ts
-    if not force and _cookie_cache and (time.time() - _cookie_ts < COOKIE_TTL):
-        return
-    try:
-        cj = browser_cookie3.chrome(domain_name="shopee.io")
-        ds_cookies: Dict[str, str] = {}
-        presto_cookies: Dict[str, str] = {}
-        for c in cj:
-            if c.domain in (DOMAIN, f".{DOMAIN}"):
-                ds_cookies[c.name] = c.value
-            if "data-infra" in (c.domain or ""):
-                presto_cookies[c.name] = c.value
-
-        if ds_cookies:
-            _cookie_cache = ds_cookies
-            _cookie_ts = time.time()
-            logger.info(f"从 Chrome 加载了 {len(ds_cookies)} 个 datasuite cookie, {len(presto_cookies)} 个 presto cookie")
-        else:
-            logger.warning("Chrome 中未找到 datasuite cookie，请先在浏览器登录 DataSuite")
-
-        if presto_cookies:
-            _presto_cookie_cache = presto_cookies
-    except Exception as e:
-        logger.error(f"读取 Chrome cookie 失败: {e}")
+DATA_INFRA_DOMAIN = "data-infra.shopee.io"
 
 
 def _load_cookies(force: bool = False) -> Dict[str, str]:
-    _load_all_cookies(force)
-    return _cookie_cache
+    return get_cookies(domain=DOMAIN, force=force)
 
 
 # ──────────────────────────── HTTP 客户端 ────────────────────────────
@@ -581,14 +549,12 @@ def search_tasks(keyword: str, project_code: str = "spx_mart", page_size: int = 
     """
     try:
         params = {
-            "search": keyword,
+            "taskName": keyword,
             "projectCode": project_code,
             "pageNo": 1,
             "pageSize": page_size,
-            "taskType": "",
-            "status": "",
         }
-        data = _request("GET", "/scheduler/api/v1/task/search", params=params, env=env)
+        data = _request("GET", "/scheduler/api/v1/task/getList", params=params, env=env)
         raw_list = data.get("data", {}).get("list", data.get("data", []))
 
         if isinstance(raw_list, dict):
@@ -599,9 +565,9 @@ def search_tasks(keyword: str, project_code: str = "spx_mart", page_size: int = 
             tasks.append({
                 "task_code": t.get("taskCode", ""),
                 "task_name": t.get("taskName", ""),
-                "task_type": t.get("taskTypeName", ""),
-                "owner": t.get("owner", ""),
-                "status": "frozen" if t.get("freeze") else "active",
+                "task_type": t.get("taskTypeName", t.get("taskExeType", "")),
+                "owner": t.get("taskOwner", t.get("owner", "")),
+                "status": "frozen" if t.get("activeStatus") == 0 else "active",
                 "schedule_period": t.get("schedulePeriodName", ""),
             })
 
@@ -672,15 +638,13 @@ KEYHOLE_BASE = "https://keyhole.data-infra.shopee.io"
 
 
 def _load_presto_cookies() -> dict:
-    """获取 Presto History Server 所需的 cookie（从统一缓存中取）。"""
-    _load_all_cookies()
-    return _presto_cookie_cache
+    """获取 Presto History Server 所需的 cookie。"""
+    return get_cookies(domain=DATA_INFRA_DOMAIN)
 
 
 def _load_keyhole_cookies() -> dict:
     """获取 Keyhole (data-infra) 所需的 cookie。"""
-    _load_all_cookies()
-    return _presto_cookie_cache
+    return get_cookies(domain=DATA_INFRA_DOMAIN)
 
 
 def _extract_task_code(task_instance_code: str) -> str:

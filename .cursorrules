@@ -7,7 +7,7 @@
 | 规则文件 | 作用域 | 内容 |
 |---------|--------|------|
 | `general.mdc` | 全局 | 项目介绍、架构概览、安装引导、安全约束 |
-| `git-workflow.mdc` | 全局 | 提交规范、分支管理、版本管理、双仓库同步 |
+| `git-workflow.mdc` | 全局 | 提交规范、分支管理、版本管理、双仓库管理 |
 | `doc-sync.mdc` | 全局 | 文档同步规则（修改功能必须更新对应 README） |
 | `nopua.mdc` | 全局 | 问题解决方法论（卡住时的升维策略） |
 | `chrome-extension.mdc` | `chrome-extension/**` | Chrome 扩展开发规则、文件职责 |
@@ -18,7 +18,7 @@
 ## 核心约束（始终生效）
 
 1. **禁止自动提交**：必须等用户说"可以提交"后才能 `git commit/push`
-2. **双仓库同步**：`git push gitlab <branch> && git push origin <branch>`
+2. **推送策略**：`git push gitlab release`（检查以 GitLab 为基准，推送成功后自动尝试同步 GitHub，失败不阻塞）
 3. **版本唯一源**：`chrome-extension/manifest.json` 的 version
 4. **文档同步**：功能变更必须更新对应模块的 README
 5. **凭证安全**：禁止硬编码密码/token，使用环境变量

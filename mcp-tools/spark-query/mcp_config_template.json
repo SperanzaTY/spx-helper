@@ -6,8 +6,8 @@
         "/absolute/path/to/spark_mcp_server.py"
       ],
       "env": {
-        "LIVY_USERNAME": "Data Suite 个人中心 → Profile → BigData Account",
-        "LIVY_PASSWORD": "Data Suite 个人中心 → Profile → BigData Account Password（点击 View 显示）",
+        "LIVY_USERNAME": "DataSuite RAM Profile (datasuite.shopee.io/ram/personal/profile) → BigData Account",
+        "LIVY_PASSWORD": "同上 → Password → 点 View 查看",
         "LIVY_URL": "http://livy-rest.data-infra.shopee.io",
         "LIVY_QUEUE": "szsc-dev",
         "LIVY_REGION": "SG"

@@ -50,6 +50,7 @@ venv/
 
 # SeaTalk Agent runtime
 .last-session.json
+seatalk-agent/.config/
 
 # 备份文件
 *.backup
