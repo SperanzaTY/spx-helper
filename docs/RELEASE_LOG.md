@@ -42,6 +42,57 @@
 
 ---
 
+## v3.4.1 — 2026-03-02 — feat(agent): Remote 回复优化 + 前端注入去重 + 发版 Skill
+
+**提交者**: @tianyi.liang
+**Commit Type**: feat
+**修改模块**: SeaTalk Agent / Cursor Skill
+
+### 变更说明
+
+#### Remote 回复优化
+- 回复尾部不再显示"时间 | 字数"，改为显示**回复时长**（如 `12.3s`）和 **token 消耗**（如 `2450↓ 680↑`）
+- 从 `connection.prompt()` 返回值获取 `usage` 字段，无 token 信息时 fallback 为字数显示
+- 新增 `!!logs [N]` 系统命令，可远程查看最近 N 条 Remote 日志（默认 20 条）
+- 后端新增 `remoteLogHistory` 日志历史列表（最多 100 条），供 `!!logs` 命令使用
+
+#### 前端注入去重修复
+- 修复 re-inject 时（页面刷新 / 心跳重连 / 手动 reinject_ui）旧 DOM 元素残留的问题：
+  - Remote Popover (`#cursor-remote-popover`) 和 Tooltip (`.cursor-tooltip`) 在 re-inject 前清理
+  - 使用 `AbortController` 统一管理 `document.addEventListener`，re-inject 时 abort 旧监听器
+  - `MutationObserver` 加入注册表，re-inject 时 disconnect
+  - 注册 `window.__cursorSidebarCleanup` 统一清理入口（面板、popover、FAB、事件、observer）
+
+#### 发版流程规范
+- 新增 `release-publish` Cursor Skill（`.cursor/skills/release-publish/`）
+- 标准化 9 步发版流程：前置检查 → 版本号 → 日志 → 文档联动 → CDP 验证 → 确认 → 提交 → 推送 → 验证
+- 涉及 SeaTalk Agent 代码修改时，必须通过 CDP 进行注入验证和功能性测试
+- 与 pre-push / commit-msg / pre-commit hook 三层协作保障发版质量
+- GitLab 为主仓库必须推送成功，GitHub 尽力推送失败不阻断
+
+#### Troubleshoot Skill 更新 (v2)
+- 新增 Phase 0.5（多进程冲突）、Phase 5（Remote 控制）、Phase 8（Agent 重启生命周期）
+- 更新架构图加入 seatalk-watch.js / seatalk-send.js / Remote Agent / launch.sh
+- 更新去重机制清单加入 AbortController / `__cursorSidebarCleanup`
+- 补充多进程并发、回复死循环、restart 静默失败、remote 追踪等实际排查经验
+
+#### Skill 版本号规则细化
+- 明确 minor 升级仅限"新增功能板块"，现有功能增强属于 patch
+
+### 测试情况
+
+| 测试项 | 结果 | 备注 |
+|--------|------|------|
+| Chrome 扩展加载正常 | N/A | 本次未修改 Chrome 扩展功能代码 |
+| MCP 工具连接正常 | N/A | 本次未修改 MCP 工具 |
+| SeaTalk Agent 启动+注入正常 | ✅ | TypeScript 编译零错误 |
+| SeaTalk Agent 重启后 UI 恢复 | ✅ | AbortController + cleanup 修复 |
+| 修改的功能正常工作 | ✅ | |
+| 已有功能未被破坏 | ✅ | |
+| 控制台无新增错误 | ✅ | |
+
+---
+
 ## v3.3.1 — 2026-03-02 — feat: Remote 系统指令 + 消息冻结机制
 
 **提交者**: @tianyi.liang

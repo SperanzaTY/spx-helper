@@ -6,8 +6,19 @@
     console.warn('[cursor-acp] window.__cursorUI not ready, skipping');
     return;
   }
+  // Clean up previous injection: DOM elements, event listeners, observers
+  if (window.__cursorSidebarCleanup) {
+    try { window.__cursorSidebarCleanup(); } catch (_) {}
+  }
   var oldPanel = document.getElementById('cursor-panel');
   if (oldPanel) oldPanel.remove();
+  var oldPopover = document.getElementById('cursor-remote-popover');
+  if (oldPopover) oldPopover.remove();
+  document.querySelectorAll('.cursor-tooltip').forEach(function (el) { el.remove(); });
+
+  var _abortCtrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  var _abortSignal = _abortCtrl ? { signal: _abortCtrl.signal } : {};
+  var _observers = [];
 
   // ── Inject confirmation dialog CSS ──
   (function () {
@@ -851,11 +862,11 @@
       focusMessage: clicked,
       isThread: !!isThread
     });
-  }, true);
+  }, Object.assign({ capture: true }, _abortSignal));
 
   document.addEventListener('mousedown', function (e) {
     if (e.target.closest('.cursor-qo-icon')) { e.stopPropagation(); e.preventDefault(); }
-  }, true);
+  }, Object.assign({ capture: true }, _abortSignal));
 
   // Observe DOM for quick-operation-menu appearing (main chat + thread)
   var qoObserver = new MutationObserver(function () {
@@ -863,6 +874,7 @@
     for (var i = 0; i < menus.length; i++) { injectCursorIcon(menus[i]); }
   });
   qoObserver.observe(document.body, { childList: true, subtree: true });
+  _observers.push(qoObserver);
   var existingMenus = document.querySelectorAll(SEL_QO_MENU);
   for (var em = 0; em < existingMenus.length; em++) { injectCursorIcon(existingMenus[em]); }
 
@@ -896,7 +908,6 @@
       selFab.style.left = (rect.left + rect.width / 2 - 50) + 'px';
       selFab._selectedText = text;
       selFab._inThread = !!inThread;
-      // Find the closest message bubble from the selection anchor for context extraction
       selFab._anchorBubble = null;
       var el = anchor.nodeType === 3 ? anchor.parentElement : anchor;
       if (el) {
@@ -905,12 +916,12 @@
       }
       selFab.classList.add('visible');
     }, 200);
-  });
+  }, _abortSignal);
 
   document.addEventListener('mousedown', function (e) {
     if (selFab.contains(e.target)) return;
     selFab.classList.remove('visible');
-  });
+  }, _abortSignal);
 
   selFab.addEventListener('click', function () {
     var text = selFab._selectedText;
@@ -2048,7 +2059,7 @@
       modelDropdown.classList.remove('show');
       if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: 'set_model', modelId: cachedModels.currentModelId }));
     });
-    document.addEventListener('click', function () { if (modelDropdown) modelDropdown.classList.remove('show'); });
+    document.addEventListener('click', function () { if (modelDropdown) modelDropdown.classList.remove('show'); }, _abortSignal);
 
     var composing = false;
     inputEl.addEventListener('compositionstart', function () { composing = true; });
@@ -2167,7 +2178,7 @@
       e.stopPropagation();
       settingsDd.classList.toggle('show');
     });
-    document.addEventListener('click', function () { if (settingsDd) settingsDd.classList.remove('show'); });
+    document.addEventListener('click', function () { if (settingsDd) settingsDd.classList.remove('show'); }, _abortSignal);
 
     settingsDd.addEventListener('click', function (e) {
       var item = e.target.closest('.cursor-settings-dd-item');
@@ -2240,7 +2251,7 @@
     }
   };
 
-  document.addEventListener('keydown', function (e) { if (e.ctrlKey && e.shiftKey && e.key === 'A') { e.preventDefault(); window.__agentToggle(); } });
+  document.addEventListener('keydown', function (e) { if (e.ctrlKey && e.shiftKey && e.key === 'A') { e.preventDefault(); window.__agentToggle(); } }, _abortSignal);
 
   // Restore panel open state after re-injection
   try { if (localStorage.getItem('__cursorPanelOpen') === '1' && !panelHandle) showPanel(); } catch (_) {}
@@ -2272,6 +2283,18 @@
       }
     } catch (_) {}
   })();
+
+  window.__cursorSidebarCleanup = function () {
+    if (_abortCtrl) _abortCtrl.abort();
+    for (var oi = 0; oi < _observers.length; oi++) {
+      try { _observers[oi].disconnect(); } catch (_) {}
+    }
+    _observers.length = 0;
+    if (panelHandle) { try { panelHandle.close(); } catch (_) {} }
+    closeRemotePopover();
+    var fab = document.querySelector('.cursor-sel-fab');
+    if (fab) fab.remove();
+  };
 
   console.log('[cursor-acp] panel loaded (Cursor-native style)');
 })();

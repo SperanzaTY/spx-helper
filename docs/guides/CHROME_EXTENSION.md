@@ -1,6 +1,6 @@
 # Chrome 扩展使用指南
 
-> SPX Helper Chrome 扩展 — Shopee 大数据开发日常工具箱（当前版本 v3.3.1）
+> SPX Helper Chrome 扩展 — Shopee 大数据开发日常工具箱（当前版本 v3.4.1）
 
 ---
 
@@ -24,9 +24,10 @@
 ## 安装
 
 ```bash
-git clone https://github.com/SperanzaTY/spx-helper.git
-# 或 GitLab（内网）：
-# git clone https://git.garena.com/tianyi.liang/spx-helper.git
+# GitLab（主仓库，推荐）：
+git clone https://git.garena.com/tianyi.liang/spx-helper.git
+# 或 GitHub 镜像：
+# git clone https://github.com/SperanzaTY/spx-helper.git
 ```
 
 1. 打开 Chrome，访问 `chrome://extensions/`
@@ -41,7 +42,8 @@ git clone https://github.com/SperanzaTY/spx-helper.git
 
 ```bash
 cd spx-helper
-git pull origin release
+git pull gitlab release
+# 如果使用 GitHub 镜像：git pull origin release
 ```
 
 然后到 `chrome://extensions/` 点击扩展卡片上的 **刷新** 按钮即可。
@@ -71,7 +73,7 @@ chrome-extension/
 
 ## 版本
 
-当前版本：v3.2.3（与项目整体版本号同步）
+当前版本：v3.4.1（与项目整体版本号同步）
 
 ---
 

@@ -36,7 +36,7 @@ function checkUpdate(logFn: typeof log): UpdateCheckResult {
   const result: UpdateCheckResult = { available: false, local: '', remote: '', behind: 0, branch, changelog: '' };
 
   try {
-    gitExec(`git fetch origin ${branch} --quiet`, PROJECT_ROOT);
+    gitExec(`git fetch gitlab ${branch} --quiet`, PROJECT_ROOT);
   } catch (e) {
     result.error = `fetch failed: ${(e as Error).message}`;
     logFn(`[updater] ${result.error}`);
@@ -51,7 +51,7 @@ function checkUpdate(logFn: typeof log): UpdateCheckResult {
   }
 
   try {
-    const remoteManifestStr = gitExec(`git show origin/${branch}:chrome-extension/manifest.json`, PROJECT_ROOT);
+    const remoteManifestStr = gitExec(`git show gitlab/${branch}:chrome-extension/manifest.json`, PROJECT_ROOT);
     const remoteManifest = JSON.parse(remoteManifestStr);
     result.remote = remoteManifest.version || result.local;
   } catch {
@@ -59,7 +59,7 @@ function checkUpdate(logFn: typeof log): UpdateCheckResult {
   }
 
   try {
-    result.behind = parseInt(gitExec(`git rev-list --count HEAD..origin/${branch}`, PROJECT_ROOT), 10) || 0;
+    result.behind = parseInt(gitExec(`git rev-list --count HEAD..gitlab/${branch}`, PROJECT_ROOT), 10) || 0;
   } catch {
     result.behind = 0;
   }
@@ -68,7 +68,7 @@ function checkUpdate(logFn: typeof log): UpdateCheckResult {
 
   if (result.available) {
     try {
-      const commitLog = gitExec(`git log --oneline HEAD..origin/${branch} -10`, PROJECT_ROOT);
+      const commitLog = gitExec(`git log --oneline HEAD..gitlab/${branch} -10`, PROJECT_ROOT);
       result.changelog = commitLog;
     } catch {}
   }
@@ -96,9 +96,9 @@ function applyUpdate(onProgress: (msg: string) => void, logFn: typeof log): bool
     }
     onProgress('✅ 工作区干净');
 
-    onProgress(`🔄 git rebase origin/${branch} ...`);
+    onProgress(`🔄 git rebase gitlab/${branch} ...`);
     try {
-      gitExec(`git rebase origin/${branch}`, PROJECT_ROOT);
+      gitExec(`git rebase gitlab/${branch}`, PROJECT_ROOT);
       onProgress('🔄 rebase ✅');
     } catch (e) {
       onProgress('❌ rebase 失败: ' + (e as Error).message);
@@ -724,9 +724,15 @@ async function main() {
     }
   }
 
+  const MAX_REMOTE_LOG_HISTORY = 100;
+  const remoteLogHistory: Array<{ text: string; level: string; ts: number }> = [];
+
   function remoteLog(msg: string, level: 'info' | 'warn' | 'error' = 'info') {
     log(`[remote] ${msg}`);
-    bridge.sendToPanel({ type: 'watch_remote_log', text: msg, level, ts: Date.now() }).catch(() => {});
+    const entry = { text: msg, level, ts: Date.now() };
+    remoteLogHistory.push(entry);
+    if (remoteLogHistory.length > MAX_REMOTE_LOG_HISTORY) remoteLogHistory.splice(0, remoteLogHistory.length - MAX_REMOTE_LOG_HISTORY);
+    bridge.sendToPanel({ type: 'watch_remote_log', text: msg, level, ts: entry.ts }).catch(() => {});
   }
 
   async function ensureRemoteAgent() {
@@ -791,12 +797,13 @@ async function main() {
             '',
             '  !!ping           — 存活检测',
             '  !!status         — 查看 bot 状态',
-            '  !!remote on|off  — 开关远程控制（不依赖 Agent）',
+            '  !!remote on|off  — 开关远程控制',
             '  !!remote         — 查看远程控制状态',
-            '  !!use <model>    — 切换模型（重建 session）',
+            '  !!use <model>    — 切换模型',
             '  !!use            — 查看当前模型',
             '  !!ls models      — 列出可用模型',
             '  !!reset          — 重置远程 Agent 会话',
+            '  !!logs [N]       — 查看最近 N 条日志 (默认20)',
             '  !!help           — 显示本帮助',
           ].join('\n');
 
@@ -861,6 +868,18 @@ async function main() {
           }
         }
 
+        case 'logs': {
+          const count = args ? Math.min(parseInt(args, 10) || 20, MAX_REMOTE_LOG_HISTORY) : 20;
+          if (remoteLogHistory.length === 0) return '暂无日志记录。';
+          const entries = remoteLogHistory.slice(-count);
+          const lines = entries.map((e) => {
+            const t = new Date(e.ts).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            const prefix = e.level === 'error' ? '❌' : e.level === 'warn' ? '⚠️' : '·';
+            return `${t} ${prefix} ${e.text}`;
+          });
+          return `最近 ${entries.length} 条日志 (共 ${remoteLogHistory.length}):\n\n${lines.join('\n')}`;
+        }
+
         default:
           return `未知指令: !!${cmd}\n输入 !!help 查看可用指令。`;
       }
@@ -919,14 +938,16 @@ async function main() {
         try {
           remoteReplyText = '';
           remoteLog('Agent 执行中...');
+          const promptStart = Date.now();
           const promptText =
             `你是远程 Cursor 助手。用户通过 SeaTalk 给你发送了指令。\n\n` +
             `[指令内容]:\n${msgText}\n\n` +
             `请执行该指令。你拥有完整的工具权限。执行完成后，输出简洁的结果摘要作为回复。`;
-          await remoteAgent.connection.prompt({
+          const promptResult = await remoteAgent.connection.prompt({
             sessionId: remoteAgent.sessionId,
             prompt: [{ type: 'text', text: promptText }] as any,
           });
+          const elapsed = Date.now() - promptStart;
 
           if (remoteFrozen) {
             remoteLog('消息已冻结（被后续消息覆盖），跳过回复');
@@ -938,16 +959,23 @@ async function main() {
             remoteLog('Agent 返回空回复，已跳过', 'warn');
             continue;
           }
-          remoteLog(`回复已生成 (${replyText.length} 字)`);
 
-          const time = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+          const turnUsage = (promptResult as any).usage as { inputTokens?: number; outputTokens?: number; totalTokens?: number } | null;
+          const durationStr = elapsed < 60_000
+            ? `${(elapsed / 1000).toFixed(1)}s`
+            : `${Math.floor(elapsed / 60_000)}m${Math.round((elapsed % 60_000) / 1000)}s`;
+          const tokenStr = turnUsage
+            ? `${turnUsage.inputTokens ?? 0}↓ ${turnUsage.outputTokens ?? 0}↑`
+            : `${replyText.length} 字`;
+          remoteLog(`回复已生成 (${durationStr}, ${tokenStr})`);
+
           const formattedReply =
             `**Remote Agent**\n` +
             `━━━━━━━━━━━━━━\n` +
             `**指令**: \`${msgText.substring(0, 100)}\`\n\n` +
             `${replyText}\n\n` +
             `━━━━━━━━━━━━━━\n` +
-            `*${time} | ${replyText.length} 字*`;
+            `*⏱ ${durationStr} | ${tokenStr}*`;
 
           try {
             const escapedText = JSON.stringify(formattedReply.substring(0, 500));
@@ -1317,7 +1345,6 @@ async function main() {
         log('restart_agent requested by user');
         bridge.sendToPanel({ type: 'status', connected: false, text: '重启中...' }).catch(() => {});
 
-        // Full process restart to reload main.ts code changes
         if (agent) {
           agent.proc.removeAllListeners('exit');
           killAgent(agent.proc);
@@ -1330,17 +1357,28 @@ async function main() {
         }
         remoteEnabled = false;
 
-        log('restart_agent: spawning new process and exiting');
-        const mainScript = path.resolve(__dirname, 'main.ts');
-        const child = spawnChild('npx', ['tsx', mainScript], {
-          cwd: path.resolve(__dirname, '..'),
-          detached: true,
-          stdio: 'ignore',
-          env: { ...process.env },
-          shell: true,
-        });
-        child.unref();
-        setTimeout(() => { process.exit(0); }, 500);
+        if (process.env.SEATALK_LAUNCHER) {
+          log('restart_agent: launcher detected, exiting with code 42 for auto-restart');
+          setTimeout(() => { process.exit(42); }, 500);
+        } else {
+          log('restart_agent: no launcher, spawning new process with log file');
+          const agentLogDir = path.join(os.homedir(), '.seatalk-agent', 'logs');
+          try { fs.mkdirSync(agentLogDir, { recursive: true }); } catch {}
+          const logFile = path.join(agentLogDir, 'restart.log');
+          const logFd = fs.openSync(logFile, 'a');
+          fs.writeSync(logFd, `\n--- restart at ${new Date().toISOString()} ---\n`);
+          const child = spawnChild('npx', ['tsx', path.resolve(__dirname, 'main.ts')], {
+            cwd: path.resolve(__dirname, '..'),
+            detached: true,
+            stdio: ['ignore', logFd, logFd],
+            env: { ...process.env, SEATALK_LAUNCHER: '1' },
+            shell: true,
+          });
+          child.unref();
+          fs.closeSync(logFd);
+          log(`restart_agent: spawned pid=${child.pid}, log=${logFile}`);
+          setTimeout(() => { process.exit(0); }, 500);
+        }
       } else if (data.type === 'update_check') {
         log('update_check requested by user');
         try {
@@ -1375,13 +1413,21 @@ async function main() {
               setTimeout(() => { process.exit(42); }, 1_000);
             } else {
               log('[updater] no launcher, spawning detached child to self-restart');
-              const child = spawnChild(process.execPath, process.argv.slice(1), {
-                cwd: process.cwd(),
+              const updLogDir = path.join(os.homedir(), '.seatalk-agent', 'logs');
+              try { fs.mkdirSync(updLogDir, { recursive: true }); } catch {}
+              const updLogFile = path.join(updLogDir, 'restart.log');
+              const updLogFd = fs.openSync(updLogFile, 'a');
+              fs.writeSync(updLogFd, `\n--- updater restart at ${new Date().toISOString()} ---\n`);
+              const child = spawnChild('npx', ['tsx', path.resolve(__dirname, 'main.ts')], {
+                cwd: path.resolve(__dirname, '..'),
                 detached: true,
-                stdio: 'ignore',
-                env: { ...process.env },
+                stdio: ['ignore', updLogFd, updLogFd],
+                env: { ...process.env, SEATALK_LAUNCHER: '1' },
+                shell: true,
               });
               child.unref();
+              fs.closeSync(updLogFd);
+              log(`[updater] spawned pid=${child.pid}, log=${updLogFile}`);
               setTimeout(() => { process.exit(0); }, 1_500);
             }
           }
