@@ -42,6 +42,31 @@
 
 ---
 
+## chore — 2026-04-03 — chore: 添加 GitHub Pages 支持
+
+**提交者**: @tianyi.liang
+**Commit Type**: chore
+**修改模块**: 其他（docs 静态部署）
+
+### 变更说明
+- 添加 `docs/index.html` 重定向入口，支持 GitHub Pages 部署技术分享页面
+- 添加 `docs/.nojekyll` 防止 Jekyll 处理静态文件
+- 部署后访问地址: https://speranzaty.github.io/spx-helper/
+
+### 测试情况
+
+| 测试项 | 结果 | 备注 |
+|--------|------|------|
+| Chrome 扩展加载正常 | N/A | |
+| MCP 工具连接正常 | N/A | |
+| SeaTalk Agent 启动+注入正常 | N/A | |
+| SeaTalk Agent 重启后 UI 恢复 | N/A | |
+| 修改的功能正常工作 | N/A | 纯静态文件，不影响功能 |
+| 已有功能未被破坏 | ✅ | |
+| 控制台无新增错误 | ✅ | |
+
+---
+
 ## v3.4.7 — 2026-04-03 — fix(ui): 修复更新完成后按钮重复 + gitignore 排除粘贴图片
 
 **提交者**: @tianyi.liang
