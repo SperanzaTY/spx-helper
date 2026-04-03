@@ -81,6 +81,7 @@
   var ACCEPTED_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
   var cachedUpdate = { available: false, local: '', remote: '', behind: 0, changelog: '' };
   var verBadgeEl = null, updateOverlay = null;
+  var _updateJustApplied = false;
 
   // Remote state
   var _watchActive = false;
@@ -467,8 +468,18 @@
     '.cursor-update-btn.primary { background:var(--cp-accent); color:#fff; } .cursor-update-btn.primary:hover { background:var(--cp-accent-hover); }',
     '.cursor-update-btn.secondary { background:var(--cp-bg3); color:var(--cp-text2); border:1px solid var(--cp-border2); } .cursor-update-btn.secondary:hover { border-color:var(--cp-accent); }',
     '.cursor-update-btn:disabled { opacity:0.5; cursor:not-allowed; }',
-    '.cursor-update-progress { margin-top:12px; padding:8px 10px; background:var(--cp-bg3); border-radius:6px; font-size:11px; color:var(--cp-text2); line-height:1.8; white-space:pre-wrap; }',
+    '.cursor-update-progress { display:none; }',
     '.cursor-update-noup { text-align:center; padding:40px 20px; color:var(--cp-text-dim2); font-size:12px; }',
+    '.cursor-update-icon { color:var(--cp-accent); flex-shrink:0; }',
+    '.cursor-update-log { margin-top:12px; padding:8px 10px; background:var(--cp-bg3); border-radius:6px; font-family:"Menlo","Consolas","Courier New",monospace; font-size:11px; color:var(--cp-text-dim); line-height:1.8; max-height:200px; overflow-y:auto; }',
+    '.cursor-update-log-line { padding:1px 0; opacity:0; transition:opacity 0.3s; }',
+    '.cursor-update-log-line.show { opacity:1; }',
+    '.cursor-update-log-line .log-ts { color:var(--cp-text-dim2); margin-right:6px; }',
+    '.cursor-update-log-line .log-ok { color:var(--cp-ok); }',
+    '.cursor-update-log-line .log-err { color:var(--cp-err); }',
+    '.cursor-update-log-line .log-info { color:var(--cp-accent); }',
+    '.cursor-ver-badge .ver-new { display:inline-block; background:var(--cp-ok); color:#fff; font-size:8px; font-weight:700; padding:0 4px; border-radius:3px; margin-left:3px; line-height:14px; letter-spacing:0.5px; animation:ca-fadein 0.5s; }',
+    '@keyframes ca-fadein { from{opacity:0;transform:scale(0.8)} to{opacity:1;transform:scale(1)} }',
   ].join('\n'));
 
   // ── Model grouping ──
@@ -1060,11 +1071,14 @@
           var cdEl = messagesEl && messagesEl.querySelector('.restart-countdown');
           if (cdEl) cdEl.style.display = 'none';
         }
-        // After update restart: detect reconnection and auto-close update overlay
-        if (wasDisconnected && cachedStatus.connected && updateOverlay && updateOverlay.classList.contains('show')) {
-          appendUpdateProgress('[ok] Agent 已重新连接！更新成功。');
+        if (wasDisconnected && cachedStatus.connected && _updateJustApplied) {
+          _updateJustApplied = false;
+          appendUpdateProgress('Agent 已重新连接');
           if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: 'update_check' }));
-          setTimeout(function () { updateOverlay.classList.remove('show'); }, 3000);
+          setTimeout(function () {
+            if (updateOverlay) updateOverlay.classList.remove('show');
+            showNewBadge();
+          }, 1500);
         }
       } else if (d.type === 'restart_progress') {
         appendRestartLog(d.text || '');
@@ -1122,12 +1136,12 @@
         appendUpdateProgress(d.text || '');
       } else if (d.type === 'update_done') {
         if (d.success) {
+          _updateJustApplied = true;
           try { localStorage.setItem('__cursorUpdateState', JSON.stringify({ status: 'done', ts: Date.now() })); } catch (_) {}
-          appendUpdateProgress('[ok] 更新完成，Agent 即将重启...');
-          setTimeout(function () { appendUpdateProgress('[...] 正在等待 Agent 重新连接...'); }, 2000);
-          setTimeout(function () { appendUpdateProgress('[tip] 如果本次更新涉及 MCP 工具变更，请在 Cursor Settings > MCP 中重启 seatalk-reader'); }, 5000);
+          appendUpdateProgress('代码已拉取，Agent 即将重启...');
+          setTimeout(function () { appendUpdateProgress('等待 Agent 重新连接...'); }, 2000);
           setTimeout(function () {
-            appendUpdateProgress('[tip] 如果长时间未重连，请运行 seatalk 命令重启 Agent');
+            appendUpdateProgress('如果长时间未重连，请运行 seatalk 命令重启 Agent');
             var applyBtn2 = updateOverlay && updateOverlay.querySelector('[data-act="apply"]');
             if (applyBtn2) { applyBtn2.disabled = false; applyBtn2.textContent = '重新检查'; applyBtn2.dataset.act = 'check'; }
           }, 15000);
@@ -1338,7 +1352,8 @@
     updateOverlay.className = 'cursor-update show';
     updateOverlay.innerHTML =
       '<div class="cursor-update-hd">' +
-        '<button class="cursor-update-back">←</button>' +
+        '<button class="cursor-update-back"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg></button>' +
+        '<svg class="cursor-update-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>' +
         '<span class="cursor-update-title">版本更新</span>' +
       '</div>' +
       '<div class="cursor-update-body"></div>';
@@ -1742,13 +1757,16 @@
   }
 
   // ── Update helpers ──
+  var _showingNewBadge = false;
+
   function updateVerBadge() {
     if (!verBadgeEl) return;
+    if (_showingNewBadge) return;
     if (cachedUpdate.available) {
       verBadgeEl.classList.add('has-update');
       var behind = cachedUpdate.behind > 9 ? '9+' : String(cachedUpdate.behind);
       if (cachedUpdate.local !== cachedUpdate.remote) {
-        verBadgeEl.innerHTML = '<span class="ver-dot"></span>v' + escapeHtml(cachedUpdate.local) + ' → v' + escapeHtml(cachedUpdate.remote);
+        verBadgeEl.innerHTML = '<span class="ver-dot"></span>v' + escapeHtml(cachedUpdate.local) + ' <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px"><polyline points="9 18 15 12 9 6"/></svg> v' + escapeHtml(cachedUpdate.remote);
       } else {
         verBadgeEl.innerHTML = '<span class="ver-dot"></span>v' + escapeHtml(cachedUpdate.local) + ' +' + behind;
       }
@@ -1758,6 +1776,15 @@
       verBadgeEl.innerHTML = 'v' + escapeHtml(cachedUpdate.local || '...');
       verBadgeEl.title = '当前版本';
     }
+  }
+
+  function showNewBadge() {
+    if (!verBadgeEl) return;
+    _showingNewBadge = true;
+    verBadgeEl.classList.remove('has-update');
+    verBadgeEl.innerHTML = 'v' + escapeHtml(cachedUpdate.local || '...') + '<span class="ver-new">NEW</span>';
+    verBadgeEl.title = '已更新到最新版本';
+    setTimeout(function () { _showingNewBadge = false; }, 30000);
   }
 
   function renderUpdateOverlay() {
@@ -1776,10 +1803,9 @@
         html += '<div class="cursor-update-changelog">' + escapeHtml(cachedUpdate.changelog) + '</div>';
       }
       html += '<div class="cursor-update-actions">' +
-        '<button class="cursor-update-btn primary" data-act="apply">更新</button>' +
-        '<button class="cursor-update-btn secondary" data-act="check">重新检查</button>' +
+        '<button class="cursor-update-btn primary" data-act="apply"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:4px"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>更新</button>' +
+        '<button class="cursor-update-btn secondary" data-act="check"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:4px"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>重新检查</button>' +
         '</div>';
-      html += '<div class="cursor-update-progress" style="display:none"></div>';
       body.innerHTML = html;
     } else {
       var msg = cachedUpdate.error ? '检查失败: ' + escapeHtml(cachedUpdate.error) : '已是最新版本 (v' + escapeHtml(cachedUpdate.local || '...') + ')';
@@ -1792,12 +1818,27 @@
 
   function appendUpdateProgress(text) {
     if (!updateOverlay) return;
-    var prog = updateOverlay.querySelector('.cursor-update-progress');
-    if (!prog) return;
-    prog.style.display = 'block';
-    prog.textContent += (prog.textContent ? '\n' : '') + text;
-    prog.scrollTop = prog.scrollHeight;
-    // Disable apply button during update
+    var logEl = updateOverlay.querySelector('.cursor-update-log');
+    if (!logEl) {
+      var body = updateOverlay.querySelector('.cursor-update-body');
+      if (!body) return;
+      logEl = document.createElement('div');
+      logEl.className = 'cursor-update-log';
+      body.appendChild(logEl);
+    }
+    var line = document.createElement('div');
+    line.className = 'cursor-update-log-line';
+    var now = new Date();
+    var ts = [now.getHours(), now.getMinutes(), now.getSeconds()].map(function (n) { return n < 10 ? '0' + n : '' + n; }).join(':');
+    var icon = '';
+    if (text.indexOf('✅') >= 0 || text.indexOf('[ok]') >= 0) icon = '<span class="log-ok">✓</span> ';
+    else if (text.indexOf('❌') >= 0 || text.indexOf('[err]') >= 0) icon = '<span class="log-err">✗</span> ';
+    else if (text.indexOf('🔄') >= 0 || text.indexOf('📦') >= 0 || text.indexOf('📡') >= 0) icon = '<span class="log-info">›</span> ';
+    var cleaned = text.replace(/^(\[ok\]|\[err\]|\[tip\]|\[\.\.\.\])\s*/, '').replace(/[📡✅❌🔄📦]/g, '').trim();
+    line.innerHTML = '<span class="log-ts">' + ts + '</span>' + icon + escapeHtml(cleaned);
+    logEl.appendChild(line);
+    requestAnimationFrame(function () { line.classList.add('show'); });
+    logEl.scrollTop = logEl.scrollHeight;
     var applyBtn = updateOverlay.querySelector('[data-act="apply"]');
     if (applyBtn) applyBtn.disabled = true;
   }
