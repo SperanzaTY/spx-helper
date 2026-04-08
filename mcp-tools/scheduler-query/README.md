@@ -1,12 +1,13 @@
 # DataSuite Scheduler 查询工具 (scheduler-query)
 
-查询 DataSuite Scheduler 平台的任务状态、实例列表、运行日志、血缘关系和 Presto SQL。
+查询 DataSuite Scheduler 平台的任务状态、实例列表、运行日志、血缘关系，以及 Presto/Spark 的 SQL 和性能诊断。
 
 ## 认证
 
-自动从 Chrome 浏览器读取 `datasuite.shopee.io` 的 Cookie，需要：
-1. 先在 Chrome 中登录 https://datasuite.shopee.io
-2. 安装依赖：`pip3 install mcp requests browser-cookie3`
+自动从 Chrome 浏览器读取 Cookie，需要：
+1. 登录 https://datasuite.shopee.io（Scheduler API 认证）
+2. 登录 https://keyhole.data-infra.shopee.io（Spark History Server 和 Keyhole 认证）
+3. 安装依赖：`pip3 install mcp requests browser-cookie3`
 
 ## 配置
 
@@ -27,7 +28,9 @@
 
 ## 工具列表
 
-### `search_tasks`
+### Scheduler 任务管理
+
+#### `search_tasks`
 搜索 Scheduler 任务。
 
 | 参数 | 类型 | 必填 | 说明 |
@@ -37,101 +40,97 @@
 | `page_size` | int | 否 | 返回条数，默认 20 |
 | `env` | string | 否 | 环境：`prod`/`dev`/`staging`，默认 `prod` |
 
-### `get_task_info`
+#### `get_task_info`
 获取任务详情。
 
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `task_code` | string | 是 | 任务代码 |
-| `env` | string | 否 | 环境，默认 `prod` |
-
-### `get_task_instances`
+#### `get_task_instances`
 查询任务的运行实例列表。
 
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `task_code` | string | 是 | 任务代码 |
-| `env` | string | 否 | 环境，默认 `prod` |
-| `date` | string | 否 | 日期，格式 `YYYY-MM-DD` |
-| `page_size` | int | 否 | 返回条数，默认 10 |
+#### `get_instance_detail`
+查询实例详情，包含 YARN Application ID / Presto Query ID（可跳转到对应的查询工具）。
 
-### `get_instance_detail`
-查询实例详情，包含 Presto Query ID（可用于获取执行的 SQL）。
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `task_instance_code` | string | 是 | 实例代码 |
-| `env` | string | 否 | 环境，默认 `prod` |
-
-### `get_instance_log`
+#### `get_instance_log`
 查询实例运行日志。
 
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `task_instance_code` | string | 是 | 实例代码 |
-| `env` | string | 否 | 环境，默认 `prod` |
-
-### `get_presto_query_sql`
-通过 Presto Query ID 或实例代码获取 **Presto 类型任务**执行的 SQL。
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `presto_query_id` | string | 否 | Presto Query ID（直接查询） |
-| `task_instance_code` | string | 否 | 实例代码（自动提取 Query ID） |
-| `env` | string | 否 | 环境，默认 `prod` |
-
-> 两个参数至少提供一个。提供 `task_instance_code` 时会自动从实例详情中提取 Query ID。
-
-### `get_spark_query_sql`
-通过 Yarn Application ID 或实例代码获取 **Spark/Hive 类型任务**的 Driver stdout 日志。
-
-通过 Keyhole 平台获取完整的 Driver AM stdout 日志，其中包含执行的 SQL 语句。
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `yarn_application_id` | string | 否 | Yarn Application ID（如 `application_1773126131675_5513239`） |
-| `task_instance_code` | string | 否 | 实例代码（自动提取 Yarn ID） |
-| `env` | string | 否 | 环境，默认 `prod` |
-
-> 两个参数至少提供一个。Spark 任务的 Yarn ID 可从实例详情或 Scheduler 页面获取。
-
-### `get_task_lineage`
+#### `get_task_lineage`
 查询任务的上下游血缘关系。
 
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `task_code` | string | 是 | 任务代码 |
-| `env` | string | 否 | 环境，默认 `prod` |
+#### `get_task_metric_summary`
+查询任务的运行指标汇总（最近 10 次平均耗时、CPU、内存、成本）。
 
-### `get_task_metric_summary`
-查询任务的运行指标汇总。
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `task_code` | string | 是 | 任务代码 |
-| `env` | string | 否 | 环境，默认 `prod` |
-
-### `get_task_operation_log`
+#### `get_task_operation_log`
 查询任务的操作日志（谁改了什么）。
 
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `task_code` | string | 是 | 任务代码 |
-| `days` | int | 否 | 查询最近多少天，默认 30 |
-| `env` | string | 否 | 环境，默认 `prod` |
-
-### `get_task_violations`
+#### `get_task_violations`
 查询任务的 SLA 违规记录。
 
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `task_code` | string | 是 | 任务代码 |
-| `project_code` | string | 否 | 项目代码，默认 `spx_mart` |
-| `env` | string | 否 | 环境，默认 `prod` |
+### Presto SQL 查询
+
+#### `get_presto_query_sql`
+通过 Presto Query ID 或实例代码获取 **Presto 类型任务**执行的 SQL 和查询统计。
+
+> 参数 `presto_query_id` 或 `task_instance_code` 至少提供一个。
+
+### Spark 日志与诊断
+
+#### `get_spark_query_sql`
+通过 YARN Application ID 或实例代码获取 **Spark/Hive 类型任务**的 Driver stdout 日志（含 SQL）。
+
+通过 Keyhole 平台获取完整的 Driver AM stdout 日志。如果 Keyhole 不可用，自动回退到 Spark History Server 的 `/sql` 端点。
+
+#### `get_spark_app_summary`
+获取 Spark 应用的概览信息和关键配置。
+
+通过 Spark History Server REST API 获取：应用名称、用户、运行时间、Spark 关键配置（内存、并行度、executor 数量、AQE 等）。
+
+#### `get_spark_stages`
+获取 Spark 应用所有 Stage 的详细指标，自动检测数据倾斜和慢 Stage。
+
+返回每个 Stage 的：耗时及占比、输入/输出行数和大小、Shuffle 读写量、磁盘溢出、数据倾斜指标（基于 task 耗时分位数）。
+
+#### `get_spark_executors`
+获取 Spark 应用的 Executor 资源使用详情。
+
+返回每个 Executor 的：内存用量及利用率、GC 时间及占比、任务完成/失败数、Shuffle 读写量。自动标记 GC 压力过大和 OOM 风险。
+
+#### `get_spark_sql_plan`
+获取 Spark 应用的 SQL 执行计划和各算子指标。
+
+返回 SQL 文本、物理执行计划（planDescription）、关键算子的行数/大小指标（Scan、Join、Shuffle 等）。
+
+#### `get_spark_jobs`
+获取 Spark 应用的 Job 列表及状态。每个 Spark Action（save/collect/count）对应一个 Job。
+
+返回每个 Job 的：提交/完成时间、Stage 构成、Task 成功/失败数。
+
+#### `get_spark_stage_tasks`
+获取指定 Stage 的 **Task 级明细**。这是精确定位数据倾斜的关键工具。
+
+返回每个 Task 的：耗时、GC 时间、输入数据量、Shuffle 读写、内存/磁盘溢出。
+自动计算 P50/P90/P99 分位数和倾斜比（max/median）。
+
+参数：`stage_id`（必须，从 `get_spark_stages` 获取）、`sort_by`（duration/shuffle_read/spill/gc_time）、`limit`（默认 20）。
+
+#### `get_spark_storage`
+获取 Spark 应用的 RDD/DataFrame 缓存信息。
+
+返回缓存的 RDD/DataFrame 列表：名称、存储级别、分区数、内存/磁盘占用。
+
+#### `diagnose_spark_app`
+**综合性能诊断工具**。自动聚合应用概览、Stage/Executor/SQL 计划信息，内置规则引擎检测：
+
+- 数据倾斜（Stage 级 + Task 级双层检测，采样 Top Stage 做精确 max/median 分析）
+- OOM 风险（executor 内存使用率 > 85%）
+- GC 压力（GC 时间占比 > 15%）
+- Shuffle 瓶颈（大量 shuffle + 磁盘溢出）
+- 配置不当（AQE 未启用、shuffle.partitions 不合理等）
+
+输出 severity 级别（HEALTHY / WARNING / CRITICAL）+ 具体优化建议 + 倾斜 Task 详情。
+倾斜检测后可用 `get_spark_stage_tasks` 深入查看完整 Task 分布。
+
+> 以上 Spark 工具的参数格式统一：`yarn_application_id`（如 `application_1773126131675_5513239`）或 `task_instance_code` 二选一。
 
 ## 使用示例
-
-在 Cursor Agent 中：
 
 ```
 搜索 scheduler 里包含 dim_station 的任务
@@ -142,23 +141,19 @@
 ```
 
 ```
-查下这个 scheduler dev 环境任务跑的 SQL 是什么：
-https://datasuite.shopee.io/scheduler/dev/task/thopsbi_spxa.studio_11116186
+诊断这个 Spark 任务的性能：application_1773126131675_5513239
 ```
 
 ```
-这个 Spark 任务执行了什么 SQL：
+这个 Spark 任务有数据倾斜吗？查看 Stage 详情：
 https://datasuite.shopee.io/scheduler/task/mkpldp_shop_health.studio_6075240/instance/mkpldp_shop_health.studio_6075240_20260401_DAY_1/detail
-```
-
-```
-查下这个 Yarn Application 执行的 SQL：application_1773126131675_5513239
 ```
 
 ## 注意事项
 
-- `env` 参数区分环境，从 Scheduler URL 中可判断：`/scheduler/dev/` → `dev`，`/scheduler/task/` → `prod`
+- `env` 参数区分环境，从 Scheduler URL 中可判断：`/scheduler/dev/` -> `dev`，`/scheduler/task/` -> `prod`
 - Cookie 有效期约 30 分钟，过期后会自动重新读取
 - 如果报 Cookie 失败，确认已在 Chrome 中登录 DataSuite
-- Presto 任务用 `get_presto_query_sql`，Spark/Hive 任务用 `get_spark_query_sql`
-- `get_spark_query_sql` 通过 Keyhole 平台获取日志，需要 data-infra Cookie（登录 DataSuite 后自动获得）
+- Presto 任务用 `get_presto_query_sql`，Spark/Hive 任务用 `get_spark_query_sql` 或 `diagnose_spark_app`
+- Spark History Server 数据有保留期限（通常 7 天），较早的 application 可能查不到
+- `diagnose_spark_app` 是最全面的 Spark 诊断入口，推荐用于告警排查

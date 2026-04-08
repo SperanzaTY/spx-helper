@@ -24,6 +24,26 @@ alwaysApply: false
 - 所有网络请求必须 try-catch，返回有意义的错误信息
 - 工具函数的 docstring 就是用户在 Cursor 里看到的工具描述，必须清晰
 
+### 认证规范（Cookie 类 MCP）
+依赖 Chrome Cookie 的 MCP **必须使用 `get_auth()`**，禁止直接用 `get_cookies()`：
+
+```python
+# [CORRECT] 磁盘 Cookie 不够时自动走 CDP 实时获取
+from chrome_auth import get_auth
+
+def _load_cookies(force=False):
+    result = get_auth(domain, force=force)  # cookie_db -> cdp_cookie 自动降级
+    return result.cookies
+
+# [WRONG] 只读磁盘，Cookie 过期/未刷盘就 401
+from chrome_auth import get_cookies
+cookies = get_cookies(domain=domain)
+```
+
+`get_auth()` 默认策略 `["cookie_db", "cdp_cookie"]`：先读 Chrome 磁盘 Cookie 数据库，失败则通过 CDP 从运行中的浏览器实时获取。这样用户无需反复手动登录刷新。
+
+适用模块：`scheduler-query`、`datamap-query` 等所有通过 `chrome_auth` 获取 DataSuite/Keyhole Cookie 的 MCP。
+
 ### 修改后刷新
 MCP 工具代码修改后，需要在 Cursor Settings → MCP 中**关闭再开启**对应服务以刷新。
 
@@ -92,22 +112,55 @@ python3 -c "import asyncio; from <module> import mcp; asyncio.run(mcp.list_tools
   - `download_seatalk_image(image_url)` — 下载图片
 - **详细文档**：`mcp-tools/seatalk-reader/README.md`
 
-### scheduler-query — DataSuite Scheduler 查询
-- **用途**：查询 Scheduler 任务状态、实例列表、运行日志、血缘、Presto SQL
-- **认证**：自动从 Chrome 读取 `datasuite.shopee.io` 的 Cookie（需先在浏览器登录）
+### datamap-query — DataMap 表元数据查询 + 写入
+- **用途**：查询和修改 DataMap 中的表/字段元数据
+- **认证**：查询用 `get_auth()` 获取 Cookie；写入用 `DATAMAP_OPEN_API_TOKEN` 环境变量（Basic Auth）
+- **查询工具**：
+  - `get_table_info(table_ref, engine?)` — 表基本信息
+  - `get_table_detail(table_ref, engine?)` — 表扩展详情（含字段列表）
+  - `get_column_detail(table_ref, column_name, engine?)` — 单列详情
+  - `get_partition_columns(table_ref, engine?)` — 分区字段
+  - `get_table_usage(table_ref, engine?)` — 使用统计
+  - `get_table_lineage(table_ref, engine?)` — 数据血缘
+  - `get_table_score(table_ref, score_type?, engine?)` — 质量评分
+  - `get_table_sla(table_ref, engine?)` — SLA 信息
+  - `list_schemas(engine?)` — 列出所有 schema
+  - `list_tables(database, engine?)` — 列出表
+  - `search_tables(keyword, engine?)` — 搜索表
+  - `search_global(keyword)` — 全局搜索
+  - `get_table_audit_log(table_ref, engine?, page_size?)` — 审计日志
+- **写入工具**（需配置 Open API Token）：
+  - `update_table_info(table_ref, description?, technical_pic?, business_pic?, data_warehouse_layer?, market_region?, dry_run?)` — 更新表元数据
+  - `update_column_info(table_ref, column_name, description?, calculation_logic?, enumeration?, biz_primary_key?, dry_run?)` — 更新字段元数据
+- **写入安全**：默认 dry_run=True（仅预览变更），设为 False 执行实际更新
+- **详细文档**：`mcp-tools/datamap-query/README.md`
+
+### scheduler-query — DataSuite Scheduler 查询 + Spark 诊断
+- **用途**：查询 Scheduler 任务状态、实例列表、运行日志、血缘、Presto/Spark SQL、Spark 性能诊断
+- **认证**：通过 `get_auth()` 自动获取 Cookie（磁盘优先，失败走 CDP）
 - **安装**：`pip3 install mcp requests browser-cookie3`
-- **核心工具**：
+- **Scheduler 工具**：
   - `search_tasks(keyword, project_code?, env?)` — 搜索任务
   - `get_task_info(task_code, env?)` — 获取任务详情
   - `get_task_instances(task_code, env?, date?, page_size?)` — 查询实例列表
-  - `get_instance_detail(task_instance_code, env?)` — 查询实例详情（含 Presto Query ID）
+  - `get_instance_detail(task_instance_code, env?)` — 查询实例详情（含 YARN App ID / Presto Query ID）
   - `get_instance_log(task_instance_code, env?)` — 查询运行日志
-  - `get_presto_query_sql(presto_query_id?, task_instance_code?, env?)` — 获取 Presto 任务的 SQL
-  - `get_spark_query_sql(yarn_application_id?, task_instance_code?, env?)` — 获取 Spark/Hive 任务的 SQL（通过 Keyhole 日志）
   - `get_task_lineage(task_code, env?)` — 查询上下游血缘
   - `get_task_metric_summary(task_code, env?)` — 运行指标汇总
   - `get_task_operation_log(task_code, days?, env?)` — 操作日志
   - `get_task_violations(task_code, project_code?, env?)` — SLA 违规记录
+- **Presto 工具**：
+  - `get_presto_query_sql(presto_query_id?, task_instance_code?, env?)` — 获取 Presto 任务的 SQL
+- **Spark 诊断工具**（通过 Spark History Server REST API）：
+  - `get_spark_query_sql(yarn_application_id?, task_instance_code?, env?)` — 获取 Spark 任务的 SQL（Keyhole 日志，回退 SHS）
+  - `get_spark_app_summary(yarn_application_id?, task_instance_code?, env?)` — 应用概览 + 关键 Spark 配置
+  - `get_spark_stages(yarn_application_id?, task_instance_code?, env?)` — Stage 指标 + 数据倾斜检测
+  - `get_spark_executors(yarn_application_id?, task_instance_code?, env?)` — Executor 资源 + GC/OOM 检测
+  - `get_spark_sql_plan(yarn_application_id?, task_instance_code?, env?)` — SQL 执行计划 + 算子指标
+  - `get_spark_jobs(yarn_application_id?, task_instance_code?, env?)` — Job 列表及状态
+  - `get_spark_stage_tasks(yarn_application_id?, task_instance_code?, stage_id, sort_by?, limit?, env?)` — Task 级明细 + 倾斜精确检测
+  - `get_spark_storage(yarn_application_id?, task_instance_code?, env?)` — RDD/缓存信息
+  - `diagnose_spark_app(yarn_application_id?, task_instance_code?, env?)` — 综合性能诊断（推荐入口，含 Task 级倾斜分析）
 - **注意**：`env` 参数支持 `prod`/`dev`/`staging`，默认 `prod`
 - **详细文档**：`mcp-tools/scheduler-query/README.md`
 

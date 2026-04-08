@@ -1,6 +1,6 @@
 # DataMap MCP Server
 
-DataSuite DataMap 表元数据查询工具，让 Cursor AI 直连 DataMap 获取 Hive/ClickHouse/StarRocks 表的元数据信息。
+DataSuite DataMap 表元数据查询 + 写入工具，让 Cursor AI 直连 DataMap 获取和修改 Hive/ClickHouse/StarRocks 表的元数据信息。
 
 ## 功能说明
 
@@ -12,13 +12,41 @@ DataSuite DataMap 表元数据查询工具，让 Cursor AI 直连 DataMap 获取
 - SLA 信息与审计日志
 - 表搜索（关键词 / 全局搜索）
 
+通过 DataMap Open API 修改表/字段元数据：
+- 更新表描述、负责人、数仓分层等
+- 更新字段描述、计算逻辑、枚举值等
+- 内置 dry_run 模式预览变更
+
 ## 认证方式
+
+### 查询操作（Chrome Cookie）
 
 使用 [chrome-auth](../chrome-auth/README.md) 共享库自动从 Chrome 读取 `datasuite.shopee.io` 的 Cookie。
 
 **前置条件**：
 1. 安装 chrome-auth：`cd mcp-tools/chrome-auth && pip install -e .`
 2. 在 Chrome 浏览器中登录 [DataSuite](https://datasuite.shopee.io)
+
+### 写入操作（Open API Token）
+
+`update_table_info` 和 `update_column_info` 使用 DataMap Open API，需要配置 Basic Auth Token：
+
+在 MCP 配置中添加 `env` 字段：
+```json
+{
+  "datamap-query": {
+    "command": "python3",
+    "args": ["/path/to/datamap_mcp_server.py"],
+    "env": {
+      "DATAMAP_OPEN_API_TOKEN": "Basic xxxxxx"
+    }
+  }
+}
+```
+
+Token 为团队共享的 DataMap Open API 凭证（格式：`Basic <base64>`），联系 yixin.yang@shopee.com 申请。
+
+> 不配置 Token 不影响所有查询工具的正常使用，仅在执行写入操作（`update_table_info` / `update_column_info` + `dry_run=False`）时需要。
 
 ## 安装
 
@@ -76,18 +104,30 @@ pip install -e .
 | `search_global(keyword)` | 全局搜索（跨引擎、跨类型，使用 SearchCenter API） |
 | `get_table_audit_log(table_ref, engine?, page_size?)` | 获取表的变更审计日志 |
 
+### 写入工具（需配置 Open API Token）
+
+| 工具 | 说明 |
+|------|------|
+| `update_table_info(table_ref, description?, technical_pic?, ...)` | 更新表元数据（描述、负责人、数仓分层等） |
+| `update_column_info(table_ref, column_name, description?, ...)` | 更新字段元数据（描述、计算逻辑、枚举值等） |
+
+写入工具内置 `dry_run` 参数（默认 True）：
+- `dry_run=True`：预览变更（对比当前值与目标值），不执行修改
+- `dry_run=False`：执行实际更新
+
 **`table_ref` 参数格式**：`"database.table"` 或 `"table"`（省略 database 默认使用 `spx_mart`）
 
 **`engine` 参数**：默认 `HIVE`，也支持 `CLICKHOUSE`、`STARROCKS`
 
 ## API 端点说明
 
-DataMap MCP 使用两组 API 前缀：
+DataMap MCP 使用三组 API：
 
-| 前缀 | 用途 |
+| API | 用途 |
 |------|------|
-| `/datamap/api/v3/` | 表信息、字段、血缘、评分、SLA、审计等（大部分工具） |
-| `/datamap/searchcenter/api/v1/` | 全局搜索（`search_global` 使用） |
+| `datasuite.shopee.io/datamap/api/v3/` | 表信息、字段、血缘、评分等查询（Cookie 认证） |
+| `datasuite.shopee.io/datamap/searchcenter/api/v1/` | 全局搜索（Cookie 认证） |
+| `open-api.datasuite.shopee.io/datamap/api/v3/` | 表/字段元数据写入（Basic Auth 认证） |
 
 > DataMap 前端 API 非官方 Open API，接口格式可能随 DataMap 版本更新而变化。如遇到 404/405 错误，可通过 CDP 抓取浏览器实际请求来确认最新 API 路径。
 
@@ -98,12 +138,14 @@ DataMap MCP 使用两组 API 前缀：
 - "查一下 `spx_mart.dwd_spx_spsso_delivery_trajectory_di_br` 这个表的信息"
 - "这个表的血缘关系是什么？上下游有哪些表？"
 - "搜索包含 fleet_order 的表"
-- "`dwd_spx_fleet_order_di_br` 的分区字段是什么？"
-- "列出 spx_mart 下所有的表"
+- "更新 `spx_datamart.dwd_spx_spsso_order_di_id` 的表描述为 'SPX order base info'"
+- "更新 order_id 列的描述为 'unique order identifier'"
 - "全局搜索 delivery_trajectory"
 
 ## 注意事项
 
 - Cookie 有效期约 30 分钟自动刷新（chrome-auth 内置 TTL 缓存），如遇 401 错误会自动重试刷新 Cookie
 - 如果持续 401，请在 Chrome 中重新登录 [DataSuite](https://datasuite.shopee.io)
+- 写入操作（update_table_info / update_column_info）需要配置 `DATAMAP_OPEN_API_TOKEN` 环境变量
+- 写入操作默认 dry_run=True，预览确认后再设置 dry_run=False 执行
 - `search_global` 使用 SearchCenter API（`/datamap/searchcenter/api/v1/`），与其他工具的 API 前缀不同

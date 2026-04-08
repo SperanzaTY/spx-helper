@@ -8,12 +8,13 @@ DataSuite DataMap 表元数据查询工具，支持表信息、字段详情、�
 
 import json
 import logging
+import os
 import time
 import base64
 from typing import Dict, Any, Optional, List
 
 import requests
-from chrome_auth import get_cookies
+from chrome_auth import get_auth
 from mcp.server.fastmcp import FastMCP
 
 logging.basicConfig(level=logging.INFO)
@@ -25,7 +26,10 @@ DOMAIN = "datasuite.shopee.io"
 
 
 def _load_cookies(force: bool = False) -> Dict[str, str]:
-    return get_cookies(domain=DOMAIN, force=force)
+    result = get_auth(DOMAIN, force=force)
+    if result.ok:
+        logger.info(f"[Auth] DataSuite cookies via {result.source} ({len(result.cookies)} cookies)")
+    return result.cookies
 
 
 def _cookie_diagnostic(cookies: Dict[str, str]) -> str:
@@ -106,6 +110,44 @@ def _request(method: str, path: str, params: dict = None, json_body: dict = None
                 continue
             raise RuntimeError(f"请求 {path} 失败: {e}") from e
     return {}
+
+
+# ──────────────────────────── Open API (写入操作) ────────────────────────────
+
+OPEN_API_BASE = "https://open-api.datasuite.shopee.io"
+
+
+def _load_open_api_token() -> str:
+    token = os.environ.get("DATAMAP_OPEN_API_TOKEN", "")
+    if not token:
+        raise RuntimeError(
+            "未配置 DATAMAP_OPEN_API_TOKEN 环境变量，无法执行写入操作。\n"
+            "Token 获取方式：联系 yixin.yang@shopee.com 申请 DataMap Open API 凭证。\n"
+            "配置方式：在 ~/.cursor/mcp.json 的 datamap-query 中添加:\n"
+            "  \"env\": {\"DATAMAP_OPEN_API_TOKEN\": \"Basic xxx\"}\n"
+            "不配置 Token 不影响所有查询工具的正常使用。"
+        )
+    if not token.startswith("Basic "):
+        token = f"Basic {token}"
+    return token
+
+
+def _open_api_post(path: str, payload: dict) -> dict:
+    """Send POST to DataMap Open API with Basic Auth."""
+    token = _load_open_api_token()
+    url = OPEN_API_BASE + API_PREFIX + path
+    resp = requests.post(
+        url,
+        headers={"Content-Type": "application/json", "Authorization": token},
+        json=payload,
+        timeout=30,
+    )
+    if resp.status_code >= 400:
+        raise RuntimeError(f"Open API 请求失败: {resp.status_code} {resp.text[:300]}")
+    body = resp.json()
+    if isinstance(body, dict) and "success" in body and not body["success"]:
+        raise RuntimeError(f"Open API 业务错误: {body.get('msg', body.get('message', json.dumps(body)))}")
+    return body
 
 
 # ──────────────────────────── Helpers ────────────────────────────
@@ -600,6 +642,197 @@ def get_table_audit_log(table_ref: str, engine: str = "HIVE", page_size: int = 2
         return json.dumps({
             "table": f"{database}.{table}",
             "audit_log": data,
+        }, ensure_ascii=False, indent=2)
+    except Exception as e:
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+
+# ──────────────────────────── 写入工具 ────────────────────────────
+
+
+@mcp.tool()
+def update_table_info(
+    table_ref: str,
+    description: str = "",
+    technical_pic: str = "",
+    business_pic: str = "",
+    data_warehouse_layer: str = "",
+    market_region: str = "",
+    idc_region: str = "SG",
+    dry_run: bool = True,
+) -> str:
+    """
+    更新 DataMap 中表的元数据信息（通过 Open API）。
+
+    默认 dry_run=True，仅预览变更（对比当前值与目标值），不执行更新。
+    确认无误后设置 dry_run=False 执行实际更新。
+
+    只需传入要修改的字段，未传入的字段不会被更新。
+
+    参数:
+        table_ref: 表名，格式 "database.table" 或 "table"（默认 database=spx_mart）
+        description: 表描述
+        technical_pic: 技术负责人邮箱，多个用逗号分隔
+        business_pic: 业务负责人邮箱，多个用逗号分隔
+        data_warehouse_layer: 数仓分层（ODS/DWD/DWS/ADS/DIM）
+        market_region: 市场区域
+        idc_region: IDC 区域，默认 "SG"
+        dry_run: True=仅预览，False=执行更新
+
+    示例:
+        update_table_info("spx_mart.dwd_spx_spsso_order_base_info_di_id", description="SPX order base")
+        update_table_info("spx_mart.dwd_spx_spsso_order_base_info_di_id", description="SPX order base", dry_run=False)
+    """
+    try:
+        database, table = _parse_table_ref(table_ref)
+
+        payload = {"idcRegion": idc_region, "schema": database, "table": table}
+        changes = {}
+
+        if description:
+            payload["description"] = description
+            changes["description"] = description
+        if technical_pic:
+            pic_list = [p.strip() for p in technical_pic.split(",") if p.strip()]
+            payload["technicalPIC"] = pic_list
+            changes["technicalPIC"] = pic_list
+        if business_pic:
+            pic_list = [p.strip() for p in business_pic.split(",") if p.strip()]
+            payload["businessPIC"] = pic_list
+            changes["businessPIC"] = pic_list
+        if data_warehouse_layer:
+            payload["dataWarehouseLayer"] = data_warehouse_layer
+            changes["dataWarehouseLayer"] = data_warehouse_layer
+        if market_region:
+            payload["marketRegion"] = market_region
+            changes["marketRegion"] = market_region
+
+        if not changes:
+            return json.dumps({"error": "未指定任何要更新的字段"}, ensure_ascii=False)
+
+        if dry_run:
+            current = {}
+            try:
+                qn = _qualified_name(database, table)
+                data = _request("GET", "/dataWarehouse/HIVE/info", params={"qualifiedName": qn})
+                if isinstance(data, dict):
+                    for field in changes:
+                        current[field] = data.get(field, "")
+            except Exception as e:
+                current["_fetch_error"] = str(e)
+
+            return json.dumps({
+                "mode": "DRY_RUN",
+                "table": f"{database}.{table}",
+                "idc_region": idc_region,
+                "proposed_changes": changes,
+                "current_values": current,
+                "note": "设置 dry_run=False 执行实际更新",
+            }, ensure_ascii=False, indent=2)
+
+        resp_data = _open_api_post("/system/hive/updateTableInfo", payload)
+        return json.dumps({
+            "mode": "EXECUTED",
+            "table": f"{database}.{table}",
+            "changes": changes,
+            "api_response": resp_data,
+        }, ensure_ascii=False, indent=2)
+    except Exception as e:
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+
+@mcp.tool()
+def update_column_info(
+    table_ref: str,
+    column_name: str,
+    description: str = "",
+    calculation_logic: str = "",
+    enumeration: str = "",
+    biz_primary_key: str = "",
+    idc_region: str = "SG",
+    dry_run: bool = True,
+) -> str:
+    """
+    更新 DataMap 中表的字段元数据信息（通过 Open API）。
+
+    默认 dry_run=True，仅预览变更，不执行更新。
+    确认无误后设置 dry_run=False 执行实际更新。
+
+    只需传入要修改的字段，未传入的字段不会被更新。
+
+    参数:
+        table_ref: 表名，格式 "database.table" 或 "table"（默认 database=spx_mart）
+        column_name: 列名
+        description: 列描述
+        calculation_logic: 计算逻辑说明
+        enumeration: 枚举值说明
+        biz_primary_key: 是否业务主键，"true"/"false"（为空不更新）
+        idc_region: IDC 区域，默认 "SG"
+        dry_run: True=仅预览，False=执行更新
+
+    示例:
+        update_column_info("spx_mart.dwd_spx_spsso_order_base_info_di_id", "order_id", description="order unique ID")
+        update_column_info("spx_mart.dwd_spx_spsso_order_base_info_di_id", "order_id", description="order unique ID", dry_run=False)
+    """
+    try:
+        database, table = _parse_table_ref(table_ref)
+
+        column_entry = {"columnName": column_name}
+        changes = {}
+
+        if description:
+            column_entry["description"] = description
+            changes["description"] = description
+        if calculation_logic:
+            column_entry["calculationLogic"] = calculation_logic
+            changes["calculationLogic"] = calculation_logic
+        if enumeration:
+            column_entry["enumeration"] = enumeration
+            changes["enumeration"] = enumeration
+        if biz_primary_key:
+            val = biz_primary_key.lower() == "true"
+            column_entry["bizPrimaryKey"] = val
+            changes["bizPrimaryKey"] = val
+
+        if not changes:
+            return json.dumps({"error": "未指定任何要更新的字段"}, ensure_ascii=False)
+
+        if dry_run:
+            current = {}
+            try:
+                qn = _qualified_name(database, table)
+                data = _request("GET", "/dataWarehouse/HIVE/columnDetail", params={
+                    "qualifiedName": qn,
+                    "columnName": column_name,
+                })
+                if isinstance(data, dict):
+                    for field in changes:
+                        current[field] = data.get(field, "")
+            except Exception as e:
+                current["_fetch_error"] = str(e)
+
+            return json.dumps({
+                "mode": "DRY_RUN",
+                "table": f"{database}.{table}",
+                "column": column_name,
+                "proposed_changes": changes,
+                "current_values": current,
+                "note": "设置 dry_run=False 执行实际更新",
+            }, ensure_ascii=False, indent=2)
+
+        payload = {
+            "idcRegion": idc_region,
+            "schema": database,
+            "table": table,
+            "columns": [column_entry],
+        }
+        resp_data = _open_api_post("/system/hive/updateColumnInfo", payload)
+        return json.dumps({
+            "mode": "EXECUTED",
+            "table": f"{database}.{table}",
+            "column": column_name,
+            "changes": changes,
+            "api_response": resp_data,
         }, ensure_ascii=False, indent=2)
     except Exception as e:
         return json.dumps({"error": str(e)}, ensure_ascii=False)

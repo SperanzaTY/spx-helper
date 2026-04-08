@@ -42,6 +42,65 @@
 
 ---
 
+## v3.4.12 — 2026-04-08 — feat(mcp): Spark 诊断工具 + DataMap 写入工具 + Cookie 认证升级
+
+**提交者**: @tianyi.liang
+**Commit Type**: feat
+**修改模块**: MCP 工具
+
+### 变更说明
+
+**Scheduler MCP - Spark 诊断工具（新增 8 个工具）**
+- `get_spark_app_summary`: 应用概览 + 关键 Spark 配置（内存/核心/AQE/动态分配等）
+- `get_spark_stages`: Stage 级指标（耗时/Shuffle/Spill）+ 数据倾斜检测
+- `get_spark_executors`: Executor 资源使用（内存/GC/任务分布）+ OOM 风险标记
+- `get_spark_sql_plan`: SQL 物理执行计划 + 关键算子指标（扫描行数/Shuffle 量）
+- `get_spark_jobs`: Job 列表及状态（每个 Action 对应的 Stage 构成）
+- `get_spark_stage_tasks`: Task 级明细 + 倾斜精确检测（P50/P90/P99 分位数 + max/median 比）
+- `get_spark_storage`: RDD/DataFrame 缓存信息（内存/磁盘占用）
+- `diagnose_spark_app`: 综合性能诊断（含 Task 级倾斜双层检测 + 优化建议）
+- 增强 `get_instance_detail`: Spark 任务自动提示可用的诊断工具
+- 增强 `get_spark_query_sql`: SHS SQL 端点作为 Keyhole 日志的回退方案
+
+**DataMap MCP - 表/字段元数据写入（新增 2 个工具）**
+- `update_table_info`: 更新表描述、技术/业务负责人、数仓分层等
+- `update_column_info`: 更新字段描述、计算逻辑、枚举值、业务主键标识
+- 通过 DataMap Open API（`open-api.datasuite.shopee.io`）+ Basic Auth 认证
+- 内置 dry_run 模式（默认开启），预览变更后再执行
+- Token 通过环境变量 `DATAMAP_OPEN_API_TOKEN` 配置，不填不影响查询工具正常使用
+- Token 获取：联系 yixin.yang@shopee.com
+
+**SHS 路由基础设施**
+- 实现 `_discover_shs_origin_host`: 从 Keyhole diagnostics 页面提取 SHS originHost
+- 实现 `_spark_history_get`: 通过 Keyhole 代理正确路由 SHS REST API（需 originHost + attemptId）
+- Keyhole 代理不支持 sortBy 参数，改为客户端排序
+
+**Cookie 认证升级（scheduler-query + datamap-query）**
+- `get_cookies()` 改为 `get_auth()`: 磁盘 Cookie 不足时自动走 CDP 实时获取
+- 消除用户反复手动登录刷新的需求
+
+**开发规范更新**
+- `.cursor/rules/mcp-tools.mdc`: 新增认证规范 + datamap-query 工具清单
+
+### 测试情况
+
+| 测试项 | 结果 | 备注 |
+|--------|------|------|
+| Chrome 扩展加载正常 | N/A | |
+| MCP 工具连接正常 | [OK] | scheduler-query + datamap-query 均通过 |
+| SeaTalk Agent 启动+注入正常 | N/A | |
+| SeaTalk Agent 重启后 UI 恢复 | N/A | |
+| 修改的功能正常工作 | [OK] | SHS 8 端点全部通过；Open API 表/字段更新 success=true；dry_run 预览正常 |
+| 已有功能未被破坏 | [OK] | 查询工具不受 Open API Token 影响 |
+| 控制台无新增错误 | [OK] | |
+
+### 特别注意
+- Spark 诊断工具依赖 Keyhole 代理访问 SHS，Keyhole 的 Cookie 通过 `get_auth()` 自动获取
+- 并行调用多个 SHS 工具可能导致 Keyhole 超时，建议逐个调用或使用 `diagnose_spark_app` 一次性诊断
+- DataMap 写入工具需要配置 `DATAMAP_OPEN_API_TOKEN` 环境变量（联系 yixin.yang@shopee.com），不配置不影响查询
+
+---
+
 ## v3.4.11 — 2026-03-02 — fix(mcp): Cookie 类 MCP 401 错误增加诊断信息
 
 **提交者**: @tianyi.liang
