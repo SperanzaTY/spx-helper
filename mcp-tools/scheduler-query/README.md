@@ -157,3 +157,4 @@ https://datasuite.shopee.io/scheduler/task/mkpldp_shop_health.studio_6075240/ins
 - Presto 任务用 `get_presto_query_sql`，Spark/Hive 任务用 `get_spark_query_sql` 或 `diagnose_spark_app`
 - Spark History Server 数据有保留期限（通常 7 天），较早的 application 可能查不到
 - `diagnose_spark_app` 是最全面的 Spark 诊断入口，推荐用于告警排查
+- Cookie 诊断逻辑由 `chrome_auth.diagnostic` 统一提供，各 MCP 工具共享

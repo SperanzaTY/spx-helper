@@ -249,38 +249,35 @@ def format_result_as_table(columns: list, rows: list) -> str:
 
 @mcp.tool()
 async def query_ck(
-    sql: str,
-    env: str,
+    sql: str = "",
+    env: str = "",
     cluster: Optional[str] = None,
     database: Optional[str] = None,
     max_rows: int = 200
 ) -> str:
-    """查询 ClickHouse 数据库，采用 DBeaver 直连方式（HTTP + Basic Auth）。
+    """Query ClickHouse via HTTP + Basic Auth.
 
-    【调用前确认】
-    1. env：live（生产）或 test（测试）
-    2. cluster（env=live 时必填），支持：ddc、ck2/ck5/ck6/ck7、online_2/4/5/6/7
-
-    支持长 SQL：WITH 子句、多行、复杂 CTE 均可；读查询超时 180 秒；请传递完整 SQL，勿截断。
-
-    集群说明：
-    - test：测试集群 spx_mart_pub
-    - ddc：DDC 集群 spx_mart_ddc
-    - ck2 / online_2：ck2 写集群（表最全）
-    - ck6 / online_6：ck6 写集群（表最全）
-    - ck5 / online_5：ck2 读集群（表为子集，部分表不存在）
-    - ck7 / online_7：ck6 读集群（表为子集，部分表不存在）
-    - online_4：test 读集群
-
-    若 ck5/ck7 报 UNKNOWN_TABLE，改查 ck2/ck6（写集群表更全）。
+    IMPORTANT: sql and env are REQUIRED. You MUST provide them in every call.
 
     Args:
-        sql: SQL 语句
-        env: live 或 test
-        cluster: 集群名（env=live 时必填），可选 ddc、ck2/ck5/ck6/ck7、online_2/4/5/6/7
-        database: 覆盖默认库（可选）
-        max_rows: 最多返回行数（默认 200）
+        sql: SQL statement (REQUIRED)
+        env: "live" or "test" (REQUIRED)
+        cluster: cluster name (REQUIRED when env=live): ddc, ck2, ck5, ck6, ck7, online_2/4/5/6/7
+        database: override default database (optional)
+        max_rows: max rows to return (default 200)
+
+    Cluster info: test=spx_mart_pub, ck2/ck6=write clusters (most tables), ck5/ck7=read clusters (subset).
+    If ck5/ck7 returns UNKNOWN_TABLE, use ck2/ck6 instead.
     """
+    if not sql or not env:
+        return (
+            "ERROR: sql and env parameters are REQUIRED but were not provided.\n"
+            "You MUST call this tool with both parameters.\n\n"
+            "Example:\n"
+            '  {"sql": "SELECT count() FROM spx_mart_manage_app.your_table", "env": "live", "cluster": "ck2"}\n\n'
+            "Please retry with the correct parameters."
+        )
+
     if env == "test":
         cluster_key = "test"
         db = database or "spx_mart_pub"

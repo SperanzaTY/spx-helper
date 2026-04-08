@@ -79,9 +79,13 @@ cookies = get_cookies(domain="datasuite.shopee.io")
 
 如果你的域名不在映射表中，可通过 `parent_domain` 参数指定。
 
+**父域 Cookie：** 过滤逻辑按 RFC 6265 判断 Cookie 的 `Domain` 是否覆盖目标主机，因此 **`Domain=.shopee.io` 的 Cookie（如 `DATA-SUITE-AUTH-userToken-v4`）会正确包含在 `datasuite.shopee.io` 的结果中**，不会被旧版子串匹配误丢。
+
 ### `get_auth(domain, *, strategies=None, ...)`
 
-统一认证入口，按策略顺序尝试获取认证，返回 `AuthResult`。
+统一认证入口，返回 `AuthResult`。
+
+**`cookie_db` 与 `cdp_cookie`（默认策略）：** 会**合并**磁盘 Cookie 与 CDP 实时 Cookie（**同名键以 CDP 为准**）。这样不会在「磁盘上已有部分 Cookie」时提前返回而导致**永远走不到 CDP**。`result.source` 可能为 `cookie_db`、`cdp_cookie` 或 `cookie_db+cdp_cookie`。
 
 ```python
 from chrome_auth import get_auth
@@ -97,7 +101,7 @@ if result.ok:
 
 **参数：**
 - `domain` — 目标域名
-- `strategies` — 策略列表，按顺序尝试，默认 `["cookie_db", "cdp_cookie"]`
+- `strategies` — 策略列表；其中 `cookie_db` 与 `cdp_cookie` 为**合并**关系（见上文），其余策略（`cdp_storage`、`cdp_header`）仍按顺序在 Cookie 为空时尝试。默认 `["cookie_db", "cdp_cookie"]`
 - `storage_key` — 使用 `cdp_storage` 策略时必填
 - `header_name` — 使用 `cdp_header` 策略时要拦截的 Header 名（默认 `"Authorization"`）
 - `cdp_port` — CDP 端口（默认自动检测 9222 / 19222）
@@ -111,13 +115,17 @@ class AuthResult:
     cookies: Dict[str, str]   # Cookie 字典
     headers: Dict[str, str]   # 认证 Header
     token: Optional[str]      # Token 字符串
-    source: str               # 来源策略名（如 "cookie_db"）
+    source: str               # 来源（如 "cookie_db"、"cdp_cookie"、"cookie_db+cdp_cookie"）
     ok: bool                  # 是否获取到有效认证
 ```
 
 ### `get_cdp_cookies(url_pattern, *, cdp_port=None, force=False, ttl=None)`
 
-通过 CDP 获取浏览器中打开页面的实时 Cookie。
+通过 CDP `Network.getCookies` 获取**当前调试端口对应浏览器**里、对目标站点生效的 Cookie。
+
+- **多端口**：会依次尝试环境变量 `CHROME_CDP_PORT`（若设置）、再 `9222`、再 `19222` 等可达端口。
+- **无需已打开目标站标签页**：若无 URL 含 `datasuite.shopee.io` 的标签，仍会使用任意可调试页面，并对 `https://datasuite.shopee.io/` 请求 Cookie。
+- **与 Chrome 一致**：DataSuite 登录若在 **Google Chrome** 里完成，而 CDP 只连在 **SeaTalk / 其它 Electron（如 19222）** 上，则两套进程 Cookie 罐不同，**仍拿不到** `DATA-SUITE-AUTH-userToken-v4`。请对 **Chrome** 使用 `--remote-debugging-port=9222` 启动（或设置 `CHROME_CDP_PORT` 指向 Chrome 的调试端口），再在本机 Chrome 中登录 DataSuite。
 
 ```python
 from chrome_auth import get_cdp_cookies
@@ -155,6 +163,42 @@ from chrome_auth import get_cache
 get_cache().clear()       # 清除所有缓存
 get_cache().invalidate("cookie:datasuite.shopee.io")  # 清除特定缓存
 ```
+
+### `cookie_diagnostic(cookies)`
+
+根据当前读到的 Cookie 字典生成诊断说明（供 MCP 在 401 时展示）。当缺少 `DATA-SUITE-AUTH-userToken-v4` 时，会附带 **macOS Chrome Cookie 加密**与 **远程调试**说明。
+
+```python
+from chrome_auth import cookie_diagnostic
+
+print(cookie_diagnostic(result.cookies))
+```
+
+---
+
+## DataSuite / Flink / Scheduler MCP 报 401
+
+在较新的 **macOS Google Chrome** 中，DataSuite 登录 Cookie 可能**加密存储**，磁盘 SQLite 中**无** `DATA-SUITE-AUTH-userToken-v4` 明文，**仅**能通过 **同一 Chrome 进程**的 CDP `Network.getCookies` 获取。
+
+**推荐步骤（本机执行一次）：**
+
+1. 保存 Chrome 中未保存的工作。
+2. 运行（会退出 Chrome 再以调试端口启动）：
+
+   ```bash
+   bash /path/to/spx-helper/mcp-tools/chrome-auth/scripts/start_chrome_remote_debug.sh
+   ```
+
+3. 在打开的 Chrome 中访问并登录：<https://datasuite.shopee.io/flink/>
+4. 验证：
+
+   ```bash
+   python3 /path/to/spx-helper/mcp-tools/chrome-auth/scripts/verify_datasuite_auth.py
+   ```
+
+   若输出 `[OK] Flink API 可访问`，再在 Cursor 中刷新 MCP。
+
+可选：在运行 MCP 的环境中设置 `export CHROME_CDP_PORT=9222`，确保 CDP 连到带调试的 Chrome（而非仅 SeaTalk 等占用的 19222）。
 
 ---
 

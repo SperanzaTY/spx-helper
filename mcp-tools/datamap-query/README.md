@@ -149,3 +149,4 @@ DataMap MCP 使用三组 API：
 - 写入操作（update_table_info / update_column_info）需要配置 `DATAMAP_OPEN_API_TOKEN` 环境变量
 - 写入操作默认 dry_run=True，预览确认后再设置 dry_run=False 执行
 - `search_global` 使用 SearchCenter API（`/datamap/searchcenter/api/v1/`），与其他工具的 API 前缀不同
+- Cookie 诊断逻辑由 `chrome_auth.diagnostic` 统一提供，各 MCP 工具共享

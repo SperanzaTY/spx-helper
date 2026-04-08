@@ -40,9 +40,12 @@ from chrome_auth import get_cookies
 cookies = get_cookies(domain=domain)
 ```
 
-`get_auth()` 默认策略 `["cookie_db", "cdp_cookie"]`：先读 Chrome 磁盘 Cookie 数据库，失败则通过 CDP 从运行中的浏览器实时获取。这样用户无需反复手动登录刷新。
+`get_auth()` 默认策略 `["cookie_db", "cdp_cookie"]`：**合并**磁盘与 CDP 两套 Cookie（同名以 CDP 为准），并修正对父域（如 `.shopee.io`）Cookie 的过滤。macOS 新版 Chrome 下 DataSuite 的 `DATA-SUITE-AUTH-userToken-v4` 可能加密存储、磁盘读不到，须用 **Chrome `--remote-debugging-port=9222`** 让 CDP 取全（见 `mcp-tools/chrome-auth/scripts/start_chrome_remote_debug.sh` 与 `cookie_diagnostic`）。
 
 适用模块：`scheduler-query`、`datamap-query` 等所有通过 `chrome_auth` 获取 DataSuite/Keyhole Cookie 的 MCP。
+
+### 本机开发时的 Cursor 配置
+仓库贡献者应使用**本地 `mcp-tools/<tool>/` 路径**配置 `~/.cursor/mcp.json`（`python3` + 入口脚本 + `PYTHONPATH` 含 `chrome-auth` 等），与「仅从 release 拉 uvx」相比，改代码立即生效。详见 `docs/guides/MCP_TOOLS.md` 中「本地仓库（开发者推荐）」。
 
 ### 修改后刷新
 MCP 工具代码修改后，需要在 Cursor Settings → MCP 中**关闭再开启**对应服务以刷新。

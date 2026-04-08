@@ -241,6 +241,7 @@ export class InspectorCdpClient implements ICdpClient {
   private _connected = false;
   private _page: CdpPage;
   private _seatalkPid = 0;
+  private _cdpEventListeners: Array<(method: string, params: Record<string, unknown>) => void> = [];
 
   constructor() {
     this._page = { id: '', title: '', url: '', type: 'page', webSocketDebuggerUrl: '' };
@@ -275,6 +276,9 @@ export class InspectorCdpClient implements ICdpClient {
           const event = JSON.parse((msg.params as any).payload);
           const handlers = this.eventHandlers.get(event.method);
           if (handlers) for (const h of handlers) h(event.params || {});
+          for (const listener of this._cdpEventListeners) {
+            try { listener(event.method, event.params || {}); } catch { /* ignore */ }
+          }
         } catch { /* malformed relay payload */ }
       }
     });
@@ -350,6 +354,11 @@ export class InspectorCdpClient implements ICdpClient {
 
   off(event: string) {
     this.eventHandlers.delete(event);
+  }
+
+  /** Register a listener that receives ALL CDP events relayed from the rendering page. */
+  onCdpEvent(listener: (method: string, params: Record<string, unknown>) => void) {
+    this._cdpEventListeners.push(listener);
   }
 
   private inspectorSend(method: string, params: Record<string, unknown> = {}, timeoutMs = 10_000): Promise<any> {

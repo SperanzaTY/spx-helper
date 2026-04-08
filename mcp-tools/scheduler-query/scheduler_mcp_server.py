@@ -16,6 +16,7 @@ from typing import Dict, Any, Optional, List
 
 import requests
 from chrome_auth import get_auth
+from chrome_auth.diagnostic import cookie_diagnostic as _cookie_diagnostic
 from mcp.server.fastmcp import FastMCP
 
 logging.basicConfig(level=logging.INFO)
@@ -32,16 +33,6 @@ def _load_cookies(force: bool = False) -> Dict[str, str]:
     if result.ok:
         logger.info(f"[Auth] DataSuite cookies via {result.source} ({len(result.cookies)} cookies)")
     return result.cookies
-
-
-def _cookie_diagnostic(cookies: Dict[str, str]) -> str:
-    total = len(cookies)
-    if total == 0:
-        return "未读取到任何 Cookie（browser_cookie3 可能无法访问 Chrome Cookie 数据库）"
-    missing = [k for k in ("CSRF-TOKEN", "JSESSIONID", "DATA-SUITE-AUTH-userToken-v4") if k not in cookies]
-    if missing:
-        return f"读到 {total} 个 Cookie，但缺少关键认证 Cookie: {', '.join(missing)}"
-    return f"Cookie 完整（{total} 个），可能是 Cookie 已过期"
 
 
 # ──────────────────────────── HTTP 客户端 ────────────────────────────

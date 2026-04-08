@@ -1,6 +1,6 @@
 {
   "name": "seatalk-agent",
-  "version": "3.4.14",
+  "version": "3.4.15",
   "description": "SeaTalk + Cursor Agent 侧边栏增强工具",
   "type": "module",
   "scripts": {

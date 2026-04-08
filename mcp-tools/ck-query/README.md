@@ -32,9 +32,12 @@
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | `sql` | string | 是 | SQL 查询语句 |
-| `cluster` | string | 否 | 集群名称，默认 `test` |
+| `env` | string | 是 | `live`（生产）或 `test`（测试） |
+| `cluster` | string | env=live 时必填 | 集群名称，支持 ddc/ck2/ck5/ck6/ck7/online_2/4/5/6/7 |
 | `database` | string | 否 | 数据库名，默认取集群配置 |
-| `max_rows` | int | 否 | 最大返回行数 |
+| `max_rows` | int | 否 | 最大返回行数，默认 200 |
+
+> 当 `sql` 或 `env` 未传入时，工具会返回自我纠正提示（含示例），引导模型重试。
 
 ## 可用集群
 

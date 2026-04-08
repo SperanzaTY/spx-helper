@@ -42,6 +42,41 @@
 
 ---
 
+## v3.4.15 — 2026-04-08 — feat(mcp/agent): Flink MCP + CDP 代理 + chrome-auth 认证修复
+
+**提交者**: @tianyi.liang
+**Commit Type**: feat
+**修改模块**: MCP 工具 / SeaTalk Agent / 文档
+
+### 变更说明
+- [MCP] 新增 Flink MCP 工具（flink-query），支持查询 DataSuite Flink 应用详情、实例状态、异常、告警日志、综合诊断等 13 个工具
+- [MCP] 修复 chrome-auth Cookie 域名匹配不符合 RFC 6265 导致 DataSuite 登录态获取失败的问题
+- [MCP] chrome-auth 改进：合并 cookie_db 和 cdp_cookie 策略结果，提取公共 cookie_diagnostic 函数
+- [MCP] CK MCP query_ck 工具改进：参数为空时返回自我纠正提示而非 pydantic ValidationError，精简 docstring 减少 token 占用
+- [Agent] 新增 CDP 代理服务（cdp-proxy.ts），Agent 启动后在 19222 端口暴露标准 CDP 协议，解决 v3.4.13 Inspector 重构后 seatalk-reader 16 个工具全部失效的问题
+- [Agent] InspectorCdpClient 新增 onCdpEvent() 方法，支持 CDP 事件广播到代理客户端
+- [Doc] INSTALL.md 补充根目录 npm install 步骤（启用 Git Hooks）
+- [Doc] SEATALK_AGENT.md 更新架构图、启动日志、过时 FAQ
+
+### 测试情况
+
+| 测试项 | 结果 | 备注 |
+|--------|------|------|
+| Chrome 扩展加载正常 | N/A | |
+| MCP 工具连接正常 | ✅ | flink-query / ck-query / seatalk-reader 均测试通过 |
+| SeaTalk Agent 启动+注入正常 | ✅ | CDP 代理正常监听 19222 |
+| SeaTalk Agent 重启后 UI 恢复 | ✅ | |
+| 修改的功能正常工作 | ✅ | CDP 代理、seatalk_eval、Flink 查询均验证 |
+| 已有功能未被破坏 | ✅ | |
+| 控制台无新增错误 | ✅ | |
+
+### 特别注意
+- 所有用户需要重启 SeaTalk Agent（终端运行 `seatalk`，或在面板点"重启 Agent"）
+- Flink MCP 需要手动配置到 `~/.cursor/mcp.json`（参见 MCP_TOOLS.md）
+- CK MCP query_ck 在 SeaTalk Agent 对话中偶发参数为空的问题是 Cursor ACP 层面的已知限制，新版本增加了自我纠正提示以缓解
+
+---
+
 ## v3.4.14 — 2026-04-08 — fix(agent): 修复 ACP 连接因 URL 类型 MCP server 缺少 headers 字段失败
 
 **提交者**: @zhenzhou.zhang

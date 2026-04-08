@@ -6,6 +6,7 @@ import { execSync, spawn as spawnChild } from 'node:child_process';
 import { connectViaInspector, findSeaTalkPid, type ICdpClient } from './cdp.js';
 import { Bridge } from './bridge.js';
 import { spawnAgent, killAgent, listModels, loadMcpServers, type AgentProcess } from './acp.js';
+import { CdpProxy } from './cdp-proxy.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WORKSPACE = process.env.WORKSPACE || path.resolve(__dirname, '../..');
@@ -429,6 +430,10 @@ async function main() {
   }
 
   log(`connected: ${client.page.title} (${client.page.url})`);
+
+  const cdpProxy = new CdpProxy({ log });
+  cdpProxy.setClient(client);
+  await cdpProxy.start();
 
   let bridge: Bridge;
 
@@ -1922,6 +1927,7 @@ async function main() {
       try {
         client = await connectViaInspector();
         log(`reconnected: ${client.page.title}`);
+        cdpProxy.setClient(client);
         reconnecting = false;
         await setupCdpClient();
         break;
@@ -1948,6 +1954,7 @@ async function main() {
 
   function cleanupAndExit(code = 0) {
     log('shutting down...');
+    cdpProxy.stop();
     knownChildPids = getProcessTree();
     if (agent) {
       agent.proc.removeAllListeners('exit');

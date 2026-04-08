@@ -51,6 +51,57 @@ def _find_page(port: int, url_pattern: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+def _list_reachable_cdp_ports(cdp_port: Optional[int]) -> List[int]:
+    """Ports to try: explicit cdp_port, else CHROME_CDP_PORT, then 9222 before 19222 (Chrome 优先于其它 CDP)."""
+    if cdp_port is not None:
+        return [cdp_port]
+    ordered: List[int] = []
+    env_port = os.environ.get("CHROME_CDP_PORT")
+    if env_port:
+        try:
+            ordered.append(int(env_port))
+        except ValueError:
+            pass
+    for p in DEFAULT_CDP_PORTS:
+        if p not in ordered:
+            ordered.append(p)
+    reachable: List[int] = []
+    for p in ordered:
+        try:
+            resp = http_requests.get(f"http://127.0.0.1:{p}/json", timeout=2)
+            if resp.status_code == 200:
+                reachable.append(p)
+        except Exception:
+            continue
+    return reachable
+
+
+def _pick_page_for_cookie_read(port: int, url_pattern: str) -> Optional[Dict[str, Any]]:
+    """Prefer a tab whose URL matches *url_pattern*; else any `page` with a debugger WebSocket."""
+    page = _find_page(port, url_pattern)
+    if page and page.get("webSocketDebuggerUrl"):
+        return page
+    try:
+        pages = _list_pages(port)
+    except Exception:
+        return None
+    for pg in pages:
+        if pg.get("type") == "page" and pg.get("webSocketDebuggerUrl"):
+            return pg
+    for pg in pages:
+        if pg.get("webSocketDebuggerUrl"):
+            return pg
+    return None
+
+
+def _cookie_urls_for_pattern(url_pattern: str) -> List[str]:
+    """URLs for Network.getCookies — 无需已打开目标站标签页，只要浏览器 Cookie 罐里有即可。"""
+    p = (url_pattern or "").strip()
+    if p.startswith("http://") or p.startswith("https://"):
+        return [p.rstrip("/") + "/"]
+    return [f"https://{p}/", f"http://{p}/"]
+
+
 def _cdp_call(ws_url: str, method: str, params: Optional[dict] = None, timeout: float = 10) -> Any:
     """Send a single CDP command over WebSocket and return the result."""
     ws = websocket.create_connection(ws_url, timeout=timeout, suppress_origin=True)
@@ -142,10 +193,11 @@ def get_cdp_cookies(
     ttl: Optional[float] = None,
 ) -> Dict[str, str]:
     """
-    Read cookies for a page via CDP Network.getCookies (live browser state).
+    Read cookies via CDP Network.getCookies (live browser state).
 
-    This is different from cookie_provider which reads the on-disk DB.
-    Useful when cookies are httpOnly or set by service workers.
+    依次尝试所有可达 CDP 端口（默认先 9222 再 19222）。若无标签页 URL 含 *url_pattern*，
+    仍可用任意可调试页调用 getCookies，并传入目标站点根 URL（如 https://datasuite.shopee.io/）。
+    DataSuite 登录态须存在于**同一 CDP 对应浏览器**（通常为带 remote-debugging 的 Chrome）。
     """
     cache = get_cache()
     cache_key = f"cdp_cookie:{url_pattern}"
@@ -155,30 +207,42 @@ def get_cdp_cookies(
         if cached is not None:
             return cached
 
-    port = cdp_port or _detect_cdp_port()
-    if port is None:
+    ports = _list_reachable_cdp_ports(cdp_port)
+    if not ports:
+        logger.warning("No CDP port reachable for cookie read")
         return {}
 
-    page = _find_page(port, url_pattern)
-    if page is None:
-        return {}
+    urls = _cookie_urls_for_pattern(url_pattern)
 
-    ws_url = page.get("webSocketDebuggerUrl")
-    if not ws_url:
-        return {}
+    for port in ports:
+        page = _pick_page_for_cookie_read(port, url_pattern)
+        if not page:
+            logger.debug("No debuggable target on CDP port %d", port)
+            continue
+        ws_url = page.get("webSocketDebuggerUrl")
+        if not ws_url:
+            continue
 
-    try:
-        result = _cdp_call(ws_url, "Network.getCookies", {"urls": [page["url"]]})
-        cookies: Dict[str, str] = {}
-        for c in result.get("cookies", []):
-            cookies[c["name"]] = c["value"]
-        if cookies:
-            cache.set(cache_key, cookies, ttl)
-            logger.info("Got %d cookies via CDP for %s", len(cookies), url_pattern)
-        return cookies
-    except Exception as e:
-        logger.error("Failed to get cookies via CDP: %s", e)
-        return {}
+        try:
+            result = _cdp_call(ws_url, "Network.getCookies", {"urls": urls})
+            cookies: Dict[str, str] = {}
+            for c in result.get("cookies", []):
+                cookies[c["name"]] = c["value"]
+            if cookies:
+                cache.set(cache_key, cookies, ttl)
+                logger.info(
+                    "Got %d cookies via CDP (port %d, urls=%s) for %s",
+                    len(cookies),
+                    port,
+                    urls,
+                    url_pattern,
+                )
+                return cookies
+        except Exception as e:
+            logger.warning("CDP Network.getCookies failed on port %d: %s", port, e)
+            continue
+
+    return {}
 
 
 def get_header(

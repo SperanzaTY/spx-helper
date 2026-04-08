@@ -81,47 +81,35 @@ seatalk
 看到以下日志说明启动成功：
 
 ```
-[agent] SeaTalk launched with --remote-debugging-port=19222
+[agent] connecting to SeaTalk via Inspector...
 [agent] connected: SeaTalk (https://web.haiserve.com/)
+[agent] [cdp-proxy] listening on 127.0.0.1:19222
 [agent] SPA ready
 [agent] injection complete!
 [agent] ACP agent connected
 ```
 
-### 方式二：直接打开 SeaTalk（需先运行过 install.sh）
+### 方式二：直接打开 SeaTalk + npm start
 
-如果你已经运行过 `install.sh`，可以用任何方式打开 SeaTalk（双击图标、Dock、Spotlight）。CDP 守护进程会在后台自动将其重启为 CDP 模式（SeaTalk 会闪一下）。然后启动 Agent：
+用任何方式打开 SeaTalk（双击图标、Dock、Spotlight），然后启动 Agent：
 
 ```bash
 cd spx-helper/seatalk-agent
 npm start
 ```
 
-### 方式三：手动分步启动（未安装守护进程）
+Agent 会通过 SIGUSR1 激活 SeaTalk 的 V8 Inspector，无需 `--remote-debugging-port` 参数。
 
-如果没有运行过 `install.sh`：
+### 验证 Agent 是否正常
 
-```bash
-# 1. 先完全退出 SeaTalk（Cmd+Q 或 pkill SeaTalk）
-
-# 2. 以 CDP 模式打开 SeaTalk
-open -a SeaTalk --args --remote-debugging-port=19222
-
-# 3. 等 SeaTalk 打开后，启动 Agent
-cd spx-helper/seatalk-agent
-npm start
-```
-
-### 验证 CDP 是否生效
-
-如果不确定 SeaTalk 是否以 CDP 模式运行，在终端执行：
+Agent 启动后会在 19222 端口暴露 CDP 代理。在终端执行：
 
 ```bash
 curl -s http://127.0.0.1:19222/json
 ```
 
-- 返回 JSON 数据 → CDP 已启用，可以启动 Agent
-- 返回"连接被拒绝" → CDP 未启用，参考上面的启动方式
+- 返回 JSON 数据（含 `web.haiserve.com` 页面）→ Agent 运行正常
+- 返回"连接被拒绝" → Agent 未启动，请执行 `seatalk`
 
 ---
 
@@ -198,7 +186,7 @@ tail -f ~/.seatalk-agent/logs/agent.log
 ## 技术架构概览
 
 ```
-SeaTalk 桌面端 (Electron, CDP port 19222)
+SeaTalk 桌面端 (Electron)
   └── 页面内注入的 JS
         ├── cursor-ui.js         UI 基础组件（面板、按钮、CSS）
         ├── sidebar-app.js       面板逻辑（对话、设置、更新）
@@ -206,8 +194,9 @@ SeaTalk 桌面端 (Electron, CDP port 19222)
         └── seatalk-watch.js     消息监听（Remote 远程控制）
 
 Node.js 后端 (seatalk-agent/src/main.ts)
-  ├── CdpClient     连接 SeaTalk CDP，注入脚本、收发消息
-  ├── Bridge        消息桥：页面 ↔ Node 双向通信
+  ├── InspectorCdpClient  SIGUSR1 激活 Inspector，debugger.attach 代理 CDP
+  ├── CdpProxy     在 19222 暴露标准 CDP 协议，供 seatalk-reader 等外部工具使用
+  ├── Bridge        消息桥：页面 <-> Node 双向通信
   ├── ACP Agent     主 AI Agent（Cursor Agent Protocol）
   ├── Remote Agent  独立 AI Agent，处理远程控制指令
   └── Updater       解析 Git remote（gitlab / origin 等），对 release 做 fetch & rebase
@@ -646,37 +635,18 @@ curl https://cursor.com/install -fsSL | bash
 
 ### SeaTalk 打开了但看不到 Cursor 面板
 
-1. 确认已运行过 `bash install.sh`（安装 CDP 守护进程，自动处理 CDP 模式）
+1. 确认已运行过 `bash install.sh`
 2. 确认 Agent 在运行：终端执行 `seatalk` 或 `cd seatalk-agent && npm start`
-3. 如果还是不行，验证 CDP 是否生效：`curl -s http://127.0.0.1:19222/json`
-4. 如果 CDP 没开启且未安装守护进程，手动退出 SeaTalk 后执行：`open -a SeaTalk --args --remote-debugging-port=19222`
+3. 验证 Agent 是否正常：`curl -s http://127.0.0.1:19222/json`（应返回 JSON 页面列表）
+4. 设置菜单 -> "重新注入 UI"
 
-### SeaTalk 启动后会闪一下
+### 19222 端口不通
 
-这是正常现象。CDP 守护进程检测到 SeaTalk 未开启 CDP 端口时，会自动重启它。只在每次打开 SeaTalk 时发生一次，之后正常使用。
+Agent 在 19222 端口暴露 CDP 代理服务。如果连不上：
 
-### CDP 守护进程已安装但 19222 端口不通
-
-CDP 守护进程**不会主动启动 SeaTalk**，它只在 SeaTalk 已运行时检测并重启为 CDP 模式。请先手动打开 SeaTalk（双击/Dock/Spotlight），守护进程会在几秒内自动检测并重启它。
-
-检查守护进程状态：
-
-```bash
-launchctl list | grep seatalk    # 应看到 com.seatalk.cdp-daemon
-cat ~/.seatalk-agent/logs/cdp-daemon.log  # 查看守护进程日志
-```
-
-### 不要直接运行 SeaTalk 二进制文件带 CDP 参数
-
-直接执行 `/Applications/SeaTalk.app/Contents/MacOS/SeaTalk --remote-debugging-port=19222` 会报 `bad option` 错误。SeaTalk 的 Electron 包装器不接受直接参数。
-
-**正确做法**：必须通过 `open` 命令传递参数：
-
-```bash
-open -a SeaTalk --args --remote-debugging-port=19222
-```
-
-或直接使用 `bash install.sh` 安装 CDP 守护进程，它会自动处理。
+1. 确认 Agent 进程在运行：`ps aux | grep 'tsx.*main.ts'`
+2. 确认没有其他程序占用该端口：`lsof -i :19222`
+3. 重新启动 Agent：`seatalk`
 
 ### Agent 日志卡在 "authenticating..." 很久
 
@@ -737,6 +707,10 @@ npm start
 ---
 
 ## 更新日志
+
+### v3.4.15
+- **CDP 代理服务**：Agent 启动后在 19222 端口暴露标准 CDP 协议，解决 v3.4.13 Inspector 重构后 seatalk-reader 等外部工具无法连接的问题。外部工具零修改
+- **InspectorCdpClient 事件广播**：新增 `onCdpEvent()` 方法，CDP 事件自动转发到代理客户端
 
 ### v3.4.14
 - **修复 ACP 连接失败**：`loadMcpServers()` 创建 SSE/HTTP 类型 MCP server 时缺少 ACP schema 要求的 `headers` 字段，导致 agent 在 `session/new` 阶段返回 "Internal error"。仅在 `mcp.json` 配置了 URL 类型 MCP server 时触发

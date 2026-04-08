@@ -17,6 +17,15 @@ _PARENT_DOMAIN_MAP = {
 }
 
 
+def _cookie_applies_to_host(host: str, cookie_domain: str) -> bool:
+    """Whether a cookie with Domain=cookie_domain should be sent to host (RFC 6265 style)."""
+    host = (host or "").lower().strip()
+    cd = (cookie_domain or "").lstrip(".").lower().strip()
+    if not host or not cd:
+        return False
+    return host == cd or host.endswith("." + cd)
+
+
 def get_cookies(
     domain: str,
     *,
@@ -56,7 +65,9 @@ def get_cookies(
     cookies: Dict[str, str] = {}
     for c in cj:
         cookie_domain = c.domain or ""
-        if cookie_domain in (domain, f".{domain}") or domain in cookie_domain:
+        # 必须包含父域 Cookie：例如 Domain=.shopee.io 的 DATA-SUITE-AUTH-userToken-v4
+        # 旧逻辑用 `domain in cookie_domain` 会漏掉仅挂在 .shopee.io 上的 Cookie
+        if _cookie_applies_to_host(domain, cookie_domain):
             cookies[c.name] = c.value
 
     if cookies:

@@ -53,6 +53,13 @@ git checkout release
 git pull origin release
 ```
 
+克隆（或更新）后，执行根目录的依赖安装以启用 Git Hooks：
+
+```bash
+cd spx-helper
+npm install
+```
+
 ---
 
 ## 第四步：按模块安装
@@ -233,7 +240,6 @@ git pull origin release
 | `uvx` 找不到 | 安装 uv 后重启终端，或 `export PATH="$HOME/.local/bin:$PATH"` |
 | MCP 一直红点 | 确认 VPN 连接 + `uvx --version` 可用 |
 | SeaTalk 没有 Cursor 面板 | 确认 `bash install.sh` 已执行，终端运行 `seatalk` |
-| SeaTalk 启动闪一下 | 正常，CDP 守护进程自动重启 |
 | node 版本低于 22 | `brew install node` |
 | Python 版本低于 3.10 | `uv python install 3.12` |
 
