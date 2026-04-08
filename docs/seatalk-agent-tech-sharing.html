@@ -25,45 +25,44 @@
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
+html {
+  scroll-snap-type: y mandatory;
+  scroll-behavior: smooth;
+}
+
 body {
   font-family: 'Noto Sans SC', sans-serif;
   background: var(--bg);
   color: var(--text);
-  overflow: hidden;
-  height: 100vh;
-  width: 100vw;
+  overflow-x: hidden;
 }
 
 .slide {
-  position: absolute;
-  inset: 0;
+  min-height: 100vh;
   display: flex;
   flex-direction: column;
   justify-content: center;
   padding: 60px 80px;
-  opacity: 0;
-  transform: translateX(60px);
-  pointer-events: none;
-  transition: opacity var(--slide-transition), transform var(--slide-transition);
+  scroll-snap-align: start;
+  position: relative;
 }
-
-.slide.active { opacity: 1; transform: translateX(0); pointer-events: auto; }
-.slide.prev { opacity: 0; transform: translateX(-60px); }
 
 .nav {
   position: fixed;
-  bottom: 10px;
   right: 16px;
+  top: 50%;
+  transform: translateY(-50%);
   display: flex;
+  flex-direction: column;
   align-items: center;
   gap: 6px;
   z-index: 100;
   background: rgba(18, 18, 26, 0.75);
   backdrop-filter: blur(12px);
-  padding: 4px 10px;
+  padding: 10px 6px;
   border-radius: 20px;
   border: 1px solid var(--border);
-  opacity: 0.5;
+  opacity: 0.35;
   transition: opacity 0.3s;
 }
 .nav:hover { opacity: 1; }
@@ -74,22 +73,17 @@ body {
 }
 .nav-dot.active {
   background: var(--accent); box-shadow: 0 0 8px var(--accent-glow);
-  width: 14px; border-radius: 3px;
+  height: 14px; border-radius: 3px;
 }
 
 .nav-label {
   font-size: 10px; color: var(--text-muted);
   font-family: 'JetBrains Mono', monospace;
-  min-width: 28px; text-align: center;
+  writing-mode: vertical-lr;
+  text-orientation: mixed;
+  letter-spacing: 1px;
+  margin-top: 2px;
 }
-
-.nav-arrow {
-  width: 22px; height: 22px; border: 1px solid var(--border);
-  border-radius: 50%; display: flex; align-items: center; justify-content: center;
-  cursor: pointer; color: var(--text-dim); transition: all 0.2s;
-  background: transparent; font-size: 11px;
-}
-.nav-arrow:hover { border-color: var(--accent); color: var(--accent); }
 
 .title-slide { align-items: center; text-align: center; background: radial-gradient(ellipse at 50% 30%, rgba(79, 110, 247, 0.08) 0%, transparent 60%); }
 
@@ -219,7 +213,7 @@ code {
 <body>
 
 <!-- Slide 0: Title -->
-<div class="slide title-slide active" data-idx="0">
+<div class="slide title-slide" data-idx="0">
   <div class="title-badge">TECHNICAL DEEP DIVE</div>
   <div class="title-main">SeaTalk Agent<br>注入式 AI 助手</div>
   <div class="title-sub">把 AI 助手"塞进"SeaTalk 聊天窗口——不改一行 SeaTalk 代码</div>
@@ -274,13 +268,13 @@ code {
     </div>
     <div class="arch-arrow">⇄</div>
     <div class="arch-box highlight">
-      <div class="arch-label">CDP Bridge</div>
+      <div class="arch-label">Inspector Bridge</div>
       <div class="arch-title" style="color: var(--accent)">Node.js 后端</div>
       <ul class="arch-items">
-        <li>cdp.ts（WebSocket 连接）</li>
+        <li>cdp.ts（Inspector CDP 客户端）</li>
+        <li>cdp-proxy.ts（19222 CDP 代理）</li>
         <li>bridge.ts（双向通信）</li>
         <li>main.ts（编排中心）</li>
-        <li>进程管理 / 自动更新</li>
       </ul>
     </div>
     <div class="arch-arrow">⇄</div>
@@ -308,10 +302,11 @@ code {
     </div>
   </div>
   <div style="margin-top: 20px; text-align: center;">
-    <span class="tag blue">Port 19222</span>
+    <span class="tag blue">SIGUSR1 Inspector</span>
     <span class="tag cyan">Runtime.addBinding</span>
     <span class="tag pink">Runtime.evaluate</span>
-    <span style="font-size: 12px; color: var(--text-muted); margin-left: 12px;">← 三个关键 CDP API 撑起整个注入体系</span>
+    <span class="tag purple">CDP Proxy :19222</span>
+    <span style="font-size: 12px; color: var(--text-muted); margin-left: 12px;">← Inspector 连接 + CDP 代理暴露标准端口</span>
   </div>
 </div>
 
@@ -319,23 +314,23 @@ code {
 <div class="slide" data-idx="3">
   <div class="section-num">03 — CDP INJECTION</div>
   <div class="section-title">如何注入 SeaTalk？</div>
-  <div class="section-subtitle">利用 Electron = Chromium 的特性，通过 CDP 远程调试协议注入代码</div>
-  <div class="note" style="margin-bottom: 16px;">CDP（Chrome DevTools Protocol）= Chrome 浏览器 F12 开发者工具背后用的协议。SeaTalk 用 Electron 构建，内核就是 Chromium，所以天然支持 CDP。</div>
+  <div class="section-subtitle">通过 Node.js Inspector 协议连接 Electron 主进程，再注入渲染进程</div>
+  <div class="note" style="margin-bottom: 16px;">v3.4.13 起不再依赖 <code>--remote-debugging-port</code> 启动参数。改用 SIGUSR1 信号激活 Node.js Inspector，通过主进程桥接到渲染进程的 CDP 协议。</div>
   <div class="flow">
     <div class="flow-step">
       <div class="flow-num">01</div>
-      <div class="flow-title">启动 SeaTalk</div>
-      <div class="flow-desc">加上 <code>--remote-debugging-port=19222</code> 参数启动</div>
+      <div class="flow-title">发送 SIGUSR1</div>
+      <div class="flow-desc">向 SeaTalk 主进程发送信号，激活 <code>Inspector :9229</code></div>
     </div>
     <div class="flow-step">
       <div class="flow-num">02</div>
-      <div class="flow-title">发现页面</div>
-      <div class="flow-desc">GET <code>/json</code> 枚举所有页面，定位主界面</div>
+      <div class="flow-title">连接 Inspector</div>
+      <div class="flow-desc">WebSocket 连接 <code>ws://127.0.0.1:9229</code></div>
     </div>
     <div class="flow-step">
       <div class="flow-num">03</div>
-      <div class="flow-title">WebSocket 连接</div>
-      <div class="flow-desc">连接到页面的 <code>webSocketDebuggerUrl</code></div>
+      <div class="flow-title">桥接渲染进程</div>
+      <div class="flow-desc">注入 <code>__cdpRelay</code> binding 建立事件通道</div>
     </div>
     <div class="flow-step">
       <div class="flow-num">04</div>
@@ -344,28 +339,29 @@ code {
     </div>
     <div class="flow-step">
       <div class="flow-num">05</div>
-      <div class="flow-title">注入脚本</div>
-      <div class="flow-desc"><code>Runtime.evaluate</code> 依次注入 4 个 JS 文件</div>
+      <div class="flow-title">注入 + CDP 代理</div>
+      <div class="flow-desc">注入 4 个 JS 文件，同时在 <code>:19222</code> 暴露标准 CDP</div>
     </div>
   </div>
   <div class="two-col" style="margin-top: 28px;">
     <div>
-      <div class="card-title">为什么选 CDP？</div>
+      <div class="card-title">为什么改用 Inspector？</div>
       <ul class="bullet-list">
-        <li><strong>零侵入</strong>：不修改 SeaTalk 任何源码</li>
-        <li><strong>SeaTalk 更新不受影响</strong>：不依赖特定版本</li>
-        <li><strong>实时调试</strong>：可以读 DOM / Redux / SQLite</li>
+        <li><strong>零配置启动</strong>：不需要特殊参数启动 SeaTalk</li>
+        <li><strong>兼容所有启动方式</strong>：Dock / 命令行 / BTM 自启均可</li>
+        <li><strong>CDP 代理兼容</strong>：19222 端口仍可用，外部工具无需改动</li>
         <li><strong>双向通信</strong>：binding + evaluate 构成完整 RPC</li>
       </ul>
     </div>
-    <div class="code-block"><span class="cm">// SeaTalk = Electron = Chromium</span>
-<span class="cm">// 启动时加一个参数就暴露了完整的调试接口</span>
+    <div class="code-block"><span class="cm">// v3.4.13+: 不再需要启动参数</span>
+<span class="cm">// 通过 SIGUSR1 信号激活 Inspector</span>
 
-open -a SeaTalk <span class="str">--args</span> \
-  <span class="str">--remote-debugging-port=19222</span>
+<span class="kw">kill</span> -SIGUSR1 $(pgrep -f SeaTalk)
+<span class="cm">// Inspector 在 9229 端口激活</span>
 
-<span class="cm">// 之后就能用标准 CDP 协议做任何事</span>
-<span class="cm">// 注入 JS、读取 DOM、拦截网络请求...</span></div>
+<span class="cm">// Node.js 后端连接 Inspector → 桥接渲染进程</span>
+<span class="cm">// CDP Proxy 在 19222 暴露标准 CDP 协议</span>
+<span class="cm">// seatalk-reader 等外部工具无需修改</span></div>
   </div>
 </div>
 
@@ -613,17 +609,17 @@ window.<span class="fn">__agentSend</span>(JSON.<span class="fn">stringify</span
     <div class="card">
       <div class="card-icon cyan">💬</div>
       <div class="card-title">SeaTalk Reader</div>
-      <div class="card-desc">通过 CDP 读取 SeaTalk 消息历史、搜索关键词、下载图片、截屏当前页面。</div>
+      <div class="card-desc">通过 CDP Proxy 读取 SeaTalk 消息历史、搜索关键词、下载图片、截屏当前页面。</div>
     </div>
     <div class="card">
       <div class="card-icon pink">🔗</div>
-      <div class="card-title">API Trace</div>
-      <div class="card-desc">追踪 SPX 内部 API 调用链，快速定位告警对应的接口和上下游。</div>
+      <div class="card-title">API Trace / DataMap</div>
+      <div class="card-desc">追踪 SPX 内部 API 调用链，查询表元数据和血缘关系，快速定位告警根因。</div>
     </div>
     <div class="card">
       <div class="card-icon purple">📊</div>
-      <div class="card-title">Scheduler / DataStudio</div>
-      <div class="card-desc">查询任务调度状态、运行实例、血缘关系；浏览和管理 DataStudio SQL 资产。</div>
+      <div class="card-title">Scheduler / Flink / DataStudio</div>
+      <div class="card-desc">查询离线任务调度状态和血缘；查询 Flink 实时任务状态、异常和告警；管理 SQL 资产。</div>
     </div>
     <div class="card">
       <div class="card-icon blue">📋</div>
@@ -670,9 +666,9 @@ window.<span class="fn">__agentSend</span>(JSON.<span class="fn">stringify</span
     </div>
     <div class="card">
       <div class="card-icon purple">🛡️</div>
-      <div class="card-title">CDP 生命周期管理</div>
+      <div class="card-title">Inspector + CDP Proxy 生命周期</div>
       <div class="card-desc">
-        心跳检测（5s 轮询）→ 断连自动重连 → SeaTalk 页面刷新自动重注入 → LaunchAgent 守护进程确保 CDP 端口始终可用。
+        SIGUSR1 激活 Inspector → 断连自动重连 → SeaTalk 页面刷新自动重注入 → CDP Proxy 在 19222 保持标准 CDP 协议，外部工具无感知。
       </div>
     </div>
   </div>
@@ -885,7 +881,7 @@ window.<span class="fn">__agentSend</span>(JSON.<span class="fn">stringify</span
       <div class="card" style="margin-top: 16px; border-color: rgba(34, 211, 238, 0.3);">
         <div class="card-title">已有的 MCP 工具生态</div>
         <div class="card-desc" style="font-size: 12px;">
-          <span class="tag blue">自研</span> presto-query · ck-query · spark-query · api-trace · scheduler-query · seatalk-reader · datastudio<br>
+          <span class="tag blue">自研</span> presto-query · ck-query · spark-query · api-trace · scheduler-query · flink-query · datamap-query · seatalk-reader · datastudio<br>
           <span class="tag cyan">外部</span> atlassian · google-sheets · drawio · browser<br><br>
           自研工具与外部工具配合，覆盖数据查询、消息读写、接口追踪、文档管理全链路
         </div>
@@ -980,13 +976,9 @@ window.<span class="fn">__agentSend</span>(JSON.<span class="fn">stringify</span
   <div class="title-meta" style="margin-top: 48px;">感谢聆听 · Q&A</div>
 </div>
 
-</div>
-
 <!-- Navigation -->
 <div class="nav">
-  <div class="nav-arrow" onclick="go(-1)">←</div>
   <div id="dots"></div>
-  <div class="nav-arrow" onclick="go(1)">→</div>
   <div class="nav-label" id="pageNum">1/16</div>
 </div>
 
@@ -994,39 +986,27 @@ window.<span class="fn">__agentSend</span>(JSON.<span class="fn">stringify</span
 const slides = document.querySelectorAll('.slide');
 let current = 0;
 
-function render() {
-  slides.forEach((s, i) => {
-    s.classList.remove('active', 'prev');
-    if (i === current) s.classList.add('active');
-    else if (i < current) s.classList.add('prev');
-  });
+const dotsEl = document.getElementById('dots');
+for (let i = 0; i < slides.length; i++) {
+  const dot = document.createElement('div');
+  dot.className = 'nav-dot';
+  dot.onclick = () => slides[i].scrollIntoView({ behavior: 'smooth' });
+  dotsEl.appendChild(dot);
+}
+
+function updateNav() {
+  const scrollY = window.scrollY;
+  const vh = window.innerHeight;
+  current = Math.round(scrollY / vh);
+  current = Math.max(0, Math.min(slides.length - 1, current));
   document.querySelectorAll('.nav-dot').forEach((d, i) => {
     d.classList.toggle('active', i === current);
   });
   document.getElementById('pageNum').textContent = `${current + 1}/${slides.length}`;
 }
 
-function go(dir) {
-  current = Math.max(0, Math.min(slides.length - 1, current + dir));
-  render();
-}
-
-const dotsEl = document.getElementById('dots');
-for (let i = 0; i < slides.length; i++) {
-  const dot = document.createElement('div');
-  dot.className = 'nav-dot';
-  dot.onclick = () => { current = i; render(); };
-  dotsEl.appendChild(dot);
-}
-
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); go(1); }
-  if (e.key === 'ArrowLeft') { e.preventDefault(); go(-1); }
-  if (e.key === 'Home') { e.preventDefault(); current = 0; render(); }
-  if (e.key === 'End') { e.preventDefault(); current = slides.length - 1; render(); }
-});
-
-render();
+window.addEventListener('scroll', updateNav, { passive: true });
+updateNav();
 </script>
 </body>
 </html>

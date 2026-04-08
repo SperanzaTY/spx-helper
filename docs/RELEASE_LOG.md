@@ -42,7 +42,34 @@
 
 ---
 
-## v3.4.15 — 2026-04-08 — feat(mcp/agent): Flink MCP + CDP 代理 + chrome-auth 认证修复
+## v3.4.15 — 2026-04-08 — docs: 技术分享文档改为滚动翻页 + 内容同步 Inspector 架构
+
+**提交者**: @tianyi.liang
+**Commit Type**: docs
+**修改模块**: 文档
+
+### 变更说明
+- 技术分享 HTML 从幻灯片点击翻页改为 scroll-snap 滚动翻页，右侧垂直导航条同步进度
+- 更新架构图：CDP Bridge 改为 Inspector Bridge，新增 cdp-proxy.ts
+- 更新 CDP 注入流程：从 --remote-debugging-port 启动参数改为 SIGUSR1 Inspector 方式
+- 更新工程化保障：CDP 生命周期从 LaunchAgent 守护进程改为 Inspector 重连 + CDP Proxy
+- MCP 工具列表新增 Flink / DataMap，SeaTalk Reader 描述更新为 CDP Proxy
+- Chrome 扩展文档版本号同步至 v3.4.15
+
+### 测试情况
+
+| 测试项 | 结果 | 备注 |
+|--------|------|------|
+| Chrome 扩展加载正常 | N/A | |
+| MCP 工具连接正常 | N/A | |
+| SeaTalk Agent 启动+注入正常 | N/A | |
+| SeaTalk Agent 重启后 UI 恢复 | N/A | |
+| 修改的功能正常工作 | [OK] | 浏览器预览验证滚动翻页和内容更新 |
+| 已有功能未被破坏 | [OK] | |
+
+---
+
+## v3.4.15 — 2026-04-08 — feat: Flink MCP + CDP 代理 + chrome-auth 认证修复
 
 **提交者**: @tianyi.liang
 **Commit Type**: feat
