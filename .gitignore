@@ -52,6 +52,9 @@ venv/
 .last-session.json
 seatalk-agent/.config/
 
+# Release notification (AI-generated, consumed by pre-push hook)
+.release-notification
+
 # 备份文件
 *.backup
 *.broken

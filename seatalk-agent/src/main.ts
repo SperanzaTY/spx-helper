@@ -3,12 +3,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execSync, spawn as spawnChild } from 'node:child_process';
-import { connectMainPage, type CdpClient } from './cdp.js';
+import { connectViaInspector, findSeaTalkPid, type ICdpClient } from './cdp.js';
 import { Bridge } from './bridge.js';
 import { spawnAgent, killAgent, listModels, loadMcpServers, type AgentProcess } from './acp.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const CDP_PORT = parseInt(process.env.CDP_PORT || '19222', 10);
 const WORKSPACE = process.env.WORKSPACE || path.resolve(__dirname, '../..');
 const PROJECT_ROOT = path.resolve(__dirname, '../..');
 
@@ -260,23 +259,6 @@ function killProcessTree(rootPid: number, signal: NodeJS.Signals = 'SIGTERM') {
   }
 }
 
-function killStaleCdpClients() {
-  try {
-    const myFamily = getMyFamily();
-    const output = execSync(`lsof -i :${CDP_PORT} -t 2>/dev/null || true`, { encoding: 'utf-8' });
-    const pids = output.split('\n').map((l) => parseInt(l.trim(), 10)).filter((p) => p > 0 && !myFamily.has(p));
-    for (const pid of pids) {
-      try {
-        const cmdline = execSync(`ps -p ${pid} -o command= 2>/dev/null || true`, { encoding: 'utf-8' }).trim();
-        if ((cmdline.includes('tsx') && cmdline.includes('main.ts')) || (cmdline.includes('npm exec') && cmdline.includes('main.ts'))) {
-          killProcessTree(pid);
-          log(`killed stale agent process tree (root ${pid})`);
-        }
-      } catch { /* already gone */ }
-    }
-  } catch { /* lsof not available or other error */ }
-}
-
 function killOrphanAgentProcesses() {
   try {
     const myFamily = getMyFamily();
@@ -388,53 +370,67 @@ async function waitForSpaReady(
   return false;
 }
 
-function ensureSeaTalkRunning() {
+async function waitForSeaTalk() {
   if (process.platform !== 'darwin') return;
   try {
-    const cdpCheck = execSync(`curl -s -o /dev/null -w "%{http_code}" http://localhost:${CDP_PORT}/json 2>/dev/null || echo "000"`, { encoding: 'utf-8' }).trim();
-    if (cdpCheck === '200') {
-      log('SeaTalk CDP already available');
-      return;
-    }
-  } catch { /* not reachable */ }
+    findSeaTalkPid();
+    log('SeaTalk is running');
+    return;
+  } catch { /* not running */ }
 
-  log('SeaTalk not running with CDP, attempting to launch...');
+  log('SeaTalk not running, launching...');
   try {
-    execSync('pkill -f SeaTalk 2>/dev/null || true', { encoding: 'utf-8' });
-    const child = spawnChild('open', ['-a', 'SeaTalk', '--args', `--remote-debugging-port=${CDP_PORT}`], { detached: true, stdio: 'ignore' });
+    const child = spawnChild('open', ['-a', 'SeaTalk'], { detached: true, stdio: 'ignore' });
     child.unref();
-    log(`SeaTalk launched with --remote-debugging-port=${CDP_PORT}`);
   } catch (e) {
     log(`failed to launch SeaTalk: ${(e as Error).message}`);
   }
+
+  for (let i = 0; i < 30; i++) {
+    await new Promise((r) => setTimeout(r, 2000));
+    try {
+      findSeaTalkPid();
+      log('SeaTalk started');
+      return;
+    } catch { /* still waiting */ }
+  }
+  throw new Error('SeaTalk did not start within 60 seconds');
+}
+
+function cleanupLegacyCdpDaemon() {
+  if (process.platform !== 'darwin') return;
+  const plistPath = path.join(os.homedir(), 'Library/LaunchAgents/com.seatalk.cdp-daemon.plist');
+  if (!fs.existsSync(plistPath)) return;
+
+  log('[cleanup] Legacy CDP daemon detected, removing...');
+  try { execSync(`launchctl unload "${plistPath}" 2>/dev/null`, { timeout: 5000 }); } catch {}
+  try { fs.unlinkSync(plistPath); } catch {}
+
+  const daemonScript = path.join(os.homedir(), '.seatalk-agent/seatalk-cdp-daemon.sh');
+  try { fs.unlinkSync(daemonScript); } catch {}
+  log('[cleanup] Legacy CDP daemon removed (was causing SeaTalk restart loop)');
 }
 
 async function main() {
-  killStaleCdpClients();
+  cleanupLegacyCdpDaemon();
   killAllStaleAgentProcesses();
-  ensureSeaTalkRunning();
-  log(`connecting to SeaTalk CDP on port ${CDP_PORT}...`);
+  await waitForSeaTalk();
+  log('connecting to SeaTalk via Inspector...');
 
-  let client: CdpClient;
+  let client: ICdpClient;
   while (true) {
     try {
-      client = await connectMainPage(CDP_PORT);
+      client = await connectViaInspector();
       break;
-    } catch {
-      log('waiting for SeaTalk...');
-      await new Promise((r) => setTimeout(r, 2000));
+    } catch (e) {
+      log('waiting for SeaTalk Inspector...', (e as Error).message);
+      await new Promise((r) => setTimeout(r, 3000));
     }
   }
 
   log(`connected: ${client.page.title} (${client.page.url})`);
 
-  log('waiting for SPA ready...');
-  const ready = await waitForSpaReady((code) => client.evaluate(code));
-  log(ready ? 'SPA ready' : 'SPA not ready after timeout, injecting anyway');
-
-  let bridge = new Bridge(client);
-  await bridge.setup();
-  log('message bridge ready');
+  let bridge: Bridge;
 
   // ── ACP ──
 
@@ -500,7 +496,7 @@ async function main() {
     sections.push(
       `SEATALK 消息读取:\n` +
       `你已连接 seatalk-reader MCP Server。操作 SeaTalk 数据时，优先使用这些 MCP 工具。\n` +
-      `不要自己写 CDP/WebSocket 脚本连接 localhost:19222，MCP 工具内部已经封装了所有底层操作。\n` +
+      `不要自己写 CDP/WebSocket 脚本，MCP 工具内部已经封装了所有底层操作。\n` +
       `\n` +
       `核心工具:\n` +
       `  query_messages_sqlite(session_name?, keyword?, limit?, hours?) — 万能查询工具\n` +
@@ -721,8 +717,6 @@ async function main() {
       return false;
     }
   }
-
-  const acpReady = await startAcp();
 
   // ── Message handler ──
 
@@ -1479,7 +1473,7 @@ async function main() {
         bridge.sendToPanel({
           type: 'diagnostics',
           info: {
-            cdpPort: CDP_PORT,
+            connectionMode: 'inspector',
             cdpConnected: !reconnecting,
             acpConnected: !!agent,
             workspace: currentWorkspace,
@@ -1775,8 +1769,6 @@ async function main() {
     });
   }
 
-  setupMessageHandler(bridge);
-
   // ── UI Injection ──
 
   async function injectScripts() {
@@ -1862,6 +1854,10 @@ async function main() {
   }
 
   async function setupCdpClient() {
+    log('waiting for SPA ready...');
+    const spaOk = await waitForSpaReady((code) => client.evaluate(code));
+    log(spaOk ? 'SPA ready' : 'SPA not ready after timeout, injecting anyway');
+
     bridge = new Bridge(client);
     await bridge.setup();
     setupMessageHandler(bridge);
@@ -1875,9 +1871,24 @@ async function main() {
 
     await doInject();
     startHeartbeat();
+
+    // Restart watch listener
+    watchActive = false;
+    startWatchListening();
+
+    // Restore ACP status to newly injected panel
+    if (agent) {
+      bridge.sendToPanel({ type: 'status', connected: true, text: 'Connected' }).catch(() => {});
+      bridge.sendToPanel({ type: 'mode', mode: defaultMode }).catch(() => {});
+      if (agent.availableModels.length) {
+        bridge.sendToPanel({ type: 'models', models: agent.availableModels, currentModelId: agent.currentModelId }).catch(() => {});
+      }
+      bridge.sendToPanel({ type: 'workspace', path: currentWorkspace, workspaces: cachedWorkspaceList }).catch(() => {});
+    }
   }
 
   await setupCdpClient();
+  await startAcp();
 
   // ── Silent update check (immediate on start, then every 10 min) ──
 
@@ -1898,17 +1909,24 @@ async function main() {
     reconnecting = true;
     stopHeartbeat();
     client.close();
-    log('CDP connection lost, attempting reconnect...');
-    while (true) {
+    log('Inspector connection lost, attempting reconnect...');
+
+    for (let i = 0; ; i++) {
       await new Promise((r) => setTimeout(r, 3000));
       try {
-        client = await connectMainPage(CDP_PORT);
+        findSeaTalkPid();
+      } catch {
+        if (i % 10 === 0) log('waiting for SeaTalk process...');
+        continue;
+      }
+      try {
+        client = await connectViaInspector();
         log(`reconnected: ${client.page.title}`);
         reconnecting = false;
         await setupCdpClient();
         break;
       } catch (e) {
-        log('CDP reconnect failed, retrying in 3s...', (e as Error).message);
+        log('Inspector reconnect failed, retrying in 3s...', (e as Error).message);
       }
     }
   }
@@ -1956,11 +1974,35 @@ async function main() {
   });
 
   process.on('uncaughtException', (err) => {
-    log('uncaughtException (kept alive):', err.message);
+    log('uncaughtException:', err.message);
+    if (isDisconnectError(err.message) && !reconnecting) {
+      log('disconnect detected via uncaughtException, triggering reconnect');
+      cdpReconnectLoop();
+    }
   });
   process.on('unhandledRejection', (reason) => {
-    log('unhandledRejection (kept alive):', String(reason));
+    const msg = reason instanceof Error ? reason.message : String(reason);
+    log('unhandledRejection:', msg);
+    if (isDisconnectError(msg) && !reconnecting) {
+      log('disconnect detected via unhandledRejection, triggering reconnect');
+      cdpReconnectLoop();
+    }
   });
+}
+
+const DISCONNECT_PATTERNS = [
+  'Cannot find context with specified id',
+  'not connected',
+  'Inspector connection closed',
+  'Inspector WS error',
+  'Inspector timeout',
+  'Target closed',
+  'Session closed',
+  'WebSocket is not open',
+];
+
+function isDisconnectError(msg: string): boolean {
+  return DISCONNECT_PATTERNS.some((p) => msg.includes(p));
 }
 
 main().catch((e) => {

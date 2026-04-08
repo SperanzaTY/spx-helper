@@ -1,19 +1,18 @@
 #!/bin/bash
-# install.sh — 一键配置 SeaTalk + Cursor Agent 自动启动
-# 用法: bash install.sh [uninstall]
+# install.sh — SeaTalk + Cursor Agent setup (Inspector mode)
+# Usage: bash install.sh [uninstall]
 set -e
 
-CDP_PORT=19222
 AGENT_DIR="$(cd "$(dirname "$0")" && pwd)"
 WRAPPER_DIR="$HOME/.seatalk-agent"
 WRAPPER_SCRIPT="$WRAPPER_DIR/launch-seatalk.sh"
-CDP_DAEMON_SCRIPT="$WRAPPER_DIR/seatalk-cdp-daemon.sh"
 LOG_DIR="$HOME/.seatalk-agent/logs"
 
-# LaunchAgent 名称
 PLIST_NAME_AGENT="com.seatalk.cursor-agent"
-PLIST_NAME_CDP="com.seatalk.cdp-daemon"
 PLIST_PATH_AGENT="$HOME/Library/LaunchAgents/${PLIST_NAME_AGENT}.plist"
+
+# Legacy daemon plist (cleanup only)
+PLIST_NAME_CDP="com.seatalk.cdp-daemon"
 PLIST_PATH_CDP="$HOME/Library/LaunchAgents/${PLIST_NAME_CDP}.plist"
 
 NODE_BIN="$(which node 2>/dev/null || echo "")"
@@ -27,19 +26,18 @@ if [ -z "$NODE_BIN" ]; then
 fi
 
 if [ -z "$NODE_BIN" ]; then
-  echo "❌ Node.js not found. Please install Node.js first."
+  echo "[FAIL] Node.js not found. Please install Node.js first."
   exit 1
 fi
 
 NODE_DIR="$(dirname "$NODE_BIN")"
 
 uninstall() {
-  echo "🗑  Uninstalling..."
+  echo "Uninstalling..."
   launchctl unload "$PLIST_PATH_AGENT" 2>/dev/null || true
   launchctl unload "$PLIST_PATH_CDP" 2>/dev/null || true
   rm -f "$PLIST_PATH_AGENT" "$PLIST_PATH_CDP"
 
-  # Clean shell aliases
   for rc in "$HOME/.zshrc" "$HOME/.bashrc"; do
     if [ -f "$rc" ]; then
       sed -i '' '/# SeaTalk + Cursor Agent/d' "$rc" 2>/dev/null || true
@@ -48,13 +46,13 @@ uninstall() {
   done
 
   rm -rf "$WRAPPER_DIR"
-  echo "✅ Uninstalled. SeaTalk will launch normally without agent."
+  echo "[OK] Uninstalled. SeaTalk will launch normally without agent."
   exit 0
 }
 
 [ "$1" = "uninstall" ] && uninstall
 
-echo "🔧 Installing SeaTalk + Cursor Agent..."
+echo "Installing SeaTalk + Cursor Agent (Inspector mode)..."
 echo "   Agent dir: $AGENT_DIR"
 echo "   Node: $NODE_BIN"
 echo ""
@@ -62,14 +60,14 @@ echo ""
 # 1. Create directories
 mkdir -p "$WRAPPER_DIR" "$LOG_DIR"
 
-# 2. Copy CDP daemon script
-cp "$AGENT_DIR/seatalk-cdp-daemon.sh" "$CDP_DAEMON_SCRIPT"
-chmod +x "$CDP_DAEMON_SCRIPT"
+# 2. Remove legacy CDP daemon if present
+launchctl unload "$PLIST_PATH_CDP" 2>/dev/null || true
+rm -f "$PLIST_PATH_CDP"
+rm -f "$WRAPPER_DIR/seatalk-cdp-daemon.sh"
 
-# 3. Create SeaTalk launch wrapper script (for manual `seatalk` command)
+# 3. Create launch wrapper script (for manual `seatalk` command)
 cat > "$WRAPPER_SCRIPT" << 'WRAPPER_EOF'
 #!/bin/bash
-CDP_PORT=__CDP_PORT__
 AGENT_DIR="__AGENT_DIR__"
 LOG_DIR="__LOG_DIR__"
 NODE_DIR="__NODE_DIR__"
@@ -84,22 +82,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-# Launch SeaTalk with CDP if not already running with it
-if ! curl -s -o /dev/null -w "" http://localhost:$CDP_PORT/json 2>/dev/null; then
-  pkill -x SeaTalk 2>/dev/null || true
-  sleep 1
-  open -a SeaTalk --args --remote-debugging-port=$CDP_PORT
-fi
-
-# Wait for CDP to become available
-for i in $(seq 1 30); do
-  if curl -s -o /dev/null http://localhost:$CDP_PORT/json 2>/dev/null; then
-    break
-  fi
-  sleep 1
-done
-
-# Kill any existing agent process (full process tree, scoped to our project)
+# Kill any existing agent process
 for pid in $(pgrep -f "tsx.*seatalk-agent.*main\.ts" 2>/dev/null || true); do
   pkill -P "$pid" 2>/dev/null || true
   kill "$pid" 2>/dev/null || true
@@ -108,7 +91,7 @@ pgrep -f "npm exec tsx.*seatalk-agent.*main\.ts" | xargs kill 2>/dev/null || tru
 pkill -f "agent.*--approve-mcps.*acp" 2>/dev/null || true
 sleep 1
 
-# Start agent
+# Start agent (handles SeaTalk launch internally via SIGUSR1 Inspector)
 cd "$AGENT_DIR"
 while true; do
   echo "[$(date)] starting agent..." >> "$LOG_DIR/agent.log"
@@ -124,47 +107,12 @@ while true; do
 done
 WRAPPER_EOF
 
-sed -i '' "s|__CDP_PORT__|${CDP_PORT}|g" "$WRAPPER_SCRIPT"
 sed -i '' "s|__AGENT_DIR__|${AGENT_DIR}|g" "$WRAPPER_SCRIPT"
 sed -i '' "s|__LOG_DIR__|${LOG_DIR}|g" "$WRAPPER_SCRIPT"
 sed -i '' "s|__NODE_DIR__|${NODE_DIR}|g" "$WRAPPER_SCRIPT"
 chmod +x "$WRAPPER_SCRIPT"
 
-# 4. Create CDP daemon LaunchAgent — 开机自启，持续运行
-#    当用户以任意方式打开 SeaTalk（双击/Dock/Spotlight），
-#    守护进程自动检测并重启为 CDP 模式
-cat > "$PLIST_PATH_CDP" << PLIST_EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>${PLIST_NAME_CDP}</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>/bin/bash</string>
-        <string>${CDP_DAEMON_SCRIPT}</string>
-    </array>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <true/>
-    <key>StandardOutPath</key>
-    <string>${LOG_DIR}/cdp-daemon-stdout.log</string>
-    <key>StandardErrorPath</key>
-    <string>${LOG_DIR}/cdp-daemon-stderr.log</string>
-    <key>EnvironmentVariables</key>
-    <dict>
-        <key>CDP_PORT</key>
-        <string>${CDP_PORT}</string>
-        <key>SEATALK_CDP_LOG</key>
-        <string>${LOG_DIR}/cdp-daemon.log</string>
-    </dict>
-</dict>
-</plist>
-PLIST_EOF
-
-# 5. Create Agent LaunchAgent — WatchPaths 触发，SeaTalk 更新时重启 agent
+# 4. Create Agent LaunchAgent — KeepAlive + RunAtLoad
 cat > "$PLIST_PATH_AGENT" << PLIST_EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -177,14 +125,10 @@ cat > "$PLIST_PATH_AGENT" << PLIST_EOF
         <string>/bin/bash</string>
         <string>${WRAPPER_SCRIPT}</string>
     </array>
-    <key>WatchPaths</key>
-    <array>
-        <string>/Applications/SeaTalk.app</string>
-    </array>
     <key>RunAtLoad</key>
-    <false/>
+    <true/>
     <key>KeepAlive</key>
-    <false/>
+    <true/>
     <key>StandardOutPath</key>
     <string>${LOG_DIR}/launchd-stdout.log</string>
     <key>StandardErrorPath</key>
@@ -200,13 +144,11 @@ cat > "$PLIST_PATH_AGENT" << PLIST_EOF
 </plist>
 PLIST_EOF
 
-# 6. Load Launch Agents
-launchctl unload "$PLIST_PATH_CDP" 2>/dev/null || true
+# 5. Load Launch Agent
 launchctl unload "$PLIST_PATH_AGENT" 2>/dev/null || true
-launchctl load "$PLIST_PATH_CDP"
 launchctl load "$PLIST_PATH_AGENT"
 
-# 7. Add alias to shell config
+# 6. Add alias to shell config
 ALIAS_LINE="alias seatalk='bash $WRAPPER_SCRIPT'"
 for rc in "$HOME/.zshrc" "$HOME/.bashrc"; do
   if [ -f "$rc" ]; then
@@ -219,20 +161,17 @@ for rc in "$HOME/.zshrc" "$HOME/.bashrc"; do
 done
 
 echo ""
-echo "✅ Installation complete!"
+echo "[OK] Installation complete!"
 echo ""
-echo "📋 What was configured:"
-echo "   1. CDP 守护进程: $CDP_DAEMON_SCRIPT"
-echo "      → 开机自启，持续监听 SeaTalk 进程"
-echo "      → 无论怎么打开 SeaTalk（双击/Dock/Spotlight），都会自动启用 CDP"
-echo "   2. Agent 启动器: $WRAPPER_SCRIPT"
-echo "   3. Shell alias: seatalk"
+echo "What was configured:"
+echo "   1. Agent launcher: $WRAPPER_SCRIPT"
+echo "      -> Starts on login, auto-restarts on crash (KeepAlive)"
+echo "      -> Connects to SeaTalk via SIGUSR1 + Inspector (no CDP port needed)"
+echo "   2. Shell alias: seatalk"
 echo ""
-echo "📖 Usage:"
-echo "   • Type 'seatalk' in terminal → launches SeaTalk + Agent"
-echo "   • Or just open SeaTalk normally → CDP daemon auto-enables CDP"
-echo "     (then run 'npm start' in seatalk-agent to start the Agent)"
-echo "   • Daemon logs: $LOG_DIR/cdp-daemon.log"
-echo "   • Agent logs:  $LOG_DIR/agent.log"
+echo "Usage:"
+echo "   - Type 'seatalk' in terminal -> launches Agent"
+echo "   - Agent will auto-detect/launch SeaTalk and connect via Inspector"
+echo "   - Agent logs: $LOG_DIR/agent.log"
 echo ""
-echo "🗑  To uninstall: bash $AGENT_DIR/install.sh uninstall"
+echo "To uninstall: bash $AGENT_DIR/install.sh uninstall"

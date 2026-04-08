@@ -1,4 +1,4 @@
-import type { CdpClient } from './cdp.js';
+import type { ICdpClient } from './cdp.js';
 
 /**
  * 消息桥: 浏览器侧 <-> Node 侧双向通信
@@ -18,7 +18,7 @@ export class Bridge {
   private static nextId = 0;
   readonly id = ++Bridge.nextId;
 
-  constructor(private client: CdpClient) {}
+  constructor(private client: ICdpClient) {}
 
   async setup() {
     this.client.off('Runtime.bindingCalled');

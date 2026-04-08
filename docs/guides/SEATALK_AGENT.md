@@ -41,7 +41,7 @@ cd spx-helper/seatalk-agent
 # 3. 安装 Node.js 依赖（不可跳过，否则 npm start 会报错）
 npm install
 
-# 4. 一键安装 CDP 守护进程 + seatalk 命令
+# 4. 一键安装 Agent + seatalk 命令
 bash install.sh
 ```
 
@@ -50,10 +50,11 @@ bash install.sh
 > **易错提醒**：步骤 1（安装 Cursor Agent CLI）是最容易遗漏的。如果跳过，`npm start` 时会报 `spawn agent ENOENT` 错误。
 
 安装脚本会配置：
-- **CDP 守护进程**（开机自启）：持续监听 SeaTalk 进程，**无论怎么打开 SeaTalk（双击/Dock/Spotlight），都会自动启用 CDP 端口**
-- **`seatalk` 命令**：终端一键启动 SeaTalk + Agent
+- **Agent 自动启动**（开机自启，崩溃自动重启）：Agent 通过 SIGUSR1 + V8 Inspector 连接 SeaTalk，无需特殊启动参数
+- **`seatalk` 命令**：终端一键启动 Agent
 
-> 安装后你可以用任何方式打开 SeaTalk（双击、Dock、Spotlight 都可以），CDP 守护进程会自动处理。
+> 安装后你可以用任何方式打开 SeaTalk（双击、Dock、Spotlight 都可以），Agent 会自动检测并连接。
+> SeaTalk 无需以特殊参数启动，即使 SeaTalk 自重启也不影响 Agent 连接。
 
 ### 卸载
 
@@ -736,6 +737,13 @@ npm start
 ---
 
 ## 更新日志
+
+### v3.4.13
+- **CDP 连接重构为 SIGUSR1 Inspector 方案**：彻底解决 SeaTalk 自重启（self-relaunch）导致 CDP 端口丢失的问题。Agent 不再杀/重启 SeaTalk，不再依赖 `--remote-debugging-port` 参数
+- **断连自动重连**：SeaTalk 关闭再打开后，Agent 自动重连并重新注入 UI（不再 crash）。断连类错误（`Cannot find context`、`not connected` 等）触发重连而非进程退出
+- **旧守护进程自动清理**：Agent 启动时检测并移除旧 `com.seatalk.cdp-daemon` LaunchAgent，避免 SeaTalk 被旧 daemon 周期性杀掉
+- **删除 CDP 守护进程**：`seatalk-cdp-daemon.sh` 不再需要，`install.sh` 简化
+- **发版群通知**：推送 release 时自动向 SeaTalk 问题反馈群发送更新通知
 
 ### v3.4.8
 - **修复系统命令被 remote 开关拦截**：关闭远程控制后 `!!ping`/`!!help`/`!!status` 等系统命令仍可正常响应

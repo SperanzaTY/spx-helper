@@ -24,10 +24,11 @@ description: >-
 - [ ] 3. 发版日志
 - [ ] 4. 模块文档联动
 - [ ] 5. CDP 功能验证（涉及 SeaTalk Agent 时）
-- [ ] 6. 展示变更 & 等待用户确认
-- [ ] 7. 提交
-- [ ] 8. 推送到远程仓库
-- [ ] 9. 推送后验证
+- [ ] 6. 生成群通知
+- [ ] 7. 展示变更 & 等待用户确认
+- [ ] 8. 提交
+- [ ] 9. 推送到远程仓库
+- [ ] 10. 推送后验证
 ```
 
 ---
@@ -189,7 +190,30 @@ npm run verify:cdp
 
 ---
 
-## Step 6：展示变更 & 等待用户确认
+## Step 6：生成群通知
+
+生成 `.release-notification` 文件，pre-push hook 会在推送成功后自动发送到 SeaTalk 问题反馈群。
+
+**写入规则**（参见 `git-workflow.mdc` 的"群通知"章节）：
+- 用自然语言撰写，面向团队成员
+- 包含：版本号、变更要点、是否需要重启/操作、注意事项
+- 时间精确到分钟，末尾标注"自动发布通知"
+- 文件路径：项目根目录 `.release-notification`（已 gitignore）
+
+```bash
+# 示例内容（AI 根据实际变更生成）
+cat .release-notification
+# [SPX Helper v3.4.13 Released]
+#
+# 本次更新:
+# - 修复了 xxx 问题
+# - 新增 xxx 功能
+#
+# ---
+# 自动发布通知 | 2026-04-08 16:30
+```
+
+## Step 7：展示变更 & 等待用户确认
 
 **在此步骤必须停下来，等待用户明确说"可以提交"后才能继续。**
 
@@ -204,8 +228,9 @@ git status                  # 总览
 2. 版本号从 X → Y
 3. 发版日志摘要
 4. 影响范围
+5. 群通知预览（.release-notification 内容）
 
-## Step 7：提交
+## Step 8：提交
 
 用户确认后执行：
 
@@ -233,9 +258,9 @@ git commit -m "<type>: <description>"
 - 禁止无意义描述：update、fix、test、wip、tmp 等单词不能独立作为描述
 - 示例：`feat(agent): 添加 Remote 系统指令和消息冻结机制`
 
-## Step 8：推送到远程仓库
+## Step 9：推送到远程仓库
 
-推送到 GitLab，pre-push hook 会自动尝试同步 GitHub：
+推送到 GitLab，pre-push hook 会自动尝试同步 GitHub 并发送群通知：
 
 ```bash
 git push gitlab release
@@ -249,7 +274,7 @@ git push gitlab release
 - GitLab 推送失败 → 阻断发版，排查原因
 - GitHub 自动同步失败 → 不阻塞，owner 会后续同步
 
-## Step 9：推送后验证
+## Step 10：推送后验证
 
 ```bash
 git log --oneline -3                    # 确认提交记录
@@ -258,8 +283,9 @@ git ls-remote gitlab release | head -1  # GitLab 远程 HEAD
 git ls-remote origin release | head -1  # GitHub 远程 HEAD（可能已自动同步）
 ```
 
-- GitLab HEAD 与本地 HEAD 一致 → 推送成功
-- GitHub HEAD 一致 → 自动同步成功；不一致 → owner 后续同步
+- GitLab HEAD 与本地 HEAD 一致 -> 推送成功
+- GitHub HEAD 一致 -> 自动同步成功；不一致 -> owner 后续同步
+- `.release-notification` 文件已被删除 -> 群通知发送成功
 
 ---
 
@@ -272,10 +298,14 @@ Hook 检查项：
 1. 远程无新提交（本地不落后，**必须先合并远程 release**）
 2. `docs/RELEASE_LOG.md` 在最新 commit 中被修改
 3. 三处版本号一致
-4. 模块代码 ↔ 文档联动
+4. 模块代码 <-> 文档联动
 5. `feat`/`fix` 类型 commit 必须升版本号
-6. **CDP 功能验证**（仅 `seatalk-agent/src/` 有变更时，自动运行 `scripts/verify-cdp.js`）
+6. **Agent 功能验证**（仅 `seatalk-agent/src/` 有变更时，自动运行 `scripts/verify-cdp.js`）
 7. 所有 commit 符合 Conventional Commit 格式
+
+推送成功后自动执行（EXIT trap）：
+- 同步 GitHub（失败不阻塞）
+- 发送 SeaTalk 群通知（读取 `.release-notification`，失败不阻塞）
 
 ---
 

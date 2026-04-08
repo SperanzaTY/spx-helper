@@ -42,6 +42,62 @@
 
 ---
 
+## v3.4.13 — 2026-04-08 — refactor(agent): SeaTalk Agent CDP 连接重构为 SIGUSR1 Inspector + 发版群通知
+
+**提交者**: @tianyi.liang
+**Commit Type**: refactor / feat
+**修改模块**: SeaTalk Agent / 工具链
+
+### 变更说明
+
+**SeaTalk Agent — CDP 连接重构（核心变更）**
+- 新增 `ICdpClient` 接口和 `InspectorCdpClient` 实现，通过 SIGUSR1 + V8 Inspector + `webContents.debugger.attach()` 获取 CDP 能力
+- 不再依赖 `--remote-debugging-port` 启动参数，彻底解决 SeaTalk 自重启（self-relaunch）导致 CDP 端口丢失的问题
+- Agent 不再杀/重启 SeaTalk 进程，消除僵尸进程风险
+- 删除 CDP 守护进程 `seatalk-cdp-daemon.sh`
+- `install.sh` 简化：删除 daemon 相关配置，Agent LaunchAgent 改为 KeepAlive + RunAtLoad
+- 保留 `CdpClient` 供 seatalk-reader MCP 等外部模块继续使用
+
+**SeaTalk Agent — 断连重连修复**
+- 修复 SeaTalk 关闭后 Agent 进程 crash 的 bug（`Cannot find context with specified id` 错误冒泡到 `main().catch()` 导致 `process.exit(1)`）
+- `uncaughtException` / `unhandledRejection` 处理器识别断连类错误，自动触发重连而非崩溃
+- 重连后自动等待 SPA 就绪、重新注入 UI、恢复 ACP 状态到面板
+- Agent 启动时自动检测并清理旧 CDP 守护进程（`com.seatalk.cdp-daemon` LaunchAgent），避免 SeaTalk 被旧 daemon 每 30 秒杀一次
+- `findSeaTalkPid()` 取最新 PID（最大值），适配 BTM 自重启时新旧进程短暂共存的场景
+
+**发版群通知功能（新增）**
+- 新增 `scripts/notify-release.sh`：读取 AI 生成的 `.release-notification` 文件，通过 SeaTalk System Account Webhook 发送到问题反馈群
+- pre-push hook EXIT trap 自动触发通知投递
+- `git-workflow.mdc` 和 `release-publish` Skill 新增群通知生成步骤
+
+**pre-push hook 更新**
+- CDP 验证逻辑适配 Inspector 方案（优先检查 9229 端口，兼容 19222）
+- EXIT trap 新增群通知投递
+- 新增 MCP 子模块 README 联动检查：修改 `mcp-tools/<tool>/` 代码时，`mcp-tools/<tool>/README.md` 也必须同步更新
+
+**文档修复**
+- `docs/guides/MCP_TOOLS.md`：补充 datamap-query 的 uvx 安装方式、`DATAMAP_OPEN_API_TOKEN` 凭证说明
+- `doc-sync.mdc`：新增子模块 README 映射规则
+
+### 测试情况
+
+| 测试项 | 结果 | 备注 |
+|--------|------|------|
+| Chrome 扩展加载正常 | N/A | 未修改 |
+| MCP 工具连接正常 | N/A | 未修改 |
+| SeaTalk Agent 启动+注入正常 | [OK] | Inspector 模式秒连，UI 注入正常 |
+| SeaTalk Agent 重启后 UI 恢复 | [OK] | 关闭 SeaTalk 后重开，Agent 自动重连并重新注入（实测 6 秒恢复） |
+| 修改的功能正常工作 | [OK] | TypeScript 编译零错误；断连不再 crash；旧 daemon 自动清理 |
+| 已有功能未被破坏 | [OK] | bridge.ts 仅类型变更，inject 脚本未修改 |
+| 控制台无新增错误 | [OK] | |
+
+### 特别注意
+- 所有用户需要更新 Agent：在 SeaTalk 面板点"检查更新"即可（自动拉代码+重启），或手动 `cd seatalk-agent && git pull && seatalk`
+- 已安装守护进程（cdp-daemon）的用户建议重新运行 `install.sh` 以清理旧配置（新版 Agent 启动时也会自动清理）
+- SeaTalk 无需以特殊参数启动，正常打开即可
+- 修改 MCP 子模块代码时，pre-push hook 现在会要求同时更新模块 README 和顶层 MCP_TOOLS.md
+- 使用 `datamap-query` MCP 的同事：安装配置已改为 uvx 方式，需更新 `~/.cursor/mcp.json` 中的配置（详见 `docs/guides/MCP_TOOLS.md`），更新后在 Cursor MCP 设置中关闭再开启刷新
+
 ## v3.4.12 — 2026-04-08 — feat(mcp): Spark 诊断工具 + DataMap 写入工具 + Cookie 认证升级
 
 **提交者**: @tianyi.liang

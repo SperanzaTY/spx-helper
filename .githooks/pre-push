@@ -162,6 +162,26 @@ check_module_doc \
   "^docs/guides/SKILL\.md$" \
   "docs/guides/SKILL.md（Skill 列表、依赖 MCP、安装方式）"
 
+# 2.5.1 MCP 子模块 README 联动检查
+# 如果修改了 mcp-tools/<tool>/ 下的代码，对应的 mcp-tools/<tool>/README.md 也要更新
+MCP_CODE_FILES=$(echo "$CHANGED_FILES" | grep -E "^mcp-tools/[^/]+/.*\.(py|json|toml|cfg)$" || true)
+if [ -n "$MCP_CODE_FILES" ]; then
+  MCP_MODULES=$(echo "$MCP_CODE_FILES" | sed 's|^mcp-tools/\([^/]*\)/.*|\1|' | sort -u)
+  for mod in $MCP_MODULES; do
+    README_CHANGED=$(echo "$CHANGED_FILES" | grep -c "^mcp-tools/${mod}/README\.md$" || true)
+    if [ "$README_CHANGED" -eq 0 ]; then
+      MOD_FILE_COUNT=$(echo "$MCP_CODE_FILES" | grep -c "^mcp-tools/${mod}/" || true)
+      echo "❌ 修改了 mcp-tools/${mod}/ 代码（${MOD_FILE_COUNT} 个文件）但未更新模块 README！"
+      echo "   请同步更新: mcp-tools/${mod}/README.md"
+      echo ""
+      DOC_ERRORS=1
+      HAS_ERRORS=1
+    else
+      echo "✅ mcp-tools/${mod}/README.md 已同步"
+    fi
+  done
+fi
+
 if [ "$DOC_ERRORS" -eq 0 ]; then
   MODULE_TOUCHED=$(echo "$CHANGED_FILES" | grep -cE "^(chrome-extension/|mcp-tools/.*\.(py|json|toml|cfg)$|seatalk-agent/src/|\.cursor/skills/)" || true)
   if [ "$MODULE_TOUCHED" -gt 0 ]; then
@@ -188,38 +208,34 @@ if git rev-parse --verify "$REMOTE_REF" >/dev/null 2>&1; then
   fi
 fi
 
-# 2.7 CDP 功能验证（仅在 seatalk-agent/src/ 有变更时）
+# 2.7 Agent 功能验证（仅在 seatalk-agent/src/ 有变更时）
 AGENT_SRC_CHANGED=$(echo "$CHANGED_FILES" | grep -cE "^seatalk-agent/src/" || true)
 if [ "$AGENT_SRC_CHANGED" -gt 0 ]; then
   echo ""
-  echo "🔍 检测到 SeaTalk Agent 代码变更（${AGENT_SRC_CHANGED} 个文件），执行 CDP 功能验证..."
+  echo "  Detected SeaTalk Agent code changes (${AGENT_SRC_CHANGED} files), running verification..."
   REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
   CDP_SCRIPT="$REPO_ROOT/scripts/verify-cdp.js"
 
   if [ ! -f "$CDP_SCRIPT" ]; then
-    echo "❌ CDP 验证脚本不存在: scripts/verify-cdp.js"
+    echo "[FAIL] Verification script not found: scripts/verify-cdp.js"
     HAS_ERRORS=1
   else
+    # Try Inspector port (9229) first, fall back to legacy CDP port (19222)
+    INSPECTOR_CHECK=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:9229/json 2>/dev/null || echo "000")
     CDP_CHECK=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:19222/json 2>/dev/null || echo "000")
-    if [ "$CDP_CHECK" != "200" ]; then
-      echo "❌ CDP 端口不可达！SeaTalk Agent 代码变更必须通过 CDP 验证。"
-      echo "   请确保 SeaTalk 和 Agent 已启动（CDP 端口 19222）"
-      echo ""
-      echo "   启动方法:"
+    if [ "$INSPECTOR_CHECK" != "200" ] && [ "$CDP_CHECK" != "200" ]; then
+      echo "[FAIL] Neither Inspector (9229) nor CDP (19222) is reachable!"
+      echo "   Please ensure SeaTalk Agent is running:"
       echo "     cd seatalk-agent && npx tsx src/main.ts"
-      echo ""
-      echo "   或使用 launch.sh:"
-      echo "     ~/.seatalk-agent/launch.sh"
       echo ""
       HAS_ERRORS=1
     else
       if node "$CDP_SCRIPT"; then
-        echo "✅ CDP 功能验证通过"
+        echo "[OK] Agent verification passed"
       else
         CDP_EXIT=$?
-        echo "❌ CDP 功能验证失败！(退出码: ${CDP_EXIT})"
-        echo "   请检查 Agent 注入状态，或手动运行验证:"
-        echo "     node scripts/verify-cdp.js"
+        echo "[FAIL] Agent verification failed (exit code: ${CDP_EXIT})"
+        echo "   Run manually: node scripts/verify-cdp.js"
         echo ""
         HAS_ERRORS=1
       fi
@@ -287,17 +303,24 @@ fi
 echo "✅ 所有检查通过，正在推送..."
 echo ""
 
-# GitLab 推送成功后，自动尝试同步到 GitHub（失败不阻塞）
-# 注意：这段在 git push gitlab 成功后执行（hook exit 0 后 git 完成推送）
-# 因为 pre-push 在推送前执行，所以用 trap 在 hook 正常退出后安排后台同步
-sync_github() {
+# GitLab 推送成功后，自动尝试同步到 GitHub + 发送群通知（失败不阻塞）
+post_push() {
+  # 同步 GitHub
   if git remote get-url origin >/dev/null 2>&1; then
-    echo "📌 自动同步到 GitHub (origin)..."
+    echo "  Syncing to GitHub (origin)..."
     if git push origin release 2>/dev/null; then
-      echo "✅ GitHub 同步成功"
+      echo "  [OK] GitHub sync successful"
     else
-      echo "⚠️  GitHub 同步失败（不影响本次发版，owner 会后续同步）"
+      echo "  [WARNING] GitHub sync failed (owner will sync later)"
     fi
   fi
+
+  # 发送 SeaTalk 群通知
+  REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+  NOTIFY_SCRIPT="$REPO_ROOT/scripts/notify-release.sh"
+  if [ -f "$NOTIFY_SCRIPT" ] && [ -f "$REPO_ROOT/.release-notification" ]; then
+    echo "  Sending release notification to SeaTalk group..."
+    bash "$NOTIFY_SCRIPT" || true
+  fi
 }
-trap sync_github EXIT
+trap post_push EXIT

@@ -10,7 +10,7 @@ alwaysApply: true
 
 **每次功能变更提交时，必须同步更新对应模块的说明文档。**
 
-## 模块 ↔ 文档映射
+## 模块 ↔ 文档映射（顶层指南）
 
 | 修改范围 | 必须更新的文档 |
 |---------|---------------|
@@ -18,6 +18,18 @@ alwaysApply: true
 | `mcp-tools/` 下的 `.py`/`.json`/`.toml`/`.cfg` | `docs/guides/MCP_TOOLS.md` |
 | `seatalk-agent/src/` 下的代码 | `docs/guides/SEATALK_AGENT.md` |
 | `.cursor/skills/` 下的 Skill | `docs/guides/SKILL.md` |
+
+## 子模块 ↔ 文档映射
+
+修改 MCP 子模块代码时，除了更新顶层 `MCP_TOOLS.md`，还必须更新子模块自身的 README：
+
+| 修改范围 | 必须更新的文档 |
+|---------|---------------|
+| `mcp-tools/<tool>/` 下的 `.py`/`.json`/`.toml`/`.cfg` | `mcp-tools/<tool>/README.md` |
+
+例如：修改了 `mcp-tools/datamap-query/datamap_mcp_server.py`，需同时更新：
+1. `mcp-tools/datamap-query/README.md`（工具详细说明）
+2. `docs/guides/MCP_TOOLS.md`（顶层概览与配置示例）
 
 ## 发版日志
 
