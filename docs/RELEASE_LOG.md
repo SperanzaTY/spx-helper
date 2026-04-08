@@ -42,6 +42,34 @@
 
 ---
 
+## v3.4.14 — 2026-04-08 — fix(agent): 修复 ACP 连接因 URL 类型 MCP server 缺少 headers 字段失败
+
+**提交者**: @zhenzhou.zhang
+**Commit Type**: fix
+**修改模块**: SeaTalk Agent
+
+### 变更说明
+- 修复 `loadMcpServers()` 创建 SSE/HTTP 类型 MCP server 时缺少 ACP schema 要求的必填字段 `headers`，导致 agent binary 在 `session/new` 阶段 schema 校验失败返回 "Internal error"
+- 新增根据 mcp.json 中的 `transport` 字段自动区分 `http`（streamable-http）和 `sse` 类型
+
+### 测试情况
+
+| 测试项 | 结果 | 备注 |
+|--------|------|------|
+| Chrome 扩展加载正常 | N/A | |
+| MCP 工具连接正常 | N/A | |
+| SeaTalk Agent 启动+注入正常 | ✅ | |
+| SeaTalk Agent 重启后 UI 恢复 | ✅ | |
+| 修改的功能正常工作 | ✅ | ACP session 创建成功，Remote Agent 就绪 |
+| 已有功能未被破坏 | ✅ | stdio 类型 MCP 不受影响 |
+| 控制台无新增错误 | ✅ | |
+
+### 特别注意
+- 此 bug 仅在 `~/.cursor/mcp.json` 中配置了 URL 类型（SSE/HTTP）MCP server 时触发，标准安装指南中的 stdio 类型不受影响
+- 已用 ACP 协议手动测试验证修复
+
+---
+
 ## v3.4.13 — 2026-04-08 — refactor(agent): SeaTalk Agent CDP 连接重构为 SIGUSR1 Inspector + 发版群通知
 
 **提交者**: @tianyi.liang

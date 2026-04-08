@@ -738,6 +738,10 @@ npm start
 
 ## 更新日志
 
+### v3.4.14
+- **修复 ACP 连接失败**：`loadMcpServers()` 创建 SSE/HTTP 类型 MCP server 时缺少 ACP schema 要求的 `headers` 字段，导致 agent 在 `session/new` 阶段返回 "Internal error"。仅在 `mcp.json` 配置了 URL 类型 MCP server 时触发
+- **支持 streamable-http 传输类型**：自动根据 `transport` 字段区分 `http` 和 `sse` MCP 类型
+
 ### v3.4.13
 - **CDP 连接重构为 SIGUSR1 Inspector 方案**：彻底解决 SeaTalk 自重启（self-relaunch）导致 CDP 端口丢失的问题。Agent 不再杀/重启 SeaTalk，不再依赖 `--remote-debugging-port` 参数
 - **断连自动重连**：SeaTalk 关闭再打开后，Agent 自动重连并重新注入 UI（不再 crash）。断连类错误（`Cannot find context`、`not connected` 等）触发重连而非进程退出

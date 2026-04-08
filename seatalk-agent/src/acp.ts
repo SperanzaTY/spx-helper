@@ -294,10 +294,13 @@ export function loadMcpServers(log?: (msg: string) => void): acp.McpServer[] {
         env: envArr,
       } as acp.McpServer);
     } else if (entry.url) {
+      const transport = (entry as any).transport;
+      const mcpType = transport === 'streamable-http' ? 'http' : 'sse';
       servers.push({
-        type: 'sse',
+        type: mcpType,
         name,
         url: entry.url,
+        headers: [],
       } as acp.McpServer);
     }
   }
