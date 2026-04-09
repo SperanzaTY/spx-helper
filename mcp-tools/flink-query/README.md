@@ -120,6 +120,10 @@ flink-mcp
 
 ## Changelog
 
+### v0.1.1
+
+- 修复 `_format_ts` 函数兼容字符串类型时间戳，避免 `str / int` 除法报错
+
 ### v0.1.0
 
 - 初始版本

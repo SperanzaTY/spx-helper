@@ -14,6 +14,8 @@
   if (oldPanel) oldPanel.remove();
   var oldPopover = document.getElementById('cursor-remote-popover');
   if (oldPopover) oldPopover.remove();
+  var oldAlarmPop = document.getElementById('cursor-alarm-popover');
+  if (oldAlarmPop) oldAlarmPop.remove();
   document.querySelectorAll('.cursor-tooltip').forEach(function (el) { el.remove(); });
 
   var _abortCtrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
@@ -95,6 +97,10 @@
   var _remoteLogs = [];
   var MAX_REMOTE_LOGS = 50;
   var MAX_WATCH_MESSAGES = 200;
+
+  // Alarm state
+  var _alarmStatus = { enabled: false, monitoredSessions: [], promptTemplate: '', sessionSettings: {}, pendingCount: 0, pending: [], recentRecords: [] };
+  var _alarmPopoverEl = null;
 
   // ── Persistence ──
   function loadConvs() { try { var r = localStorage.getItem(STORE_KEY); return r ? JSON.parse(r) : []; } catch (_) { return []; } }
@@ -1186,6 +1192,23 @@
         markWatchMsg(d.mid, 'generating', '执行中...');
       } else if (d.type === 'watch_reply_sent') {
         markWatchMsg(d.mid, 'sent', d.replyText);
+
+      // ── Alarm events ──
+      } else if (d.type === 'alarm_status') {
+        _alarmStatus = {
+          enabled: !!d.enabled,
+          monitoredSessions: d.monitoredSessions || [],
+          promptTemplate: d.promptTemplate || '',
+          sessionSettings: d.sessionSettings || {},
+          pendingCount: d.pendingCount || 0,
+          pending: d.pending || [],
+          recentRecords: d.recentRecords || []
+        };
+        updateAlarmUI();
+      } else if (d.type === 'alarm_investigating') {
+        console.log('[alarm] investigating:', d.mid);
+      } else if (d.type === 'alarm_resolved') {
+        console.log('[alarm] resolved:', d.mid, d.replyPreview);
       }
     } catch (err) { console.error('[cursor-acp] __agentReceive error:', err); }
   };
@@ -1701,6 +1724,642 @@
     if (dot) {
       dot.style.background = _watchRemoteEnabled ? '#4ec9b0' : '#555';
       dot.style.boxShadow = _watchRemoteEnabled ? '0 0 4px rgba(78,201,176,0.6)' : 'none';
+    }
+  }
+
+  // ── Alarm Popover ──
+
+  function toggleAlarmPopover() {
+    if (_alarmPopoverEl) { closeAlarmPopover(); } else { showAlarmPopover(); }
+  }
+
+  function showAlarmPopover() {
+    if (_alarmPopoverEl) return;
+    var btn = document.getElementById('cursor-alarm-sidebar-btn');
+    if (!btn) return;
+    var rect = btn.getBoundingClientRect();
+
+    var savedSize = null;
+    try { savedSize = JSON.parse(localStorage.getItem('__alarm_popover_size') || 'null'); } catch (_) {}
+    var popW = (savedSize && savedSize.w) || 360;
+    var popH = (savedSize && savedSize.h) || 0;
+
+    var pop = document.createElement('div');
+    pop.className = 'cursor-remote-popover';
+    pop.id = 'cursor-alarm-popover';
+    pop.style.cssText = 'visibility:hidden;left:' + (rect.right + 8) + 'px;top:0px;width:' + popW + 'px;display:block;overflow-y:auto;max-height:calc(100vh - 16px);min-width:280px;max-width:500px;min-height:200px;position:fixed';
+
+    pop.innerHTML =
+      '<div class="crp-header">' +
+        '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px"><rect x="9" y="1" width="6" height="4" rx="1" stroke-opacity="0.6"/><line x1="10.5" y1="3" x2="13.5" y2="3" stroke-opacity="0.3"/><rect x="9" y="19" width="6" height="4" rx="1" stroke-opacity="0.6"/><line x1="10.5" y1="21" x2="13.5" y2="21" stroke-opacity="0.3"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="4.2" stroke-opacity="0.3" stroke-dasharray="2 1.5"/><circle cx="12" cy="12" r="1.5" stroke-opacity="0.5"/><circle cx="12" cy="12" r="0.5" fill="currentColor" stroke="none"/><line x1="12" y1="12" x2="12" y2="8"/><line x1="12" y1="12" x2="15" y2="14" stroke-opacity="0.6"/><circle cx="18.5" cy="12" r="1" stroke-opacity="0.6"/></svg>' +
+        'Alarm Bot' +
+      '</div>' +
+      '<div class="crp-row">' +
+        '<span class="crp-toggle alarm-toggle" title="启用后自动监控告警消息"><span class="gt-track"><span class="gt-knob"></span></span><span class="gt-label">告警监控</span></span>' +
+      '</div>' +
+      '<div class="crp-row alarm-groups-section" style="margin-top:6px">' +
+        '<div style="font-size:10px;color:rgba(255,255,255,0.35);margin-bottom:4px">监控群列表</div>' +
+        '<div class="alarm-monitored-groups" style="margin-bottom:6px"></div>' +
+        '<div class="alarm-add-group-btn" style="font-size:10px;color:#4ec9b0;cursor:pointer;padding:3px 0;opacity:0.7">+ 添加监控群</div>' +
+        '<div class="alarm-add-group-area" style="display:none">' +
+          '<input class="alarm-group-search" type="text" placeholder="搜索群..." style="width:100%;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:4px;color:rgba(255,255,255,0.7);font-size:11px;padding:4px 8px;outline:none;margin-bottom:4px">' +
+          '<div class="alarm-groups-list" style="max-height:150px;overflow-y:auto;font-size:11px"></div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="crp-row" style="margin-top:6px">' +
+        '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">' +
+          '<span style="font-size:10px;color:rgba(255,255,255,0.35)">全局排查 Prompt</span>' +
+          '<span class="alarm-prompt-toggle" style="font-size:9px;color:rgba(77,150,255,0.7);cursor:pointer;user-select:none">展开</span>' +
+        '</div>' +
+        '<div class="alarm-prompt-wrap" style="display:none">' +
+          '<textarea class="alarm-prompt" rows="6" style="width:100%;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:4px;color:rgba(255,255,255,0.7);font-size:10px;font-family:-apple-system,sans-serif;padding:6px;resize:vertical;outline:none;line-height:1.4"></textarea>' +
+          '<div style="font-size:9px;color:rgba(255,255,255,0.2);margin-top:2px">变量: {{groupName}} {{timeout}} {{alarmText}}</div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="crp-status alarm-status-line"></div>' +
+      '<div class="alarm-pending-list" style="margin-top:6px;font-size:10px"></div>' +
+      '<div style="margin-top:8px;border-top:1px solid rgba(255,255,255,0.08);padding-top:6px">' +
+        '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">' +
+          '<span style="font-size:10px;color:rgba(255,255,255,0.35)">操作日志</span>' +
+          '<span class="alarm-records-count" style="font-size:9px;color:rgba(78,201,176,0.6)"></span>' +
+        '</div>' +
+        '<div class="alarm-records" style="font-size:10px;max-height:150px;overflow-y:auto"></div>' +
+      '</div>';
+
+    document.body.appendChild(pop);
+    _alarmPopoverEl = pop;
+
+    // Toggle binding
+    var toggleEl = pop.querySelector('.alarm-toggle');
+    if (toggleEl) {
+      if (_alarmStatus.enabled) toggleEl.classList.add('on');
+      toggleEl.addEventListener('click', function () {
+        var newState = !_alarmStatus.enabled;
+        if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: 'alarm_toggle', enabled: newState }));
+      });
+    }
+
+    // Load group list from Redux store (with search + split)
+    loadGroupList();
+
+    // "+ 添加监控群" button toggles the add area
+    var addBtn = pop.querySelector('.alarm-add-group-btn');
+    var addArea = pop.querySelector('.alarm-add-group-area');
+    if (addBtn && addArea) {
+      addBtn.addEventListener('click', function () {
+        var shown = addArea.style.display !== 'none';
+        addArea.style.display = shown ? 'none' : 'block';
+        addBtn.textContent = shown ? '+ 添加监控群' : '- 收起';
+        if (!shown) {
+          var searchEl = addArea.querySelector('.alarm-group-search');
+          if (searchEl) { searchEl.value = ''; searchEl.focus(); }
+          loadGroupList('');
+        }
+      });
+    }
+
+    // Prompt template — toggle + save on blur
+    var promptToggle = pop.querySelector('.alarm-prompt-toggle');
+    var promptWrap = pop.querySelector('.alarm-prompt-wrap');
+    var promptEl = pop.querySelector('.alarm-prompt');
+    if (promptToggle && promptWrap && promptEl) {
+      promptEl.value = _alarmStatus.promptTemplate || '';
+      promptToggle.addEventListener('click', function () {
+        var hidden = promptWrap.style.display === 'none';
+        promptWrap.style.display = hidden ? 'block' : 'none';
+        promptToggle.textContent = hidden ? '收起' : '展开';
+      });
+      promptEl.addEventListener('blur', function () {
+        var val = this.value.trim();
+        if (val && val !== _alarmStatus.promptTemplate) {
+          if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: 'alarm_config_update', config: { promptTemplate: val } }));
+        }
+      });
+    }
+
+    // Render status
+    renderAlarmPopoverContent();
+
+    // Position — grow upward from button, bottom-anchored
+    var vh = window.innerHeight;
+    var margin = 8;
+    var bottomAnchor = vh - rect.bottom;
+    var availH = vh - margin * 2;
+    var initH = popH > 0 ? Math.min(popH, availH) : Math.min(520, availH);
+    pop.style.height = initH + 'px';
+    pop.style.maxHeight = availH + 'px';
+    pop.style.bottom = Math.max(margin, bottomAnchor - 10) + 'px';
+    pop.style.top = 'auto';
+    pop.style.visibility = 'visible';
+
+    btn.classList.add('active');
+    requestAnimationFrame(function () { pop.classList.add('show'); });
+
+    // Drag handle for manual resizing (top-right corner, drag upward to grow)
+    var handle = document.createElement('div');
+    handle.className = 'cursor-resize-handle';
+    pop.insertBefore(handle, pop.firstChild);
+    pop.style.position = 'fixed';
+    handle.addEventListener('mousedown', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      var startX = e.clientX, startY = e.clientY;
+      var startW = pop.offsetWidth, startH = pop.offsetHeight;
+      function onMove(ev) {
+        var newW = Math.max(280, Math.min(500, startW + (ev.clientX - startX)));
+        var newH = Math.max(200, startH - (ev.clientY - startY));
+        pop.style.width = newW + 'px';
+        pop.style.height = newH + 'px';
+      }
+      function onUp() {
+        document.removeEventListener('mousemove', onMove, true);
+        document.removeEventListener('mouseup', onUp, true);
+        try { localStorage.setItem('__alarm_popover_size', JSON.stringify({ w: pop.offsetWidth, h: pop.offsetHeight })); } catch (_) {}
+      }
+      document.addEventListener('mousemove', onMove, true);
+      document.addEventListener('mouseup', onUp, true);
+    });
+
+    setTimeout(function () {
+      document.addEventListener('click', _alarmOutsideClick, true);
+    }, 0);
+  }
+
+  function closeAlarmPopover() {
+    if (_alarmPopoverEl) {
+      _alarmPopoverEl.remove();
+      _alarmPopoverEl = null;
+    }
+    document.removeEventListener('click', _alarmOutsideClick, true);
+    var btn = document.getElementById('cursor-alarm-sidebar-btn');
+    if (btn) btn.classList.remove('active');
+  }
+
+  function _alarmOutsideClick(e) {
+    if (_alarmPopoverEl && !_alarmPopoverEl.contains(e.target)) {
+      var btn = document.getElementById('cursor-alarm-sidebar-btn');
+      if (btn && btn.contains(e.target)) return;
+      closeAlarmPopover();
+    }
+  }
+
+  var _allGroups = [];
+
+  function fetchGroupsFromStore() {
+    var groups = [];
+    try {
+      var store = window.store;
+      if (store) {
+        var state = store.getState();
+        var groupInfo = (state.contact && state.contact.groupInfo) || {};
+        var keys = Object.keys(groupInfo);
+        for (var i = 0; i < keys.length; i++) {
+          var g = groupInfo[keys[i]];
+          if (g && g.name) {
+            groups.push({ session: 'group-' + keys[i], name: g.name });
+          }
+        }
+        groups.sort(function (a, b) { return a.name.localeCompare(b.name); });
+      }
+    } catch (_) {}
+    return groups;
+  }
+
+  function onGroupCheckboxChange(e) {
+    if (!_alarmPopoverEl) return;
+    var cb = e && e.target;
+    if (cb && !cb.checked && cb.getAttribute('data-was-checked') === '1') {
+      var session = cb.getAttribute('data-session') || '';
+      var ss = (_alarmStatus.sessionSettings && _alarmStatus.sessionSettings[session]) || {};
+      var hasConfig = (ss.patterns && ss.patterns.length) || ss.workspace || ss.prompt || ss.requireMention;
+      if (hasConfig && !confirm('确定取消监控此群？已配置的规则将保留。')) {
+        cb.checked = true;
+        return;
+      }
+    }
+    var allCbs = _alarmPopoverEl.querySelectorAll('.alarm-group-cb');
+    var sessions = [];
+    for (var j = 0; j < allCbs.length; j++) {
+      if (allCbs[j].checked) sessions.push(allCbs[j].getAttribute('data-session'));
+    }
+    if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: 'alarm_config_update', config: { monitoredSessions: sessions } }));
+  }
+
+  function renderGroupCheckbox(g, checked) {
+    if (!checked) {
+      return '<div style="display:flex;align-items:center;gap:4px;padding:2px 0">' +
+        '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:rgba(255,255,255,0.6);flex:1;overflow:hidden">' +
+          '<input type="checkbox" class="alarm-group-cb" data-session="' + escapeHtml(g.session) + '" style="margin:0">' +
+          '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escapeHtml(g.name) + '</span>' +
+        '</label></div>';
+    }
+    var ss = (_alarmStatus.sessionSettings && _alarmStatus.sessionSettings[g.session]) || {};
+    var patCount = (ss.patterns || []).length;
+    var badges = [];
+    if (patCount > 0) badges.push(patCount + '\u6761\u89C4\u5219');
+    var tm = ss.timeoutMinutes;
+    if (typeof tm === 'number') badges.push(tm === 0 ? '\u5373\u65F6' : tm + '\u5206\u949F');
+    if (ss.workspace) badges.push('\u5DE5\u4F5C\u533A');
+    if (ss.requireMention) badges.push('@\u6211');
+    var badgeColor = badges.length > 0 ? '#4ec9b0' : 'rgba(255,255,255,0.25)';
+    var badgeText = badges.length > 0 ? badges.join(' | ') : '\u914D\u7F6E';
+    return '<div style="display:flex;align-items:center;gap:4px;padding:2px 0">' +
+      '<input type="checkbox" class="alarm-group-cb" data-session="' + escapeHtml(g.session) + '" data-was-checked="1" checked style="margin:0">' +
+      '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:rgba(255,255,255,0.6);flex:1;cursor:default">' + escapeHtml(g.name) + '</span>' +
+      '<span class="alarm-group-settings-btn" data-session="' + escapeHtml(g.session) + '" data-name="' + escapeHtml(g.name) + '" style="flex-shrink:0;font-size:9px;color:' + badgeColor + ';cursor:pointer;padding:1px 5px;font-family:monospace;border:1px solid ' + badgeColor + ';border-radius:3px;opacity:0.7" title="点击配置此群的告警规则">' + badgeText + '</span>' +
+    '</div>';
+  }
+
+  function buildWorkspaceOptions(selected) {
+    var opts = '<option value="">默认</option>';
+    var list = cachedWorkspaceList || [];
+    for (var i = 0; i < list.length; i++) {
+      var w = list[i];
+      var sel = w.path === selected ? ' selected' : '';
+      opts += '<option value="' + escapeHtml(w.path) + '"' + sel + '>' + escapeHtml(w.name) + '</option>';
+    }
+    if (selected && !list.some(function (w) { return w.path === selected; })) {
+      var base = selected.split('/').pop() || selected;
+      opts += '<option value="' + escapeHtml(selected) + '" selected>' + escapeHtml(base) + ' (custom)</option>';
+    }
+    return opts;
+  }
+
+  function buildModelOptions(selected) {
+    var opts = '<option value="">默认</option>';
+    var models = (cachedModels && cachedModels.models) || [];
+    for (var i = 0; i < models.length; i++) {
+      var m = models[i];
+      var mid = m.modelId || m.id || '';
+      var mname = m.name || mid;
+      var sel = mid === selected ? ' selected' : '';
+      opts += '<option value="' + escapeHtml(mid) + '"' + sel + '>' + escapeHtml(mname) + '</option>';
+    }
+    if (selected && models.length > 0 && !models.some(function (m) { return (m.modelId || m.id) === selected; })) {
+      opts += '<option value="' + escapeHtml(selected) + '" selected>' + escapeHtml(selected) + '</option>';
+    }
+    return opts;
+  }
+
+  function showGroupSettingsPanel(session, name) {
+    if (!_alarmPopoverEl) return;
+    var existing = _alarmPopoverEl.querySelector('.alarm-group-settings-panel');
+    if (existing) existing.remove();
+
+    var ss = (_alarmStatus.sessionSettings && _alarmStatus.sessionSettings[session]) || {};
+    var patterns = ss.patterns || [];
+    var matchMode = ss.matchMode || 'any';
+    var timeoutMin = ss.timeoutMinutes || 5;
+
+    var panel = document.createElement('div');
+    panel.className = 'alarm-group-settings-panel';
+    panel.style.cssText = 'background:rgba(30,30,30,0.95);border:1px solid rgba(78,201,176,0.3);border-radius:6px;padding:8px;margin:6px 0;font-size:11px';
+
+    var patternsHtml = '';
+    for (var pi = 0; pi < patterns.length; pi++) {
+      patternsHtml += '<span class="gsp-chip" data-idx="' + pi + '" style="display:inline-flex;align-items:center;gap:3px;padding:2px 6px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:3px;font-size:9px;font-family:\'SF Mono\',Monaco,monospace;color:rgba(255,255,255,0.6);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + escapeHtml(patterns[pi]) + '">' +
+        '<span style="overflow:hidden;text-overflow:ellipsis">' + escapeHtml(patterns[pi]) + '</span>' +
+        '<span class="gsp-chip-del" data-idx="' + pi + '" style="cursor:pointer;color:rgba(255,255,255,0.3);font-size:11px;line-height:1;flex-shrink:0">\u00d7</span>' +
+      '</span>';
+    }
+
+    var selectStyle = 'background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.08);border-radius:4px;color:rgba(255,255,255,0.7);font-size:10px;padding:3px 6px;outline:none';
+
+    panel.innerHTML =
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">' +
+        '<span style="color:#4ec9b0;font-size:10px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px">' + escapeHtml(name) + '</span>' +
+        '<span class="alarm-gsp-close" style="color:rgba(255,255,255,0.3);cursor:pointer;font-size:14px;line-height:1">&times;</span>' +
+      '</div>' +
+      '<div style="margin-bottom:6px">' +
+        '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px">' +
+          '<span style="font-size:9px;color:rgba(255,255,255,0.35)">匹配规则</span>' +
+          '<div style="display:flex;gap:4px">' +
+            '<button class="gsp-ai-gen-btn" style="background:rgba(77,150,255,0.12);border:1px solid rgba(77,150,255,0.25);border-radius:4px;color:#6ea8fe;font-size:9px;padding:1px 6px;cursor:pointer" title="打开 Agent 面板辅助生成正则">AI 生成</button>' +
+            '<button class="gsp-add-btn" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:4px;color:rgba(255,255,255,0.5);font-size:9px;padding:1px 6px;cursor:pointer">+ 添加</button>' +
+          '</div>' +
+        '</div>' +
+        '<div class="gsp-pattern-chips" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:4px">' + (patternsHtml || '<span style="font-size:9px;color:rgba(255,255,255,0.2);font-style:italic">无规则</span>') + '</div>' +
+        '<div style="display:flex;align-items:center;gap:6px;font-size:10px;color:rgba(255,255,255,0.4)">' +
+          '<span>逻辑:</span>' +
+          '<select class="gsp-match-mode" style="' + selectStyle + '">' +
+            '<option value="any"' + (matchMode === 'any' ? ' selected' : '') + '>任一匹配 (OR)</option>' +
+            '<option value="all"' + (matchMode === 'all' ? ' selected' : '') + '>全部匹配 (AND)</option>' +
+          '</select>' +
+        '</div>' +
+      '</div>' +
+      '<div style="display:flex;gap:8px;margin-bottom:6px;flex-wrap:wrap;font-size:10px;color:rgba(255,255,255,0.4)">' +
+        '<div style="display:flex;align-items:center;gap:3px">' +
+          '<span>处理延迟:</span>' +
+          '<input type="range" class="gsp-timeout" min="0" max="30" step="1" value="' + timeoutMin + '" style="width:60px;height:12px;accent-color:#4ec9b0;cursor:pointer">' +
+          '<span class="gsp-timeout-val" style="min-width:24px;text-align:right">' + (timeoutMin === 0 ? '即时' : timeoutMin + 'm') + '</span>' +
+        '</div>' +
+        '<label style="display:flex;align-items:center;gap:3px;cursor:pointer">' +
+          '<input type="checkbox" class="gsp-mention"' + (ss.requireMention ? ' checked' : '') + ' style="accent-color:#4d96ff">' +
+          '<span>仅 @我</span>' +
+        '</label>' +
+        '<label style="display:flex;align-items:center;gap:3px;cursor:pointer">' +
+          '<input type="checkbox" class="gsp-cancel-human"' + (ss.cancelOnHumanReply !== false ? ' checked' : '') + ' style="accent-color:#4d96ff">' +
+          '<span>有人回复取消</span>' +
+        '</label>' +
+      '</div>' +
+      '<div style="display:flex;gap:6px;margin-bottom:6px;font-size:10px;color:rgba(255,255,255,0.4)">' +
+        '<div style="flex:1">' +
+          '<div style="font-size:9px;color:rgba(255,255,255,0.35);margin-bottom:2px">Workspace</div>' +
+          '<select class="gsp-workspace" style="width:100%;' + selectStyle + '">' + buildWorkspaceOptions(ss.workspace || '') + '</select>' +
+        '</div>' +
+        '<div style="flex:1">' +
+          '<div style="font-size:9px;color:rgba(255,255,255,0.35);margin-bottom:2px">模型</div>' +
+          '<select class="gsp-model" style="width:100%;' + selectStyle + '">' + buildModelOptions(ss.modelId || '') + '</select>' +
+        '</div>' +
+      '</div>' +
+      '<div style="margin-bottom:6px">' +
+        '<div style="font-size:9px;color:rgba(255,255,255,0.35);margin-bottom:2px">附加 Prompt</div>' +
+        '<textarea class="gsp-prompt" rows="2" placeholder="追加在全局 Prompt 后面..." style="width:100%;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:4px;color:rgba(255,255,255,0.7);font-size:10px;font-family:-apple-system,sans-serif;padding:4px 6px;resize:vertical;outline:none;line-height:1.4">' + escapeHtml(ss.prompt || '') + '</textarea>' +
+      '</div>' +
+      '<div style="display:flex;gap:6px;justify-content:flex-end">' +
+        '<button class="alarm-gsp-clear" style="background:rgba(255,100,100,0.1);border:1px solid rgba(255,100,100,0.2);border-radius:4px;color:rgba(255,100,100,0.6);font-size:10px;padding:3px 10px;cursor:pointer">重置</button>' +
+        '<button class="alarm-gsp-save" style="background:rgba(78,201,176,0.15);border:1px solid rgba(78,201,176,0.3);border-radius:4px;color:#4ec9b0;font-size:10px;padding:3px 10px;cursor:pointer">保存</button>' +
+      '</div>';
+
+    var monEl = _alarmPopoverEl.querySelector('.alarm-monitored-groups');
+    if (monEl) monEl.parentNode.insertBefore(panel, monEl.nextSibling);
+
+    panel.querySelector('.alarm-gsp-close').addEventListener('click', function () { panel.remove(); });
+
+    // Timeout slider label
+    var timeoutSlider = panel.querySelector('.gsp-timeout');
+    var timeoutLabel = panel.querySelector('.gsp-timeout-val');
+    if (timeoutSlider && timeoutLabel) {
+      timeoutSlider.addEventListener('input', function () {
+        var v = parseInt(this.value, 10);
+        timeoutLabel.textContent = v === 0 ? '即时' : v + 'm';
+      });
+    }
+
+    // Pattern chip delete
+    var chipDels = panel.querySelectorAll('.gsp-chip-del');
+    for (var di = 0; di < chipDels.length; di++) {
+      chipDels[di].addEventListener('click', function (e) {
+        e.stopPropagation();
+        var idx = parseInt(this.getAttribute('data-idx'), 10);
+        var cur = ((_alarmStatus.sessionSettings && _alarmStatus.sessionSettings[session]) || {}).patterns || [];
+        var newP = cur.slice();
+        newP.splice(idx, 1);
+        saveGroupSettings(session, panel, { patterns: newP });
+      });
+    }
+
+    // Add pattern
+    panel.querySelector('.gsp-add-btn').addEventListener('click', function () {
+      var regex = prompt('输入正则表达式:');
+      if (regex && regex.trim()) {
+        var cur = ((_alarmStatus.sessionSettings && _alarmStatus.sessionSettings[session]) || {}).patterns || [];
+        saveGroupSettings(session, panel, { patterns: cur.concat([regex.trim()]) });
+      }
+    });
+
+    // AI generate
+    panel.querySelector('.gsp-ai-gen-btn').addEventListener('click', function () {
+      closeAlarmPopover();
+      window.__agentToggle(true);
+      setTimeout(function () {
+        if (inputEl) {
+          inputEl.value =
+            '请帮我从告警消息示例中生成正则表达式（JavaScript RegExp 语法）。\n\n' +
+            '要求:\n' +
+            '- 每行一个正则表达式\n' +
+            '- 提取关键特征词，可变部分用 .* 或 \\d+ 匹配\n' +
+            '- 保持简洁，能匹配同类告警即可\n' +
+            '- 通常 3-6 个就够\n' +
+            '- 只输出正则，不要解释\n\n' +
+            '我的告警消息示例:\n';
+          inputEl.style.height = '36px';
+          inputEl.style.height = Math.min(inputEl.scrollHeight, 120) + 'px';
+          inputEl.focus();
+        }
+      }, 300);
+    });
+
+    // Save button
+    panel.querySelector('.alarm-gsp-save').addEventListener('click', function () {
+      var cfg = {};
+      cfg.patterns = getChipPatterns(panel);
+      cfg.matchMode = panel.querySelector('.gsp-match-mode').value;
+      var tv = parseInt(panel.querySelector('.gsp-timeout').value, 10);
+      cfg.timeoutMinutes = isNaN(tv) ? 5 : tv;
+      cfg.requireMention = panel.querySelector('.gsp-mention').checked;
+      cfg.cancelOnHumanReply = panel.querySelector('.gsp-cancel-human').checked;
+      cfg.workspace = panel.querySelector('.gsp-workspace').value;
+      cfg.modelId = panel.querySelector('.gsp-model').value;
+      cfg.prompt = panel.querySelector('.gsp-prompt').value.trim();
+      saveGroupSettings(session, null, cfg);
+      panel.remove();
+    });
+
+    // Clear button
+    panel.querySelector('.alarm-gsp-clear').addEventListener('click', function () {
+      var allSS = Object.assign({}, _alarmStatus.sessionSettings || {});
+      delete allSS[session];
+      if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: 'alarm_config_update', config: { sessionSettings: allSS } }));
+      panel.remove();
+    });
+  }
+
+  function getChipPatterns(panel) {
+    var chips = panel.querySelectorAll('.gsp-chip');
+    var result = [];
+    for (var i = 0; i < chips.length; i++) {
+      var title = chips[i].getAttribute('title');
+      if (title) result.push(title);
+    }
+    return result;
+  }
+
+  function saveGroupSettings(session, panel, overrides) {
+    var allSS = Object.assign({}, _alarmStatus.sessionSettings || {});
+    var cur = Object.assign({}, allSS[session] || {});
+    allSS[session] = Object.assign(cur, overrides);
+    _alarmStatus.sessionSettings = allSS;
+    if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: 'alarm_config_update', config: { sessionSettings: allSS } }));
+    renderAlarmPopoverContent();
+  }
+
+  function loadGroupList(filter) {
+    if (!_alarmPopoverEl) return;
+    _allGroups = fetchGroupsFromStore();
+
+    var monSet = {};
+    for (var m = 0; m < _alarmStatus.monitoredSessions.length; m++) {
+      monSet[_alarmStatus.monitoredSessions[m]] = true;
+    }
+
+    // Render monitored groups section (always visible, above search)
+    var monEl = _alarmPopoverEl.querySelector('.alarm-monitored-groups');
+    if (monEl) {
+      var monitored = _allGroups.filter(function (g) { return monSet[g.session]; });
+      if (monitored.length > 0) {
+        var mHtml = '';
+        for (var mi = 0; mi < monitored.length; mi++) {
+          mHtml += renderGroupCheckbox(monitored[mi], true);
+        }
+        monEl.innerHTML = '<div style="font-size:9px;color:rgba(78,201,176,0.6);margin-bottom:2px">监控中 (' + monitored.length + ')</div>' + mHtml;
+        var mCbs = monEl.querySelectorAll('.alarm-group-cb');
+        for (var mci = 0; mci < mCbs.length; mci++) mCbs[mci].addEventListener('change', onGroupCheckboxChange);
+        var sBtns = monEl.querySelectorAll('.alarm-group-settings-btn');
+        for (var si = 0; si < sBtns.length; si++) {
+          sBtns[si].addEventListener('click', function (e) {
+            e.stopPropagation();
+            var session = this.getAttribute('data-session');
+            var name = this.getAttribute('data-name');
+            showGroupSettingsPanel(session, name);
+          });
+        }
+      } else {
+        monEl.innerHTML = '<div style="font-size:9px;color:rgba(255,255,255,0.2);font-style:italic;margin-bottom:2px">未选择监控群</div>';
+      }
+    }
+
+    // Render all groups (filtered, excluding already-monitored)
+    var listEl = _alarmPopoverEl.querySelector('.alarm-groups-list');
+    if (!listEl) return;
+
+    if (_allGroups.length === 0) {
+      listEl.innerHTML = '<div style="color:rgba(255,255,255,0.2);font-style:italic;padding:4px 0">Loading groups...</div>';
+      return;
+    }
+
+    var query = (filter || '').toLowerCase();
+    var unmonitored = _allGroups.filter(function (g) {
+      if (monSet[g.session]) return false;
+      if (query && g.name.toLowerCase().indexOf(query) === -1) return false;
+      return true;
+    });
+
+    if (unmonitored.length === 0) {
+      listEl.innerHTML = query
+        ? '<div style="color:rgba(255,255,255,0.2);font-style:italic;padding:4px 0">无匹配</div>'
+        : '<div style="color:rgba(255,255,255,0.2);font-style:italic;padding:4px 0">所有群已在监控中</div>';
+      return;
+    }
+
+    var html = '';
+    for (var gi = 0; gi < unmonitored.length; gi++) {
+      html += renderGroupCheckbox(unmonitored[gi], false);
+    }
+    listEl.innerHTML = html;
+
+    var cbs = listEl.querySelectorAll('.alarm-group-cb');
+    for (var ci = 0; ci < cbs.length; ci++) cbs[ci].addEventListener('change', onGroupCheckboxChange);
+
+    // Bind search input
+    var searchEl = _alarmPopoverEl.querySelector('.alarm-group-search');
+    if (searchEl && !searchEl._bound) {
+      searchEl._bound = true;
+      searchEl.addEventListener('input', function () {
+        loadGroupList(this.value);
+      });
+    }
+  }
+
+  function renderAlarmPopoverContent() {
+    if (!_alarmPopoverEl) return;
+
+    var toggleEl = _alarmPopoverEl.querySelector('.alarm-toggle');
+    if (toggleEl) {
+      if (_alarmStatus.enabled) toggleEl.classList.add('on');
+      else toggleEl.classList.remove('on');
+    }
+
+    // Re-render group list (preserve search query)
+    var searchEl = _alarmPopoverEl.querySelector('.alarm-group-search');
+    var query = searchEl ? searchEl.value : '';
+    loadGroupList(query);
+
+    var statusEl = _alarmPopoverEl.querySelector('.alarm-status-line');
+    if (statusEl) {
+      if (_alarmStatus.enabled) {
+        var pendText = _alarmStatus.pendingCount > 0
+          ? ' | ' + _alarmStatus.pendingCount + ' pending'
+          : '';
+        statusEl.innerHTML = '<span class="crp-dot on"></span>Monitoring' + pendText;
+      } else {
+        statusEl.innerHTML = '<span class="crp-dot"></span>Off';
+      }
+    }
+
+    var pendEl = _alarmPopoverEl.querySelector('.alarm-pending-list');
+    if (pendEl) {
+      if (_alarmStatus.pending.length === 0) {
+        pendEl.innerHTML = '';
+      } else {
+        var ph = '';
+        for (var pi = 0; pi < _alarmStatus.pending.length; pi++) {
+          var pa = _alarmStatus.pending[pi];
+          ph += '<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;color:rgba(255,255,255,0.5)">' +
+            '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:160px" title="' + escapeHtml(pa.text) + '">' + escapeHtml(pa.sessionName) + '</span>' +
+            '<span style="color:#fbbf24;flex-shrink:0">' + pa.remainingSec + 's</span>' +
+          '</div>';
+        }
+        pendEl.innerHTML = '<div style="color:rgba(255,255,255,0.35);margin-bottom:2px">Pending alarms:</div>' + ph;
+      }
+    }
+
+    var recCountEl = _alarmPopoverEl.querySelector('.alarm-records-count');
+    var recEl = _alarmPopoverEl.querySelector('.alarm-records');
+    if (recEl) {
+      var recCount = (_alarmStatus.recentRecords || []).length;
+      if (recCountEl) recCountEl.textContent = recCount > 0 ? recCount + ' 条' : '';
+      if (recCount === 0) {
+        recEl.innerHTML = '<div style="color:rgba(255,255,255,0.15);font-style:italic;text-align:center;padding:8px 0;font-size:10px">暂无记录</div>';
+      } else {
+        var rh = '';
+        for (var ri = 0; ri < _alarmStatus.recentRecords.length; ri++) {
+          var rec = _alarmStatus.recentRecords[ri];
+          var t = new Date(rec.resolvedAt);
+          var time = ('0' + t.getHours()).slice(-2) + ':' + ('0' + t.getMinutes()).slice(-2);
+          var outcomeLabel = rec.outcome === 'investigated' ? '<span style="color:#4ec9b0">AI replied</span>'
+            : rec.outcome === 'cancelled_human' ? '<span style="color:#94a3b8">Human replied</span>'
+            : '<span style="color:#888">Cancelled</span>';
+          var replyTip = rec.replyPreview ? '\n--- AI Reply ---\n' + rec.replyPreview : '';
+          rh += '<div style="padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.04)">' +
+            '<div style="display:flex;justify-content:space-between;color:rgba(255,255,255,0.4)">' +
+              '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:140px">' + escapeHtml(rec.sessionName) + '</span>' +
+              '<span style="flex-shrink:0">' + time + ' ' + outcomeLabel + '</span>' +
+            '</div>' +
+            '<div style="color:rgba(255,255,255,0.25);font-size:9px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:1px;cursor:help" title="' + escapeHtml(rec.text + replyTip) + '">' + escapeHtml(rec.text.substring(0, 60)) + '</div>' +
+          '</div>';
+        }
+        recEl.innerHTML = rh;
+      }
+    }
+  }
+
+  function updateAlarmUI() {
+    updateAlarmSidebarDot();
+    renderAlarmPopoverContent();
+  }
+
+  function updateAlarmSidebarDot() {
+    var aBtn = document.getElementById('cursor-alarm-sidebar-btn');
+    if (!aBtn) return;
+    var dot = aBtn.querySelector('.alarm-status-dot');
+    if (dot) {
+      dot.style.background = _alarmStatus.enabled ? '#4ec9b0' : '#555';
+      dot.style.boxShadow = _alarmStatus.enabled ? '0 0 4px rgba(78,201,176,0.6)' : 'none';
+    }
+    // Pending badge
+    var badge = aBtn.querySelector('.alarm-badge');
+    if (_alarmStatus.pendingCount > 0) {
+      if (!badge) {
+        badge = document.createElement('span');
+        badge.className = 'alarm-badge';
+        badge.style.cssText = 'position:absolute;top:2px;right:2px;min-width:12px;height:12px;border-radius:6px;background:#f44;color:#fff;font-size:8px;display:flex;align-items:center;justify-content:center;padding:0 2px;line-height:1';
+        aBtn.style.position = 'relative';
+        aBtn.appendChild(badge);
+      }
+      badge.textContent = _alarmStatus.pendingCount > 9 ? '9+' : _alarmStatus.pendingCount;
+    } else if (badge) {
+      badge.remove();
     }
   }
 
@@ -2349,6 +3008,32 @@
   });
   updateWatchSidebarDot();
 
+  // ── Alarm sidebar button ──
+  var oldAlarmBtn = document.getElementById('cursor-alarm-sidebar-btn');
+  if (oldAlarmBtn) oldAlarmBtn.remove();
+  UI.createSidebarButton({
+    id: 'cursor-alarm-sidebar-btn',
+    icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" width="22" height="22"><rect x="9" y="1" width="6" height="4" rx="1" stroke-opacity="0.6"/><line x1="10.5" y1="3" x2="13.5" y2="3" stroke-opacity="0.3"/><rect x="9" y="19" width="6" height="4" rx="1" stroke-opacity="0.6"/><line x1="10.5" y1="21" x2="13.5" y2="21" stroke-opacity="0.3"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="4.2" stroke-opacity="0.3" stroke-dasharray="2 1.5"/><circle cx="12" cy="12" r="1.5" stroke-opacity="0.5"/><circle cx="12" cy="12" r="0.5" fill="currentColor" stroke="none"/><line x1="12" y1="12" x2="12" y2="8"/><line x1="12" y1="12" x2="15" y2="14" stroke-opacity="0.6"/><circle cx="18.5" cy="12" r="1" stroke-opacity="0.6"/><circle class="alarm-status-dot" cx="20" cy="4" r="2.5" fill="#555" stroke="none"/></svg>',
+    onClick: function () { toggleAlarmPopover(); },
+    tooltip: function () {
+      var st = _alarmStatus.enabled
+        ? '<span style="color:#4ec9b0">Monitoring (' + _alarmStatus.pendingCount + ' pending)</span>'
+        : '<span style="color:#888">Off</span>';
+      return '<b>Alarm Bot</b><div style="font-size:10px;color:#858585;margin-top:2px">' + st + '</div>';
+    }
+  });
+  updateAlarmSidebarDot();
+
+  window.__alarmToggle = function (open) {
+    if (open === false || (open === undefined && _alarmPopoverEl)) {
+      closeAlarmPopover();
+    } else if (!_alarmPopoverEl) {
+      showAlarmPopover();
+    }
+  };
+  // Request alarm status on load
+  if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: 'alarm_get_status' }));
+
   window.__watchToggle = function (open) {
     if (open === false || (open === undefined && _remotePopoverEl)) {
       closeRemotePopover();
@@ -2387,6 +3072,7 @@
     _observers.length = 0;
     if (panelHandle) { try { panelHandle.close(); } catch (_) {} }
     closeRemotePopover();
+    closeAlarmPopover();
     var fab = document.querySelector('.cursor-sel-fab');
     if (fab) fab.remove();
   };

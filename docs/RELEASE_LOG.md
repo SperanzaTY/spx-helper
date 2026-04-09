@@ -6,6 +6,40 @@
 
 ---
 
+## v3.5.0 -- 2026-04-09 -- `feat`: Alarm Bot 告警自动排查
+
+**提交者**: @tianyi.liang
+**Commit Type**: feat
+**修改模块**: SeaTalk Agent / MCP 工具
+
+### 变更说明
+- [新增] Alarm Bot 功能模块：监控 SeaTalk 群告警消息，无人响应时 AI 自动排查并以线程回复到群里
+- [新增] alarm-manager.ts：告警状态机（配置管理、PendingAlarm 定时器、调查队列、记录管理）
+- [新增] sidebar-app.js Alarm Bot UI：蒸汽朋克腕表图标、弹窗面板（可拖拽调整大小）、按群独立配置（匹配规则与/或逻辑、处理延迟、工作区选择、模型选择、追加 prompt、仅 @我、人工回复取消）
+- [新增] main.ts 告警后端逻辑：消息监听 -> 正则匹配 -> 延迟等待 -> 启动独立 Agent 排查 -> 线程回复
+- [新增] DataMap MCP update_table_info 新增 table_status 字段（ACTIVE/MIGRATED/DEPRECATED/OFFLINE）
+- [新增] DataMap batch_update_table_status.py 批量更新表状态脚本
+- [修复] Flink MCP _format_ts 函数兼容字符串类型时间戳，避免 str/int 除法报错
+- [优化] cursor-ui.js 自定义 checkbox 样式（深色背景 + 琥珀色勾选状态）
+
+### 测试情况
+
+| 测试项 | 结果 | 备注 |
+|--------|------|------|
+| Chrome 扩展加载正常 | N/A | |
+| MCP 工具连接正常 | N/A | Flink/DataMap 变更为小修复 |
+| SeaTalk Agent 启动+注入正常 | [OK] | |
+| SeaTalk Agent 重启后 UI 恢复 | [OK] | |
+| 修改的功能正常工作 | [OK] | Alarm Bot 监控+排查+线程回复已验证 |
+| 已有功能未被破坏 | [OK] | |
+| 控制台无新增错误 | [OK] | |
+
+### 特别注意
+- 所有用户需要重启 Agent（终端运行 `seatalk` 或 `npm start`）
+- Alarm Bot 配置存储在 `~/.cursor/seatalk-alarm-config.json`，首次使用需在面板中配置监控群和匹配规则
+
+---
+
 ## 记录格式
 
 ```

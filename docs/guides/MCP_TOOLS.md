@@ -327,3 +327,11 @@ MCP 工具需要 Python 3.10+。通过 uv 安装：`uv python install 3.12`
 ## 六、配置位置
 
 MCP 配置在 `~/.cursor/mcp.json`，新增或修改后需在 Cursor 设置中**关闭再开启**对应 MCP 以刷新。
+
+---
+
+## 更新日志
+
+### v3.5.0
+- **DataMap MCP**: `update_table_info` 新增 `table_status` 字段（ACTIVE/MIGRATED/DEPRECATED/OFFLINE），新增批量更新脚本
+- **Flink MCP**: 修复 `_format_ts` 函数兼容字符串类型时间戳

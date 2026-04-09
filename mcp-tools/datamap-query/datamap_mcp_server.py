@@ -649,6 +649,7 @@ def update_table_info(
     business_pic: str = "",
     data_warehouse_layer: str = "",
     market_region: str = "",
+    table_status: str = "",
     idc_region: str = "SG",
     dry_run: bool = True,
 ) -> str:
@@ -667,12 +668,13 @@ def update_table_info(
         business_pic: 业务负责人邮箱，多个用逗号分隔
         data_warehouse_layer: 数仓分层（ODS/DWD/DWS/ADS/DIM）
         market_region: 市场区域
+        table_status: 表生命周期状态（ACTIVE/MIGRATED/DEPRECATED/OFFLINE）
         idc_region: IDC 区域，默认 "SG"
         dry_run: True=仅预览，False=执行更新
 
     示例:
         update_table_info("spx_mart.dwd_spx_spsso_order_base_info_di_id", description="SPX order base")
-        update_table_info("spx_mart.dwd_spx_spsso_order_base_info_di_id", description="SPX order base", dry_run=False)
+        update_table_info("spx_mart.dwd_spx_spsso_order_base_info_di_id", table_status="MIGRATED", dry_run=False)
     """
     try:
         database, table = _parse_table_ref(table_ref)
@@ -697,6 +699,9 @@ def update_table_info(
         if market_region:
             payload["marketRegion"] = market_region
             changes["marketRegion"] = market_region
+        if table_status:
+            payload["tableStatus"] = table_status
+            changes["tableStatus"] = table_status
 
         if not changes:
             return json.dumps({"error": "未指定任何要更新的字段"}, ensure_ascii=False)

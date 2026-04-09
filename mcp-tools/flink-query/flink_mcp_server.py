@@ -107,13 +107,13 @@ def _get_data(resp: dict) -> Any:
     return resp.get("data")
 
 
-def _format_ts(ts: Optional[int]) -> str:
+def _format_ts(ts) -> str:
     """将毫秒时间戳格式化为可读字符串。"""
     if not ts:
         return ""
     try:
-        return datetime.fromtimestamp(ts / 1000).strftime("%Y-%m-%d %H:%M:%S")
-    except (ValueError, OSError):
+        return datetime.fromtimestamp(int(ts) / 1000).strftime("%Y-%m-%d %H:%M:%S")
+    except (ValueError, OSError, TypeError):
         return str(ts)
 
 

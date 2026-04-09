@@ -142,6 +142,13 @@ DataMap MCP 使用三组 API：
 - "更新 order_id 列的描述为 'unique order identifier'"
 - "全局搜索 delivery_trajectory"
 
+## Changelog
+
+### v3.5.0
+
+- `update_table_info` 新增 `table_status` 参数，支持设置表生命周期状态（ACTIVE/MIGRATED/DEPRECATED/OFFLINE）
+- 新增 `batch_update_table_status.py` 批量更新表状态脚本（从 Migration List Google Sheet 提取表列表）
+
 ## 注意事项
 
 - Cookie 有效期约 30 分钟自动刷新（chrome-auth 内置 TTL 缓存），如遇 401 错误会自动重试刷新 Cookie

@@ -7,6 +7,7 @@ import { connectViaInspector, findSeaTalkPid, type ICdpClient } from './cdp.js';
 import { Bridge } from './bridge.js';
 import { spawnAgent, killAgent, listModels, loadMcpServers, type AgentProcess } from './acp.js';
 import { CdpProxy } from './cdp-proxy.js';
+import { AlarmManager, type WatchMessage, type PendingAlarm } from './alarm-manager.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WORKSPACE = process.env.WORKSPACE || path.resolve(__dirname, '../..');
@@ -435,7 +436,7 @@ async function main() {
   cdpProxy.setClient(client);
   await cdpProxy.start();
 
-  let bridge: Bridge;
+  let bridge: Bridge = undefined as unknown as Bridge;
 
   // ── ACP ──
 
@@ -665,9 +666,17 @@ async function main() {
       agent.proc.on('exit', (code) => {
         log(`ACP agent process exited (code=${code}), will respawn in 3s...`);
         agent = null;
-        setTimeout(() => {
+        bridge.sendToPanel({ type: 'status', connected: false, text: 'ACP 断开，重连中...' }).catch(() => {});
+        setTimeout(async () => {
           killOrphanAgentProcesses();
-          startAcp();
+          const ok = await startAcp();
+          if (ok) {
+            bridge.sendToPanel({ type: 'status', connected: true, text: 'Connected' }).catch(() => {});
+            bridge.sendToPanel({ type: 'mode', mode: defaultMode }).catch(() => {});
+            if (agent && agent.availableModels.length) {
+              bridge.sendToPanel({ type: 'models', models: agent.availableModels, currentModelId: agent.currentModelId }).catch(() => {});
+            }
+          }
         }, 3000);
       });
 
@@ -744,6 +753,139 @@ async function main() {
   let remoteProcessingActive = false;
   let remoteFrozen = false;
   const remoteMessageQueue: Array<Record<string, unknown>> = [];
+
+  // ── Alarm Auto-Reply ──
+
+  let alarmAgent: AgentProcess | null = null;
+  let alarmAgentSpawning = false;
+  let alarmAgentModelId = '';
+  let alarmAgentWorkspace = '';
+  let alarmTextCollector: { text: string } = { text: '' };
+  let alarmAgentLock: Promise<void> = Promise.resolve();
+
+  async function ensureAlarmAgent(workspace?: string, modelId?: string): Promise<AgentProcess> {
+    const desiredModel = modelId || '';
+    const desiredWorkspace = workspace || currentWorkspace;
+
+    const needRecycle = alarmAgent && (
+      alarmAgentModelId !== desiredModel ||
+      alarmAgentWorkspace !== desiredWorkspace
+    );
+
+    if (needRecycle && alarmAgent) {
+      const reasons: string[] = [];
+      if (alarmAgentModelId !== desiredModel) reasons.push(`model: ${alarmAgentModelId || 'default'} → ${desiredModel || 'default'}`);
+      if (alarmAgentWorkspace !== desiredWorkspace) reasons.push(`workspace: ${path.basename(alarmAgentWorkspace)} → ${path.basename(desiredWorkspace)}`);
+      log(`[alarm-agent] recycling (${reasons.join(', ')})`);
+      killAgent(alarmAgent.proc);
+      alarmAgent = null;
+    }
+
+    if (alarmAgent) return alarmAgent;
+    if (alarmAgentSpawning) {
+      while (alarmAgentSpawning) await new Promise((r) => setTimeout(r, 500));
+      if (alarmAgent) return alarmAgent;
+    }
+
+    alarmAgentSpawning = true;
+    try {
+      const alarmCallbacks = {
+        onTextChunk: (text: string) => { alarmTextCollector.text += text; },
+        onThoughtChunk: () => {},
+        onToolCall: () => {},
+        onModeUpdate: () => {},
+        onUsageUpdate: () => {},
+      };
+      alarmAgent = await spawnAgent({
+        workspacePath: desiredWorkspace,
+        callbacks: alarmCallbacks,
+        log: (msg: string) => log(`[alarm-agent] ${msg}`),
+        sessionMode: 'agent',
+        modelId: desiredModel || undefined,
+      });
+      alarmAgentModelId = desiredModel;
+      alarmAgentWorkspace = desiredWorkspace;
+      alarmAgent.proc.on('exit', (code) => {
+        log(`[alarm-agent] process exited (code=${code})`);
+        alarmAgent = null;
+      });
+      log(`[alarm] Agent spawned (model: ${desiredModel || 'default'}, workspace: ${path.basename(desiredWorkspace)})`);
+      return alarmAgent;
+    } finally {
+      alarmAgentSpawning = false;
+    }
+  }
+
+  async function promptAlarmAgent(promptText: string, workspace?: string, modelId?: string): Promise<string> {
+    let unlock: () => void;
+    const prev = alarmAgentLock;
+    alarmAgentLock = new Promise((r) => { unlock = r; });
+
+    await prev;
+    try {
+      const ag = await ensureAlarmAgent(workspace, modelId);
+      const collector = { text: '' };
+      alarmTextCollector = collector;
+      await ag.connection.prompt({
+        sessionId: ag.sessionId,
+        prompt: [{ type: 'text', text: promptText }] as any,
+      });
+      return collector.text.trim();
+    } finally {
+      unlock!();
+    }
+  }
+
+  async function investigateAlarm(alarm: PendingAlarm): Promise<string> {
+    log(`[alarm] investigating: ${alarm.sessionName} — "${alarm.text.substring(0, 80)}"`);
+    bridge.sendToPanel({ type: 'alarm_investigating', mid: alarm.mid, session: alarm.session, sessionName: alarm.sessionName }).catch(() => {});
+
+    const promptText = alarmManager.buildPrompt(alarm);
+    const sessionWorkspace = alarmManager.getSessionWorkspace(alarm.session);
+    const sessionModel = alarmManager.getSessionModelId(alarm.session);
+
+    const promptStart = Date.now();
+    let replyText = '';
+    try {
+      replyText = await promptAlarmAgent(promptText, sessionWorkspace, sessionModel);
+    } catch (e) {
+      log(`[alarm] agent prompt error: ${(e as Error).message}`);
+    }
+    const elapsed = Date.now() - promptStart;
+
+    if (!replyText) {
+      log('[alarm] agent returned empty reply, skipping send');
+      return '';
+    }
+
+    const durationStr = elapsed < 60_000
+      ? `${(elapsed / 1000).toFixed(1)}s`
+      : `${Math.floor(elapsed / 60_000)}m${Math.round((elapsed % 60_000) / 1000)}s`;
+
+    const formattedReply =
+      `**[Alarm Bot]** Auto-Investigation\n` +
+      `━━━━━━━━━━━━━━\n` +
+      `${replyText}\n\n` +
+      `━━━━━━━━━━━━━━\n` +
+      `*${durationStr} · ${alarm.sessionName}*`;
+
+    try {
+      const escapedText = JSON.stringify(formattedReply.substring(0, 500));
+      await client.evaluate(`window.__seatalkWatch && window.__seatalkWatch.addSentText(${escapedText})`);
+    } catch {}
+    await doSend(alarm.session, formattedReply, 'markdown', 'alarm-bot', alarm.mid);
+    log(`[alarm] reply sent to ${alarm.sessionName} (thread mid=${alarm.mid})`);
+    bridge.sendToPanel({ type: 'alarm_resolved', mid: alarm.mid, session: alarm.session, replyPreview: replyText.substring(0, 200) }).catch(() => {});
+    return replyText.substring(0, 200);
+  }
+
+  const alarmManager = new AlarmManager({
+    onInvestigate: investigateAlarm,
+    onStatusChange: (status) => {
+      bridge.sendToPanel({ type: 'alarm_status', ...status }).catch(() => {});
+    },
+    log,
+  });
 
   function startWatchListening() {
     if (!watchActive) {
@@ -1673,6 +1815,20 @@ async function main() {
           log(`watch: ${messages.length} new message(s)`);
           bridge.sendToPanel({ type: 'watch_messages', messages }).catch(() => {});
 
+          // Feed messages to AlarmManager for alarm detection
+          alarmManager.onNewMessages(messages.map((m) => ({
+            mid: (m.mid || '') as string,
+            session: (m.session || '') as string,
+            sessionName: (m.sessionName || '') as string,
+            sender: (m.sender || '') as string,
+            senderId: (m.senderId || '') as string,
+            text: (m.text || '') as string,
+            ts: (m.ts || 0) as number,
+            tag: (m.tag || '') as string,
+            isMention: !!m.isMention,
+            isSelfCommand: !!m.isSelfCommand,
+          })));
+
           const selfCmds = messages.filter((m) => !!m.isSelfCommand);
           for (const cmd of selfCmds) {
             const text = ((cmd.text || '') as string).trim();
@@ -1770,6 +1926,23 @@ async function main() {
         remoteLog('远程控制已关闭');
         bridge.sendToPanel({ type: 'watch_remote_status', active: false }).catch(() => {});
 
+      // ── Alarm events ──
+
+      } else if (data.type === 'alarm_toggle') {
+        const enabled = data.enabled as boolean | undefined;
+        alarmManager.toggle(enabled);
+
+      } else if (data.type === 'alarm_config_update') {
+        const config = data.config as Record<string, unknown>;
+        if (config) alarmManager.updateConfig(config);
+
+      } else if (data.type === 'alarm_cancel') {
+        const mid = data.mid as string;
+        if (mid) alarmManager.cancelAlarm(mid);
+
+      } else if (data.type === 'alarm_get_status') {
+        bridge.sendToPanel({ type: 'alarm_status', ...alarmManager.getStatus() }).catch(() => {});
+
       }
     });
   }
@@ -1813,6 +1986,7 @@ async function main() {
     // Always start watch listener on injection
     startWatchListening();
     bridge.sendToPanel({ type: 'watch_remote_status', active: remoteEnabled, status: remoteAgent ? 'ready' : 'off' }).catch(() => {});
+    bridge.sendToPanel({ type: 'alarm_status', ...alarmManager.getStatus() }).catch(() => {});
     if (remoteEnabled && !remoteAgent && !remoteAgentSpawning) {
       ensureRemoteAgent().catch((e) => {
         remoteLog(`自动启动 Remote Agent 失败: ${(e as Error).message}`, 'warn');
@@ -1893,7 +2067,16 @@ async function main() {
   }
 
   await setupCdpClient();
-  await startAcp();
+  const acpOk = await startAcp();
+  if (acpOk && agent) {
+    const ag = agent as AgentProcess;
+    bridge.sendToPanel({ type: 'status', connected: true, text: 'Connected' }).catch(() => {});
+    bridge.sendToPanel({ type: 'mode', mode: defaultMode }).catch(() => {});
+    if (ag.availableModels.length) {
+      bridge.sendToPanel({ type: 'models', models: ag.availableModels, currentModelId: ag.currentModelId }).catch(() => {});
+    }
+    bridge.sendToPanel({ type: 'workspace', path: currentWorkspace, workspaces: cachedWorkspaceList }).catch(() => {});
+  }
 
   // ── Silent update check (immediate on start, then every 10 min) ──
 
@@ -1954,8 +2137,14 @@ async function main() {
 
   function cleanupAndExit(code = 0) {
     log('shutting down...');
+    alarmManager.destroy();
     cdpProxy.stop();
     knownChildPids = getProcessTree();
+    if (alarmAgent) {
+      alarmAgent.proc.removeAllListeners('exit');
+      killAgent(alarmAgent.proc);
+      alarmAgent = null;
+    }
     if (agent) {
       agent.proc.removeAllListeners('exit');
       killAgent(agent.proc);
@@ -1972,6 +2161,9 @@ async function main() {
   process.on('SIGTERM', () => cleanupAndExit(0));
 
   process.on('exit', () => {
+    if (alarmAgent) {
+      try { alarmAgent.proc.kill('SIGKILL'); } catch {}
+    }
     if (agent) {
       try { agent.proc.kill('SIGKILL'); } catch {}
     }
