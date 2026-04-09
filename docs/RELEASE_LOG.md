@@ -6,6 +6,31 @@
 
 ---
 
+## v3.5.6 -- 2026-04-09 -- `feat`: Flink MCP 新增从表名反查上下游任务
+
+**提交者**: @tianyi.liang
+**Commit Type**: feat
+**修改模块**: MCP 工具
+
+### 变更说明
+- 新增 `search_flink_table_lineage` 工具：给定表名（Kafka topic / Hudi / ClickHouse 等），反向查找哪些 Flink 任务在读/写此表
+- 两步 API 调用：先通过 `/datalineage/tables/search` 搜索匹配的表获取 uniqueKey，再通过 `/datalineage/tables/applications` 查询上下游应用详情
+- 支持 7 种表类型：kafka / shopee_catalog (Hive/Hudi) / clickhouse / hbase / redis / elasticsearch / jdbc
+- 支持模糊搜索，匹配结果过多时提示用户缩小关键字范围
+
+### 测试情况
+
+| 测试项 | 结果 | 备注 |
+|--------|------|------|
+| Chrome 扩展加载正常 | N/A | |
+| MCP 工具连接正常 | N/A | |
+| SeaTalk Agent 启动+注入正常 | N/A | |
+| 修改的功能正常工作 | [OK] | 通过浏览器验证 API 响应结构 |
+| 已有功能未被破坏 | [OK] | 新增工具，不影响已有功能 |
+| 控制台无新增错误 | [OK] | |
+
+---
+
 ## v3.5.5 -- 2026-04-09 -- `feat`: diagnose_flink_app 接入 Keyhole + Grafana 全栈数据
 
 **提交者**: @tianyi.liang

@@ -729,6 +729,9 @@ npm start
 
 ## 更新日志
 
+### v3.5.6
+- 版本号同步（本次修改不涉及 SeaTalk Agent）
+
 ### v3.5.5
 - 版本号同步（本次修改不涉及 SeaTalk Agent）
 

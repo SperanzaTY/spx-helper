@@ -332,6 +332,9 @@ MCP 配置在 `~/.cursor/mcp.json`，新增或修改后需在 Cursor 设置中**
 
 ## 更新日志
 
+### v3.5.6
+- **Flink 表→任务反查**: 新增 `search_flink_table_lineage` 工具，给定表名反向查找上下游 Flink 任务，支持 7 种表类型
+
 ### v3.5.5
 - **Flink 一键诊断增强**: `diagnose_flink_app` 接入 Keyhole (Checkpoint 健康 + Runtime 异常) 和 Grafana (背压/Kafka Lag/CPU/Heap)，从 6 个数据源扩展到 9 个，新增自动阈值判断和优化建议
 

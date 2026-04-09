@@ -1019,6 +1019,93 @@ def get_flink_sla_dr(app_id: int) -> str:
         return _result({"error": str(e)})
 
 
+@mcp.tool()
+def search_flink_table_lineage(
+    table_name: str,
+    table_type: str = "kafka",
+    project_name: str = "",
+) -> str:
+    """从表名反查关联的 Flink 任务（哪些任务在读/写这张表）。
+
+    两步流程：先搜索表获取 uniqueKey，再查询关联的上下游应用。
+
+    Args:
+        table_name: 表名关键字（如 Kafka topic 名、Hudi 表名，支持模糊搜索）
+        table_type: 表类型，可选值: kafka / shopee_catalog (Hive/Hudi) /
+                    clickhouse / hbase / redis / elasticsearch / jdbc。默认 kafka
+        project_name: 项目名（如 spx_mart）。不传则从搜索结果中自动提取
+
+    Returns:
+        匹配的表及其上下游 Flink 应用列表（Write Applications / Read Applications）
+    """
+    try:
+        search_resp = _request("GET", "/datalineage/tables/search",
+                               params={"keyword": table_name, "tableType": table_type})
+        tables = _get_data(search_resp) or []
+        if not tables:
+            return _result({
+                "error": f"未找到匹配 '{table_name}' (type={table_type}) 的表",
+                "hint": "仅在 Flink 平台上使用过的表可被搜到。"
+                        "可尝试其他 tableType: kafka / shopee_catalog / clickhouse / hbase / redis / elasticsearch / jdbc",
+            })
+
+        if len(tables) > 20:
+            return _result({
+                "matchCount": len(tables),
+                "message": f"匹配到 {len(tables)} 张表，请提供更精确的关键字",
+                "preview": [t.get("tableName") for t in tables[:15]],
+            })
+
+        results = []
+        for tbl in tables[:10]:
+            edge_name = tbl.get("edgeName", "")
+            tbl_name = tbl.get("tableName", "")
+            proj = project_name or tbl_name.split("__")[0] if "__" in tbl_name else ""
+            if not edge_name or not proj:
+                results.append({"table": tbl_name, "error": "缺少 edgeName 或 projectName"})
+                continue
+
+            try:
+                lineage_resp = _request("GET", "/datalineage/tables/applications",
+                                        params={
+                                            "uniqueKey": edge_name,
+                                            "tableType": table_type,
+                                            "projectName": proj,
+                                        })
+                lineage_data = _get_data(lineage_resp) or {}
+
+                apps = lineage_data.get("applications", [])
+                app_list = [{
+                    "id": a.get("id"),
+                    "name": a.get("name"),
+                    "type": a.get("jobType"),
+                    "status": a.get("status"),
+                    "project": a.get("projectName"),
+                    "owner": a.get("email"),
+                    "importance": a.get("importanceLevel"),
+                } for a in apps]
+
+                entry: Dict[str, Any] = {
+                    "table": tbl_name,
+                    "tableType": table_type,
+                    "idcRegion": tbl.get("IDC Region"),
+                    "upstreamCount": lineage_data.get("upstreamCount", 0),
+                    "downstreamCount": lineage_data.get("downstreamCount", 0),
+                    "upstream": [{"src": e.get("src"), "dst": e.get("dst")}
+                                 for e in (lineage_data.get("upstream") or [])],
+                    "downstream": [{"src": e.get("src"), "dst": e.get("dst")}
+                                   for e in (lineage_data.get("downstream") or [])],
+                    "applications": app_list,
+                }
+                results.append(entry)
+            except Exception as e:
+                results.append({"table": tbl_name, "error": str(e)})
+
+        return _result({"keyword": table_name, "tableType": table_type, "results": results})
+    except Exception as e:
+        return _result({"error": str(e)})
+
+
 # ═══════════════════════════════════════════════════════════════════
 # Keyhole / Grafana 基础设施
 # ═══════════════════════════════════════════════════════════════════
