@@ -144,6 +144,12 @@ DataMap MCP 使用三组 API：
 
 ## Changelog
 
+### v3.5.3
+
+- 所有读取工具新增 `idc_region` 参数：传 `"USEast"` 可查询 USEast 区域的表元数据（如 BR 表）
+- `update_datamap` 的 dry_run 预览也使用正确 IDC 的 qualifiedName 读取当前值
+- 默认空值 = SG，完全向后兼容
+
 ### v3.5.2
 
 - 自动解析 IDC 区域差异：查询非 SG 表（如 BR 表，qualifiedName 为 `prod#USEast`）时，若默认 `hive@prod@db@table` 查不到，自动搜索正确 qualifiedName 并重试

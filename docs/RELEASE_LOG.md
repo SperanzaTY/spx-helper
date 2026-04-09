@@ -6,6 +6,32 @@
 
 ---
 
+## v3.5.3 -- 2026-04-09 -- `fix`: DataMap MCP 读取工具支持 IDC 区域
+
+**提交者**: @tianyi.liang
+**Commit Type**: fix
+**修改模块**: MCP 工具
+
+### 变更说明
+- DataMap MCP 所有读取工具新增 `idc_region` 参数，支持查询非 SG 区域（如 USEast）的表元数据
+- 修复之前读取 API 始终返回 SG 版本数据的问题：`_qualified_name` 新增 `idc` 参数，生成 `hive@prod#USEast@db@table` 格式 QN
+- `update_datamap` 的 dry_run 预览也使用正确 IDC QN 读取当前值
+- 影响工具：get_table_info, get_table_detail, get_column_detail, get_partition_columns, get_table_usage, get_table_lineage, get_table_score, get_table_sla, get_table_audit_log
+- 完全向后兼容：不传 `idc_region` 时行为与之前一致（默认查询 SG）
+
+### 测试情况
+
+| 测试项 | 结果 | 备注 |
+|--------|------|------|
+| Chrome 扩展加载正常 | N/A | |
+| MCP 工具连接正常 | OK | SG/USEast 对比验证通过 |
+| SeaTalk Agent 启动+注入正常 | N/A | |
+| 修改的功能正常工作 | OK | QN/hdfsPath/lastEditTime 均不同 |
+| 已有功能未被破坏 | OK | 默认不传 idc_region 行为一致 |
+| 控制台无新增错误 | OK | |
+
+---
+
 ## v3.5.2 -- 2026-04-09 -- `feat`: Alarm Bot 发送者授权安全加固
 
 **提交者**: @tianyi.liang

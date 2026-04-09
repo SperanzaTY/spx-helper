@@ -332,6 +332,9 @@ MCP 配置在 `~/.cursor/mcp.json`，新增或修改后需在 Cursor 设置中**
 
 ## 更新日志
 
+### v3.5.3
+- **DataMap MCP**: 所有读取工具新增 `idc_region` 参数，支持查询 USEast 等非 SG 区域表的元数据（如 `get_table_info("xxx_br", idc_region="USEast")`）
+
 ### v3.5.2
 - **DataMap MCP**: 自动解析 IDC 区域差异 -- 查询非 SG 表（如 BR 表，qualifiedName 为 `prod#USEast`）时，若默认 QN 查不到，自动搜索正确 qualifiedName 并重试，结果带缓存
 

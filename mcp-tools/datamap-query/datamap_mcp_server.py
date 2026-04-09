@@ -204,14 +204,15 @@ def _open_api_post(path: str, payload: dict) -> dict:
 
 # ──────────────────────────── Helpers ────────────────────────────
 
-def _qualified_name(database: str, table: str, engine: str = "hive", env: str = "prod") -> str:
-    """Build DataMap qualifiedName: engine@env@database@table (raw format for API calls)."""
-    return f"{engine}@{env}@{database}@{table}"
+def _qualified_name(database: str, table: str, engine: str = "hive", env: str = "prod", idc: str = "") -> str:
+    """Build DataMap qualifiedName: engine@env[#idc]@database@table."""
+    env_part = f"{env}#{idc}" if idc else env
+    return f"{engine}@{env_part}@{database}@{table}"
 
 
-def _encode_qualified_name(database: str, table: str, engine: str = "hive", env: str = "prod") -> str:
+def _encode_qualified_name(database: str, table: str, engine: str = "hive", env: str = "prod", idc: str = "") -> str:
     """Base64-encode a qualifiedName (used for DataMap page URLs, not API calls)."""
-    return base64.b64encode(_qualified_name(database, table, engine, env).encode()).decode()
+    return base64.b64encode(_qualified_name(database, table, engine, env, idc).encode()).decode()
 
 
 def _parse_table_ref(table_ref: str) -> tuple:
@@ -228,7 +229,7 @@ mcp = FastMCP("DataMap MCP Server")
 
 
 @mcp.tool()
-def get_table_info(table_ref: str, engine: str = "HIVE") -> str:
+def get_table_info(table_ref: str, engine: str = "HIVE", idc_region: str = "") -> str:
     """
     获取 DataMap 中表的基本信息（描述、Owner、分区、存储格式等）。
 
@@ -236,14 +237,15 @@ def get_table_info(table_ref: str, engine: str = "HIVE") -> str:
         table_ref: 表名，格式为 "database.table" 或 "table"（默认 database=spx_mart）
                    例如: "spx_mart.dwd_spx_spsso_delivery_trajectory_di_br"
         engine: 引擎类型，默认 "HIVE"，也支持 "CLICKHOUSE"、"STARROCKS"
+        idc_region: IDC 区域，默认空=SG。传 "USEast" 查询 BR 表在 USEast 的版本
 
     示例:
         get_table_info("spx_mart.dwd_spx_spsso_delivery_trajectory_di_br")
-        get_table_info("dwd_spx_fleet_order_di_br")
+        get_table_info("dwd_spx_fleet_order_tracking_ri_br", idc_region="USEast")
     """
     try:
         database, table = _parse_table_ref(table_ref)
-        qn = _qualified_name(database, table)
+        qn = _qualified_name(database, table, idc=idc_region)
         data = _request("GET", f"/dataWarehouse/{engine}/info", params={"qualifiedName": qn})
         actual_qn = _qn_cache.get(f"{database}.{table}", qn)
         qn_b64 = base64.b64encode(actual_qn.encode()).decode()
@@ -291,7 +293,7 @@ def get_table_info(table_ref: str, engine: str = "HIVE") -> str:
 
 
 @mcp.tool()
-def get_table_detail(table_ref: str, engine: str = "HIVE") -> str:
+def get_table_detail(table_ref: str, engine: str = "HIVE", idc_region: str = "") -> str:
     """
     获取 DataMap 中表的扩展详情（含完整字段列表、分区信息等）。
 
@@ -300,13 +302,14 @@ def get_table_detail(table_ref: str, engine: str = "HIVE") -> str:
     参数:
         table_ref: 表名，格式为 "database.table" 或 "table"
         engine: 引擎类型，默认 "HIVE"
+        idc_region: IDC 区域，默认空=SG。传 "USEast" 查询 USEast 版本
 
     示例:
         get_table_detail("spx_mart.dwd_spx_spsso_delivery_trajectory_di_br")
     """
     try:
         database, table = _parse_table_ref(table_ref)
-        qn = _qualified_name(database, table)
+        qn = _qualified_name(database, table, idc=idc_region)
         data = _request("GET", f"/dataWarehouse/{engine}/expandDetail", params={"qualifiedName": qn})
 
         result = {
@@ -320,7 +323,7 @@ def get_table_detail(table_ref: str, engine: str = "HIVE") -> str:
 
 
 @mcp.tool()
-def get_column_detail(table_ref: str, column_name: str, engine: str = "HIVE") -> str:
+def get_column_detail(table_ref: str, column_name: str, engine: str = "HIVE", idc_region: str = "") -> str:
     """
     获取表中某一列的详细信息（类型、描述、标签、敏感度等级等）。
 
@@ -328,13 +331,14 @@ def get_column_detail(table_ref: str, column_name: str, engine: str = "HIVE") ->
         table_ref: 表名
         column_name: 列名
         engine: 引擎类型，默认 "HIVE"
+        idc_region: IDC 区域，默认空=SG。传 "USEast" 查询 USEast 版本
 
     示例:
         get_column_detail("spx_mart.dwd_spx_spsso_delivery_trajectory_di_br", "order_id")
     """
     try:
         database, table = _parse_table_ref(table_ref)
-        qn = _qualified_name(database, table)
+        qn = _qualified_name(database, table, idc=idc_region)
         data = _request("GET", f"/dataWarehouse/{engine}/columnDetail", params={
             "qualifiedName": qn,
             "columnName": column_name,
@@ -350,20 +354,21 @@ def get_column_detail(table_ref: str, column_name: str, engine: str = "HIVE") ->
 
 
 @mcp.tool()
-def get_partition_columns(table_ref: str, engine: str = "HIVE") -> str:
+def get_partition_columns(table_ref: str, engine: str = "HIVE", idc_region: str = "") -> str:
     """
     获取表的分区字段列表。
 
     参数:
         table_ref: 表名
         engine: 引擎类型，默认 "HIVE"
+        idc_region: IDC 区域，默认空=SG。传 "USEast" 查询 USEast 版本
 
     示例:
         get_partition_columns("spx_mart.dwd_spx_spsso_delivery_trajectory_di_br")
     """
     try:
         database, table = _parse_table_ref(table_ref)
-        qn = _qualified_name(database, table)
+        qn = _qualified_name(database, table, idc=idc_region)
         data = _request("GET", f"/dataWarehouse/{engine}/partitionColumns", params={"qualifiedName": qn})
         result = {
             "table": f"{database}.{table}",
@@ -375,20 +380,21 @@ def get_partition_columns(table_ref: str, engine: str = "HIVE") -> str:
 
 
 @mcp.tool()
-def get_table_usage(table_ref: str, engine: str = "HIVE") -> str:
+def get_table_usage(table_ref: str, engine: str = "HIVE", idc_region: str = "") -> str:
     """
     获取表的使用统计（查询频次、热度评分等）。
 
     参数:
         table_ref: 表名
         engine: 引擎类型，默认 "HIVE"
+        idc_region: IDC 区域，默认空=SG。传 "USEast" 查询 USEast 版本
 
     示例:
         get_table_usage("spx_mart.dwd_spx_spsso_delivery_trajectory_di_br")
     """
     try:
         database, table = _parse_table_ref(table_ref)
-        qn = _qualified_name(database, table)
+        qn = _qualified_name(database, table, idc=idc_region)
         data = _request("GET", f"/dataWarehouse/{engine}/usage", params={"qualifiedName": qn})
         result = {
             "table": f"{database}.{table}",
@@ -400,20 +406,21 @@ def get_table_usage(table_ref: str, engine: str = "HIVE") -> str:
 
 
 @mcp.tool()
-def get_table_lineage(table_ref: str, engine: str = "HIVE") -> str:
+def get_table_lineage(table_ref: str, engine: str = "HIVE", idc_region: str = "") -> str:
     """
     获取表的数据血缘关系（上下游表和任务依赖）。
 
     参数:
         table_ref: 表名
         engine: 引擎类型，默认 "HIVE"
+        idc_region: IDC 区域，默认空=SG。传 "USEast" 查询 USEast 版本
 
     示例:
         get_table_lineage("spx_mart.dwd_spx_spsso_delivery_trajectory_di_br")
     """
     try:
         database, table = _parse_table_ref(table_ref)
-        qn = _qualified_name(database, table)
+        qn = _qualified_name(database, table, idc=idc_region)
         data = _request("GET", "/lineage/v2", params={"qualifiedName": qn})
 
         if isinstance(data, dict):
@@ -490,7 +497,7 @@ def get_table_lineage(table_ref: str, engine: str = "HIVE") -> str:
 
 
 @mcp.tool()
-def get_table_score(table_ref: str, score_type: str = "completeness", engine: str = "HIVE") -> str:
+def get_table_score(table_ref: str, score_type: str = "completeness", engine: str = "HIVE", idc_region: str = "") -> str:
     """
     获取表的质量评分。
 
@@ -498,14 +505,14 @@ def get_table_score(table_ref: str, score_type: str = "completeness", engine: st
         table_ref: 表名
         score_type: 评分类型，"completeness"（完整度）或 "popularity"（热度）
         engine: 引擎类型，默认 "HIVE"
+        idc_region: IDC 区域，默认空=SG。传 "USEast" 查询 USEast 版本
 
     示例:
         get_table_score("spx_mart.dwd_spx_spsso_delivery_trajectory_di_br", "completeness")
-        get_table_score("spx_mart.dwd_spx_spsso_delivery_trajectory_di_br", "popularity")
     """
     try:
         database, table = _parse_table_ref(table_ref)
-        qn = _qualified_name(database, table)
+        qn = _qualified_name(database, table, idc=idc_region)
         data = _request("GET", f"/dataWarehouse/{engine}/score/{score_type}", params={"qualifiedName": qn})
         result = {
             "table": f"{database}.{table}",
@@ -518,20 +525,21 @@ def get_table_score(table_ref: str, score_type: str = "completeness", engine: st
 
 
 @mcp.tool()
-def get_table_sla(table_ref: str, engine: str = "HIVE") -> str:
+def get_table_sla(table_ref: str, engine: str = "HIVE", idc_region: str = "") -> str:
     """
     获取表关联的 SLA 信息。
 
     参数:
         table_ref: 表名
         engine: 引擎类型，默认 "HIVE"
+        idc_region: IDC 区域，默认空=SG。传 "USEast" 查询 USEast 版本
 
     示例:
         get_table_sla("spx_mart.dwd_spx_spsso_delivery_trajectory_di_br")
     """
     try:
         database, table = _parse_table_ref(table_ref)
-        qn = _qualified_name(database, table)
+        qn = _qualified_name(database, table, idc=idc_region)
         data = _request("GET", f"/dataWarehouse/{engine}/relatedSlas", params={"qualifiedName": qn})
         result = {
             "table": f"{database}.{table}",
@@ -671,7 +679,7 @@ def search_global(keyword: str) -> str:
 
 
 @mcp.tool()
-def get_table_audit_log(table_ref: str, engine: str = "HIVE", page_size: int = 20) -> str:
+def get_table_audit_log(table_ref: str, engine: str = "HIVE", page_size: int = 20, idc_region: str = "") -> str:
     """
     获取表的变更审计日志。
 
@@ -679,13 +687,14 @@ def get_table_audit_log(table_ref: str, engine: str = "HIVE", page_size: int = 2
         table_ref: 表名
         engine: 引擎类型，默认 "HIVE"
         page_size: 返回条数，默认 20
+        idc_region: IDC 区域，默认空=SG。传 "USEast" 查询 USEast 版本
 
     示例:
         get_table_audit_log("spx_mart.dwd_spx_spsso_delivery_trajectory_di_br")
     """
     try:
         database, table = _parse_table_ref(table_ref)
-        qn = _qualified_name(database, table)
+        qn = _qualified_name(database, table, idc=idc_region)
         data = _request("GET", f"/dataWarehouse/{engine}/auditLog", params={
             "qualifiedName": qn,
             "version": 1,
@@ -759,7 +768,8 @@ def update_datamap(
     """
     try:
         database, table = _parse_table_ref(table_ref)
-        qn = _qualified_name(database, table)
+        idc_for_qn = "" if idc_region == "SG" else idc_region
+        qn = _qualified_name(database, table, idc=idc_for_qn)
 
         try:
             body = json.loads(payload)
