@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List
 
 import requests
-from chrome_auth import get_auth
+from chrome_auth import get_auth, AuthResult
 from chrome_auth.diagnostic import cookie_diagnostic as _cookie_diagnostic
 from mcp.server.fastmcp import FastMCP
 
@@ -27,12 +27,21 @@ logger = logging.getLogger(__name__)
 DOMAIN = "datasuite.shopee.io"
 DATA_INFRA_DOMAIN = "data-infra.shopee.io"
 
+_last_auth: Optional[AuthResult] = None
 
-def _load_cookies(force: bool = False) -> Dict[str, str]:
-    result = get_auth(DOMAIN, force=force)
+
+def _load_cookies(force: bool = False, auth_failed: bool = False) -> Dict[str, str]:
+    global _last_auth
+    result = get_auth(DOMAIN, force=force, auth_failed=auth_failed)
+    _last_auth = result
     if result.ok:
         logger.info(f"[Auth] DataSuite cookies via {result.source} ({len(result.cookies)} cookies)")
     return result.cookies
+
+
+def _diag(cookies: Dict[str, str]) -> str:
+    expires_at = _last_auth.expires_at if _last_auth else None
+    return _cookie_diagnostic(cookies, expires_at=expires_at)
 
 
 # ──────────────────────────── HTTP 客户端 ────────────────────────────
@@ -95,14 +104,13 @@ def _request(method: str, path: str, params: dict = None, json_body: dict = None
             if resp.status_code in (401, 403):
                 if attempt < MAX_RETRIES:
                     logger.warning(f"{resp.status_code} 重试中，刷新 cookie...")
-                    cookies = _load_cookies(force=True)
+                    cookies = _load_cookies(force=True, auth_failed=True)
                     if "CSRF-TOKEN" in cookies:
                         headers["x-csrf-token"] = cookies["CSRF-TOKEN"]
                     continue
-                diag = _cookie_diagnostic(cookies)
                 raise RuntimeError(
                     f"请求 {path} 失败: {resp.status_code}\n"
-                    f"Cookie 诊断: {diag}\n"
+                    f"Cookie 诊断: {_diag(cookies)}\n"
                     f"这通常是 Chrome 登录态问题，不是代码 bug。请在 Chrome 中打开 {BASE_URL} 确认已登录。"
                 )
             resp.raise_for_status()

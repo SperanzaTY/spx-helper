@@ -6,6 +6,50 @@
 
 ---
 
+## v3.5.9 -- 2026-04-09 -- `feat`: chrome-auth Cookie 过期自动检测与 SSO 静默刷新
+
+**提交者**: @tianyi.liang
+**Commit Type**: feat
+**修改模块**: MCP 工具（chrome-auth、flink-query、scheduler-query、datamap-query）、Cursor Skill（flink-alert-triage、spx-bug-trace）
+
+### 变更说明
+- [MCP] chrome-auth 新增 Cookie 过期感知：从 CDP 和磁盘读取 Cookie 的 `expires` 字段，缓存 TTL 跟随实际过期时间，不再返回已知过期的 Cookie
+- [MCP] chrome-auth 新增自动 SSO 刷新：Cookie 过期时自动通过 AppleScript 控制 Chrome 打开 DataSuite 页面触发 SSO 静默续期（macOS），优先尝试 CDP 后台标签页刷新
+- [MCP] `get_auth()` 新增 `auth_failed` 参数：MCP 工具收到 401/403 时传入 `auth_failed=True`，无条件触发自动刷新（不受 Cookie 过期时间限制），修复了之前"server 已拒绝但 cookie 未过期导致不触发刷新"的设计缺陷
+- [MCP] 主动刷新阈值从 60 秒扩大到 5 分钟（`_EXPIRY_THRESHOLD = 300`），更早发现即将过期的 Cookie
+- [MCP] flink/scheduler/datamap 三个 MCP 工具统一使用 `_diag()` 辅助函数，诊断信息自动包含 `expires_at` 过期时间
+- [MCP] AuthResult 新增 `expires_at` 和 `expires_soon` 字段，下游 MCP 可感知认证剩余有效期
+- [MCP] cookie_diagnostic 增强：支持传入 `expires_at` 参数，输出精确的过期时间和操作建议
+- [MCP] 新增 `invalidate_domain()` 函数，一次清除指定域名的全部缓存
+- [MCP] TTLCache.set() 修复 `ttl=0` 边界 case（使用 `if ttl is not None` 替代 `ttl or`）
+- [MCP] Flink MCP Logify 查询增强认证重试逻辑（SSE 层级 auth error 检测）
+- [Skill] 新增 flink-alert-triage Skill：Flink 告警自动分诊（L1 快速简报 / L2 深度诊断 / L3 恢复操作），含 alarm-bot-prompt 配置
+- [Skill] spx-bug-trace 更新：补充 Flink MCP 工具引用，Cookie 认证段落改为自动刷新优先
+
+### 测试情况
+
+| 测试项 | 结果 | 备注 |
+|--------|------|------|
+| Chrome 扩展加载正常 | N/A | 本次未修改扩展 |
+| MCP 工具连接正常 | N/A | chrome-auth 是库，不独立运行 |
+| SeaTalk Agent 启动+注入正常 | N/A | 本次未修改 Agent |
+| AuthResult 新字段兼容性 | [OK] | expires_at/expires_soon 为可选字段，不破坏下游 |
+| Cookie 过期检测 | [OK] | 正确读取 CDP/磁盘 expires 字段，缓存 TTL 跟随实际过期 |
+| AppleScript 自动刷新 | [OK] | CDP 失败后降级到 AppleScript，成功刷新 Cookie |
+| auth_failed=True 触发刷新 | [OK] | 即使 Cookie 未过期，auth_failed=True 也会无条件触发 SSO 刷新 |
+| Cooldown 防频繁刷新 | [OK] | 60 秒内不重复刷新 |
+| _diag() 包含 expires_at | [OK] | 诊断信息正确输出过期时间 |
+| cookie_diagnostic 增强 | [OK] | 过期/即将过期/齐全三种情况输出正确 |
+| Flink API 调用验证 | [OK] | 刷新后的 Cookie 通过真实 API 调用验证 |
+| 已有功能未被破坏 | [OK] | get_cookies/get_auth 公开接口向后兼容 |
+
+### 特别注意
+- AppleScript 刷新时 Chrome 会短暂闪现一个标签页（约 8 秒后自动关闭）
+- 仅当 SSO 主会话过期（需输密码/MFA）时才需手动登录
+- 非 macOS 系统不支持 AppleScript 刷新，降级为提示手动操作
+
+---
+
 ## v3.5.8 -- 2026-04-09 -- `feat`: Flink MCP 新增 Logify 日志直查工具
 
 **提交者**: @tianyi.liang

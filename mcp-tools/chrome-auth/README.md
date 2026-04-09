@@ -106,6 +106,7 @@ if result.ok:
 - `header_name` — 使用 `cdp_header` 策略时要拦截的 Header 名（默认 `"Authorization"`）
 - `cdp_port` — CDP 端口（默认自动检测 9222 / 19222）
 - `force` — 跳过缓存
+- `auth_failed` — 调用方收到 401/403 时设为 True，无条件触发自动刷新（不受 Cookie 过期时间限制）
 - `ttl` — 缓存有效期
 
 **返回 `AuthResult`：**
@@ -116,7 +117,25 @@ class AuthResult:
     headers: Dict[str, str]   # 认证 Header
     token: Optional[str]      # Token 字符串
     source: str               # 来源（如 "cookie_db"、"cdp_cookie"、"cookie_db+cdp_cookie"）
+    expires_at: Optional[float]  # 最早 Cookie 过期时间（Unix timestamp）
     ok: bool                  # 是否获取到有效认证
+    expires_soon: bool        # Cookie 是否在 5 分钟内过期
+```
+
+**自动刷新**：`get_auth` 在以下两种情况自动尝试 SSO 静默续期：
+1. Cookie 即将过期（剩余 < 5 分钟）— 主动刷新
+2. 调用方传入 `auth_failed=True`（收到 401/403）— 无条件刷新
+
+刷新链路：先尝试 CDP 导航，失败则降级为 AppleScript 控制 Chrome 打开 DataSuite 页面触发 SSO。刷新成功后重新读取 Cookie，对调用方透明。每个域名有 60 秒冷却期防止频繁刷新。
+
+### `invalidate_domain(domain)`
+
+清除指定域名的所有缓存数据（Cookie + 过期信息）。
+
+```python
+from chrome_auth import invalidate_domain
+
+invalidate_domain("datasuite.shopee.io")  # 清除该域名的全部缓存
 ```
 
 ### `get_cdp_cookies(url_pattern, *, cdp_port=None, force=False, ttl=None)`
@@ -164,14 +183,15 @@ get_cache().clear()       # 清除所有缓存
 get_cache().invalidate("cookie:datasuite.shopee.io")  # 清除特定缓存
 ```
 
-### `cookie_diagnostic(cookies)`
+### `cookie_diagnostic(cookies, *, expires_at=None)`
 
-根据当前读到的 Cookie 字典生成诊断说明（供 MCP 在 401 时展示）。当缺少 `DATA-SUITE-AUTH-userToken-v4` 时，会附带 **macOS Chrome Cookie 加密**与 **远程调试**说明。
+根据当前读到的 Cookie 字典和过期时间生成诊断说明（供 MCP 在 401 时展示）。传入 `expires_at`（来自 `AuthResult.expires_at`）可获得精确的过期诊断。
 
 ```python
 from chrome_auth import cookie_diagnostic
 
-print(cookie_diagnostic(result.cookies))
+print(cookie_diagnostic(result.cookies, expires_at=result.expires_at))
+# 例: "Cookie 已于 14:30:00 过期（10 分钟前），请在 Chrome 中打开 https://datasuite.shopee.io 刷新登录"
 ```
 
 ---
@@ -225,16 +245,28 @@ mcp-tools/
 
 import json
 import requests
-from chrome_auth import get_cookies
+from typing import Dict, Optional
+from chrome_auth import get_auth, AuthResult
+from chrome_auth.diagnostic import cookie_diagnostic
 from mcp.server.fastmcp import FastMCP
 
 mcp = FastMCP("Your MCP Server")
 
 DOMAIN = "your-platform.example.com"
 BASE_URL = f"https://{DOMAIN}"
+MAX_RETRIES = 2
 
-def _load_cookies(force=False):
-    return get_cookies(domain=DOMAIN, force=force)
+_last_auth: Optional[AuthResult] = None
+
+def _load_cookies(force=False, auth_failed=False) -> Dict[str, str]:
+    global _last_auth
+    result = get_auth(DOMAIN, force=force, auth_failed=auth_failed)
+    _last_auth = result
+    return result.cookies
+
+def _diag(cookies: Dict[str, str]) -> str:
+    expires_at = _last_auth.expires_at if _last_auth else None
+    return cookie_diagnostic(cookies, expires_at=expires_at)
 
 def _request(method, path, **kwargs):
     cookies = _load_cookies()
@@ -242,15 +274,17 @@ def _request(method, path, **kwargs):
         "x-csrf-token": cookies.get("CSRF-TOKEN", ""),
         "accept": "application/json",
     }
-    resp = requests.request(method, BASE_URL + path,
-                            cookies=cookies, headers=headers, **kwargs)
-    if resp.status_code in (401, 403):
-        cookies = _load_cookies(force=True)
-        headers["x-csrf-token"] = cookies.get("CSRF-TOKEN", "")
+    for attempt in range(MAX_RETRIES + 1):
         resp = requests.request(method, BASE_URL + path,
                                 cookies=cookies, headers=headers, **kwargs)
-    resp.raise_for_status()
-    return resp.json()
+        if resp.status_code in (401, 403):
+            if attempt < MAX_RETRIES:
+                cookies = _load_cookies(force=True, auth_failed=True)
+                headers["x-csrf-token"] = cookies.get("CSRF-TOKEN", "")
+                continue
+            raise RuntimeError(f"{resp.status_code}\n{_diag(cookies)}")
+        resp.raise_for_status()
+        return resp.json()
 
 @mcp.tool()
 def query_something(keyword: str) -> str:
@@ -338,9 +372,13 @@ cookies = get_cookies("app.example.com", parent_domain="example.com")
 chrome-auth/
   pyproject.toml              # 包定义和依赖
   chrome_auth/
-    __init__.py               # 统一入口：get_auth, get_cookies, ...
-    cookie_provider.py        # 策略1: 读 Chrome Cookie 数据库
-    cdp_provider.py           # 策略2/3/4: CDP 相关能力
+    __init__.py               # 统一入口：get_auth, invalidate_domain, ...
+    cookie_provider.py        # 策略1: 读 Chrome Cookie 数据库（含过期时间感知）
+    cdp_provider.py           # 策略2/3/4: CDP + AppleScript 自动刷新
     cache.py                  # 线程安全 TTL 缓存
-    types.py                  # AuthResult 数据结构
+    types.py                  # AuthResult 数据结构（含 expires_at）
+    diagnostic.py             # Cookie 过期诊断
+  scripts/
+    start_chrome_remote_debug.sh  # 以远程调试端口启动 Chrome
+    verify_datasuite_auth.py      # 验证 DataSuite 认证状态
 ```

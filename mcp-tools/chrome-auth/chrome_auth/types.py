@@ -1,5 +1,6 @@
 """Shared type definitions for chrome-auth."""
 
+import time
 from dataclasses import dataclass, field
 from typing import Dict, Optional
 
@@ -12,7 +13,15 @@ class AuthResult:
     headers: Dict[str, str] = field(default_factory=dict)
     token: Optional[str] = None
     source: str = ""
+    expires_at: Optional[float] = None
 
     @property
     def ok(self) -> bool:
         return bool(self.cookies or self.headers or self.token)
+
+    @property
+    def expires_soon(self) -> bool:
+        """True if cookies expire within 5 minutes."""
+        if self.expires_at is None:
+            return False
+        return self.expires_at - time.time() < 300

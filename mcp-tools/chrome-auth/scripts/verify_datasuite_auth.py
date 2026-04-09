@@ -21,9 +21,13 @@ def main() -> int:
     print("get_auth source:", auth.source)
     print("cookie count:", len(auth.cookies))
     print("has DATA-SUITE-AUTH-userToken-v4:", "DATA-SUITE-AUTH-userToken-v4" in auth.cookies)
+    if auth.expires_at:
+        import time
+        print(f"expires_at: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(auth.expires_at))}")
+        print(f"expires_soon: {auth.expires_soon}")
     print()
     print("--- diagnostic ---")
-    print(cookie_diagnostic(auth.cookies))
+    print(cookie_diagnostic(auth.cookies, expires_at=auth.expires_at))
     print()
 
     url = f"https://{domain}/flink/api/v2/applications/741498"

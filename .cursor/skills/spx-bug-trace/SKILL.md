@@ -46,6 +46,16 @@ git pull origin release
 | `get_flink_metrics` / `get_flink_latency` (flink-query MCP) | 查询 Flink 监控指标（Kafka Lag、CPU/内存、Checkpoint、背压） |
 | `get_flink_lineage` (flink-query MCP) | 获取 Flink 数据血缘（Source/Lookup/Sink 表） |
 | `get_flink_checkpoints` (flink-query MCP) | 获取 Checkpoint 详细统计（失败原因、耗时、大小） |
+| `query_flink_logs` (flink-query MCP) | 直接查询 Flink 应用的 Logify 日志内容，无需打开浏览器（注意 Logify 认证独立于 DataSuite） |
+| `get_flink_log_url` (flink-query MCP) | 生成 Flink 应用的 Logify 日志链接 |
+| `get_flink_alarm_log` (flink-query MCP) | 获取 Flink 应用的告警日志（告警名称、内容、接收者、通知渠道） |
+| `get_flink_resource_estimation` (flink-query MCP) | 资源调优建议：建议并行度、CPU/内存使用、伸缩历史 |
+| `get_flink_latency_analysis` (flink-query MCP) | 延迟根因分析（含异常诊断、系统指标、热力图） |
+| `search_flink_table_lineage` (flink-query MCP) | **从表名/topic 名反查关联的 Flink 任务**（比 search_flink_apps 更精确，推荐优先使用） |
+| `get_flink_graph_metrics` (flink-query MCP) | 算子级指标，用于定位瓶颈算子（吞吐、延迟、背压） |
+| `get_flink_vertices` (flink-query MCP) | 算子拓扑：各算子的并行度和运行状态 |
+| `get_flink_taskmanagers` (flink-query MCP) | TaskManager 列表和资源详情（CPU/内存/磁盘/Slot） |
+| `get_flink_job_config` (flink-query MCP) | 运行时配置：并行度、重启策略、Checkpoint 配置、用户自定义参数 |
 | `confluence_search` / `confluence_get_page` / `confluence_get_page_children` (mcp-atlassian) | 查 Confluence：PRD 背景、历史排查经验、沉淀知识 |
 | `confluence_create_page` (mcp-atlassian) | 在历史问题排查目录下创建知识文档 |
 | `confluence_update_page` (mcp-atlassian) | 更新已存在的 Confluence 页（修订标题或全文正文） |
@@ -188,7 +198,7 @@ query_messages_sqlite(keyword="<表名或任务名片段>", hours=720, limit=20)
 diagnose_flink_app(app_id=<appId>, minutes=120)
 ```
 
-若一键诊断因 Cookie 过期失败（常见问题），可逐项调用：
+若一键诊断返回结果不完整，可逐项调用：
 ```
 get_flink_app_detail(app_id=<appId>)       # 任务详情和当前状态
 get_flink_instance(app_id=<appId>)          # 实例信息
@@ -229,12 +239,14 @@ FROM system.parts
 WHERE database = '<db>' AND table = '<id_local_table>'
 ```
 
-**DataSuite Cookie 过期问题**：
+**DataSuite Cookie 认证**：
 
-Flink MCP 工具依赖 DataSuite 的 `DATA-SUITE-AUTH-userToken-v4` Cookie。在较新 macOS Chrome 中，该 Cookie 可能加密存储，`browser_cookie3` 无法读取明文。若遇到持续 401 错误：
-1. 提醒用户在 Chrome 中刷新 DataSuite 登录（访问 https://datasuite.shopee.io/flink/）
-2. 或设置 `CHROME_CDP_PORT=9222` 通过 CDP 获取 Cookie
-3. 若无法恢复，退回到 SeaTalk 告警消息 + CK 数据探查的组合方式完成诊断
+Flink/Scheduler/DataMap 等 MCP 工具依赖 DataSuite 的 Cookie。v3.5.9 起，chrome-auth 会在遇到 401/403 时**自动尝试 SSO 刷新**（通过 AppleScript 控制 Chrome 打开 DataSuite 页面触发 SSO 静默续期），大多数情况下无需人工干预。
+
+若自动刷新后仍持续 401：
+1. SSO 主会话已过期（需重新输密码/MFA）— 提醒用户在 Chrome 中打开 https://datasuite.shopee.io/ 手动登录
+2. 在较新 macOS Chrome 中，`DATA-SUITE-AUTH-userToken-v4` 可能加密存储，需通过 CDP 获取 — 设置 `CHROME_CDP_PORT=9222` 或使用 `start_chrome_remote_debug.sh`
+3. 若认证无法恢复，退回到 SeaTalk 告警消息 + CK 数据探查的组合方式完成诊断
 
 **检查 ClickHouse 表的实际物理结构**：
 

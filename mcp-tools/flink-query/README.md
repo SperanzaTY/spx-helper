@@ -110,7 +110,7 @@ flink-mcp
 
 ## 认证
 
-复用 chrome-auth 库，自动从 Chrome 浏览器读取以下域的 Cookie：
+复用 chrome-auth 库，自动从 Chrome 浏览器读取以下域的 Cookie。v3.5.9 起，遇到 401/403 时会自动尝试 SSO 静默刷新（通过 `auth_failed=True` 触发），大多数情况下无需手动干预。
 
 | 数据源 | 域名 | 关键 Cookie |
 |--------|------|------------|

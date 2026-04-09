@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse, parse_qs
 
 import requests as http_requests
-from chrome_auth import get_auth
+from chrome_auth import get_auth, AuthResult
 from chrome_auth.diagnostic import cookie_diagnostic as _cookie_diagnostic
 from mcp.server.fastmcp import FastMCP
 
@@ -28,12 +28,21 @@ logger = logging.getLogger(__name__)
 
 DOMAIN = "datasuite.shopee.io"
 
+_last_auth: Optional[AuthResult] = None
 
-def _load_cookies(force: bool = False) -> Dict[str, str]:
-    result = get_auth(DOMAIN, force=force)
+
+def _load_cookies(force: bool = False, auth_failed: bool = False) -> Dict[str, str]:
+    global _last_auth
+    result = get_auth(DOMAIN, force=force, auth_failed=auth_failed)
+    _last_auth = result
     if result.ok:
         logger.info(f"[Auth] Flink cookies via {result.source} ({len(result.cookies)} cookies)")
     return result.cookies
+
+
+def _diag(cookies: Dict[str, str]) -> str:
+    expires_at = _last_auth.expires_at if _last_auth else None
+    return _cookie_diagnostic(cookies, expires_at=expires_at)
 
 
 # ──────────────────────────── HTTP 客户端 ────────────────────────────
@@ -80,14 +89,13 @@ def _request(method: str, path: str, params: dict = None, json_body: dict = None
             if resp.status_code in (401, 403):
                 if attempt < MAX_RETRIES:
                     logger.warning(f"{resp.status_code} 重试中，刷新 cookie...")
-                    cookies = _load_cookies(force=True)
+                    cookies = _load_cookies(force=True, auth_failed=True)
                     if "CSRF-TOKEN" in cookies:
                         headers["x-csrf-token"] = cookies["CSRF-TOKEN"]
                     continue
-                diag = _cookie_diagnostic(cookies)
                 raise RuntimeError(
                     f"请求 {path} 失败: {resp.status_code}\n"
-                    f"Cookie 诊断:\n{diag}"
+                    f"Cookie 诊断:\n{_diag(cookies)}"
                 )
             resp.raise_for_status()
             return resp.json()
@@ -124,6 +132,19 @@ def _build_logify_url(app_id: int, instance_id: int) -> str:
 LOGIFY_STORE_ID = 73
 
 
+_LOGIFY_AUTH_KEYWORDS = ("401", "403", "unauthorized", "login", "auth", "expire", "CSRF")
+
+
+def _is_logify_auth_error(resp) -> bool:
+    """检测 Logify 响应是否为认证失败（含 302 重定向到登录页的情况）。"""
+    ct = (resp.headers.get("content-type") or "").lower()
+    if resp.status_code in (401, 403):
+        return True
+    if "text/html" in ct:
+        return True
+    return False
+
+
 def _logify_query_sse(
     filters: Optional[List[Dict]],
     query: Optional[str],
@@ -154,6 +175,7 @@ def _logify_query_sse(
     }
 
     url = f"{BASE_URL}/logify/api/v1/discover/query/records/parallel-stream?logStoreId={LOGIFY_STORE_ID}"
+    last_error = ""
 
     for attempt in range(MAX_RETRIES + 1):
         try:
@@ -165,46 +187,69 @@ def _logify_query_sse(
                 timeout=(10, 90),
                 stream=True,
             )
-            if resp.status_code in (401, 403):
+            if _is_logify_auth_error(resp):
+                resp.close()
                 if attempt < MAX_RETRIES:
-                    cookies = _load_cookies(force=True)
+                    logger.warning(f"Logify 认证失败 (HTTP {resp.status_code})，刷新 cookie...")
+                    cookies = _load_cookies(force=True, auth_failed=True)
                     if "CSRF-TOKEN" in cookies:
                         headers["x-csrf-token"] = cookies["CSRF-TOKEN"]
                     continue
-                raise RuntimeError(f"Logify 认证失败: {resp.status_code}")
+                raise RuntimeError(
+                    f"Logify 认证失败: HTTP {resp.status_code}\nCookie 诊断:\n{_diag(cookies)}"
+                )
             resp.raise_for_status()
-            break
         except http_requests.RequestException as e:
             if attempt < MAX_RETRIES:
+                cookies = _load_cookies(force=True, auth_failed=True)
+                if "CSRF-TOKEN" in cookies:
+                    headers["x-csrf-token"] = cookies["CSRF-TOKEN"]
                 continue
             raise RuntimeError(f"Logify 请求失败: {e}")
-    else:
-        raise RuntimeError("Logify 请求超过最大重试次数")
 
-    rows: List[Dict] = []
-    event_type = ""
-    for line in resp.iter_lines(decode_unicode=True):
-        if line is None:
-            continue
-        if line == "":
-            event_type = ""
-            continue
-        if line.startswith("event:"):
-            event_type = line[6:]
-        elif line.startswith("data:"):
-            data_str = line[5:]
-            if event_type == "error":
-                resp.close()
-                raise RuntimeError(f"Logify 查询错误: {data_str}")
-            if event_type == "row":
-                try:
-                    rows.append(json.loads(data_str))
-                except json.JSONDecodeError:
-                    pass
-                if len(rows) >= page_size:
-                    break
-    resp.close()
-    return rows
+        rows: List[Dict] = []
+        event_type = ""
+        sse_auth_error = False
+        for line in resp.iter_lines(decode_unicode=True):
+            if line is None:
+                continue
+            if line == "":
+                event_type = ""
+                continue
+            if line.startswith("event:"):
+                event_type = line[6:]
+            elif line.startswith("data:"):
+                data_str = line[5:]
+                if event_type == "error":
+                    resp.close()
+                    if any(kw in data_str.lower() for kw in _LOGIFY_AUTH_KEYWORDS):
+                        sse_auth_error = True
+                        last_error = data_str
+                        break
+                    raise RuntimeError(f"Logify 查询错误: {data_str}")
+                if event_type == "row":
+                    try:
+                        rows.append(json.loads(data_str))
+                    except json.JSONDecodeError:
+                        pass
+                    if len(rows) >= page_size:
+                        break
+        resp.close()
+
+        if sse_auth_error:
+            if attempt < MAX_RETRIES:
+                logger.warning(f"Logify SSE 认证错误，刷新 cookie: {last_error[:100]}")
+                cookies = _load_cookies(force=True, auth_failed=True)
+                if "CSRF-TOKEN" in cookies:
+                    headers["x-csrf-token"] = cookies["CSRF-TOKEN"]
+                continue
+            raise RuntimeError(
+                f"Logify 认证失败 (SSE): {last_error}\nCookie 诊断:\n{_diag(cookies)}"
+            )
+
+        return rows
+
+    raise RuntimeError("Logify 请求超过最大重试次数")
 
 
 def _format_ts(ts) -> str:

@@ -28,7 +28,8 @@ class TTLCache:
 
     def set(self, key: str, value: Any, ttl: Optional[float] = None) -> None:
         with self._lock:
-            self._store[key] = (value, time.time() + (ttl or self._default_ttl))
+            effective_ttl = ttl if ttl is not None else self._default_ttl
+            self._store[key] = (value, time.time() + effective_ttl)
 
     def invalidate(self, key: str) -> None:
         with self._lock:

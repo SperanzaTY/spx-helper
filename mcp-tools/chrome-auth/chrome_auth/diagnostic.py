@@ -1,8 +1,8 @@
 """统一 Cookie 诊断文案（DataSuite / Flink / Scheduler 共用）。"""
 
-from typing import Dict, Iterable, List, Tuple
+import time
+from typing import Dict, Iterable, Optional, Tuple
 
-# DataSuite Web 登录态常见键（磁盘可能因加密读不到 DATA-SUITE-AUTH）
 DEFAULT_CRITICAL_KEYS: Tuple[str, ...] = (
     "CSRF-TOKEN",
     "JSESSIONID",
@@ -29,13 +29,44 @@ def cookie_diagnostic(
     cookies: Dict[str, str],
     *,
     critical_keys: Iterable[str] = DEFAULT_CRITICAL_KEYS,
+    expires_at: Optional[float] = None,
 ) -> str:
-    """返回简短诊断句，供 MCP 在 401 时展示。"""
+    """返回简短诊断句，供 MCP 在 401 时展示。
+
+    Args:
+        cookies: Current cookie dict.
+        critical_keys: Keys that must be present for auth to work.
+        expires_at: Earliest cookie expiry (Unix timestamp), from AuthResult.
+    """
     total = len(cookies)
     if total == 0:
         return "未读取到任何 Cookie（browser_cookie3 可能无法访问 Chrome Cookie 数据库）"
 
     missing = [k for k in critical_keys if k not in cookies]
+
+    now = time.time()
+    if expires_at is not None and expires_at <= now:
+        expired_ago = now - expires_at
+        if expired_ago < 60:
+            age = f"{int(expired_ago)} 秒前"
+        elif expired_ago < 3600:
+            age = f"{int(expired_ago / 60)} 分钟前"
+        else:
+            age = f"{expired_ago / 3600:.1f} 小时前"
+        return (
+            f"Cookie 已于 {time.strftime('%H:%M:%S', time.localtime(expires_at))} 过期"
+            f"（{age}），请在 Chrome 中打开 https://datasuite.shopee.io 刷新登录"
+        )
+
+    if expires_at is not None:
+        remaining = expires_at - now
+        if remaining < 300:
+            return (
+                f"Cookie 将在 {int(remaining / 60)} 分钟后过期"
+                f"（{time.strftime('%H:%M:%S', time.localtime(expires_at))}），"
+                "建议尽快在 Chrome 中刷新 DataSuite 页面以续期"
+            )
+
     if not missing:
         return f"Cookie 键齐全（{total} 个），可能是 Cookie 已过期或接口权限变更"
 

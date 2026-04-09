@@ -1,11 +1,12 @@
 """Cookie provider — reads cookies from Chrome's on-disk cookie database via browser_cookie3."""
 
 import logging
-from typing import Dict, Optional
+import time
+from typing import Dict, List, Optional
 
 import browser_cookie3
 
-from .cache import get_cache
+from .cache import DEFAULT_TTL, get_cache
 
 logger = logging.getLogger("chrome_auth.cookie")
 
@@ -15,6 +16,17 @@ _PARENT_DOMAIN_MAP = {
     "datasuite.shopee.io": "shopee.io",
     "data-infra.shopee.io": "shopee.io",
 }
+
+
+def _effective_ttl(min_expires: Optional[float], user_ttl: Optional[float]) -> Optional[float]:
+    """Cache TTL = min(time until earliest cookie expiry, user_ttl or default)."""
+    base = user_ttl if user_ttl is not None else DEFAULT_TTL
+    if min_expires is None:
+        return base
+    remaining = min_expires - time.time()
+    if remaining <= 0:
+        return 5.0
+    return min(remaining, base)
 
 
 def _cookie_applies_to_host(host: str, cookie_domain: str) -> bool:
@@ -63,16 +75,26 @@ def get_cookies(
         return cache.get(cache_key) or {}
 
     cookies: Dict[str, str] = {}
+    cookie_expires: List[float] = []
     for c in cj:
         cookie_domain = c.domain or ""
-        # 必须包含父域 Cookie：例如 Domain=.shopee.io 的 DATA-SUITE-AUTH-userToken-v4
-        # 旧逻辑用 `domain in cookie_domain` 会漏掉仅挂在 .shopee.io 上的 Cookie
         if _cookie_applies_to_host(domain, cookie_domain):
             cookies[c.name] = c.value
+            if getattr(c, "expires", None) and c.expires > 0:
+                cookie_expires.append(float(c.expires))
 
     if cookies:
-        cache.set(cache_key, cookies, ttl)
-        logger.info("Loaded %d cookies for %s (via %s)", len(cookies), domain, query_domain)
+        min_expires = min(cookie_expires) if cookie_expires else None
+        effective_ttl = _effective_ttl(min_expires, ttl)
+        cache.set(cache_key, cookies, effective_ttl)
+        expiry_key = f"cookie_expires:{domain}"
+        if min_expires is not None:
+            cache.set(expiry_key, min_expires, effective_ttl)
+        logger.info(
+            "Loaded %d cookies for %s (via %s), earliest_expiry=%s",
+            len(cookies), domain, query_domain,
+            time.strftime("%H:%M:%S", time.localtime(min_expires)) if min_expires else "unknown",
+        )
     else:
         logger.warning("No cookies found for %s — make sure you are logged in via Chrome", domain)
 

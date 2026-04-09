@@ -3,6 +3,8 @@
 import json
 import logging
 import os
+import subprocess
+import sys
 import threading
 import time
 from typing import Any, Dict, List, Optional
@@ -10,12 +12,38 @@ from typing import Any, Dict, List, Optional
 import requests as http_requests
 import websocket
 
-from .cache import get_cache
+from .cache import DEFAULT_TTL, get_cache
 
 logger = logging.getLogger("chrome_auth.cdp")
 
 DEFAULT_CDP_PORTS = [9222, 19222]
 _HEADER_LISTEN_TIMEOUT = 10  # seconds
+
+# Domains that support silent SSO refresh via CDP navigation
+_SSO_REFRESH_DOMAINS = (
+    "datasuite.shopee.io",
+    "data-infra.shopee.io",
+    "grafana.idata.shopeemobile.com",
+)
+_SSO_REFRESH_URLS = {
+    "datasuite.shopee.io": "https://datasuite.shopee.io/flink/",
+    "data-infra.shopee.io": "https://data-infra.shopee.io/",
+    "grafana.idata.shopeemobile.com": "https://grafana.idata.shopeemobile.com/",
+}
+
+
+def _effective_ttl(min_expires: Optional[float], user_ttl: Optional[float]) -> Optional[float]:
+    """Compute cache TTL = min(time until earliest cookie expiry, user_ttl or default).
+
+    Returns None to let cache use its default when no useful bound exists.
+    """
+    base = user_ttl if user_ttl is not None else DEFAULT_TTL
+    if min_expires is None:
+        return base
+    remaining = min_expires - time.time()
+    if remaining <= 0:
+        return 5.0  # already expired — cache very briefly to avoid hammering
+    return min(remaining, base)
 
 
 def _detect_cdp_port() -> Optional[int]:
@@ -226,16 +254,26 @@ def get_cdp_cookies(
         try:
             result = _cdp_call(ws_url, "Network.getCookies", {"urls": urls})
             cookies: Dict[str, str] = {}
+            cookie_expires: List[float] = []
             for c in result.get("cookies", []):
                 cookies[c["name"]] = c["value"]
+                exp = c.get("expires", -1)
+                if exp > 0:
+                    cookie_expires.append(exp)
             if cookies:
-                cache.set(cache_key, cookies, ttl)
+                min_expires = min(cookie_expires) if cookie_expires else None
+                effective_ttl = _effective_ttl(min_expires, ttl)
+                cache.set(cache_key, cookies, effective_ttl)
+                expiry_key = f"cdp_cookie_expires:{url_pattern}"
+                if min_expires is not None:
+                    cache.set(expiry_key, min_expires, effective_ttl)
                 logger.info(
-                    "Got %d cookies via CDP (port %d, urls=%s) for %s",
+                    "Got %d cookies via CDP (port %d, urls=%s) for %s, earliest_expiry=%s",
                     len(cookies),
                     port,
                     urls,
                     url_pattern,
+                    time.strftime("%H:%M:%S", time.localtime(min_expires)) if min_expires else "unknown",
                 )
                 return cookies
         except Exception as e:
@@ -337,3 +375,152 @@ def get_header(
 
     logger.warning("No %s header found in requests matching '%s' within %ds", header_name, url_pattern, listen_timeout)
     return None
+
+
+def _try_cdp_refresh(
+    url: str,
+    cdp_port: Optional[int] = None,
+    timeout: float = 15,
+) -> bool:
+    """Try to refresh session via CDP Target.createTarget + Page.navigate."""
+    ports = _list_reachable_cdp_ports(cdp_port)
+    if not ports:
+        logger.debug("_try_cdp_refresh: no CDP port reachable")
+        return False
+
+    port = ports[0]
+    page = _pick_page_for_cookie_read(port, "")
+    if not page:
+        logger.debug("_try_cdp_refresh: no debuggable target on port %d", port)
+        return False
+
+    control_ws_url = page.get("webSocketDebuggerUrl")
+    if not control_ws_url:
+        return False
+
+    target_id = None
+    try:
+        result = _cdp_call(control_ws_url, "Target.createTarget", {"url": "about:blank"})
+        target_id = result.get("targetId")
+        if not target_id:
+            logger.debug("_try_cdp_refresh: Target.createTarget returned no targetId")
+            return False
+    except Exception as e:
+        logger.debug("_try_cdp_refresh: failed to create tab: %s", e)
+        return False
+
+    try:
+        time.sleep(0.3)
+
+        new_ws_url = None
+        for p in _list_pages(port):
+            if p.get("id") == target_id and p.get("webSocketDebuggerUrl"):
+                new_ws_url = p["webSocketDebuggerUrl"]
+                break
+
+        if not new_ws_url:
+            logger.debug("_try_cdp_refresh: could not find WS URL for new tab %s", target_id)
+            return False
+
+        ws = websocket.create_connection(new_ws_url, timeout=timeout + 5, suppress_origin=True)
+        try:
+            msg_id = 1
+            ws.send(json.dumps({"id": msg_id, "method": "Page.enable", "params": {}}))
+            msg_id += 1
+
+            ws.send(json.dumps({"id": msg_id, "method": "Page.navigate", "params": {"url": url}}))
+            msg_id += 1
+
+            deadline = time.time() + timeout
+            loaded = False
+            final_url = None
+            while time.time() < deadline:
+                ws.settimeout(max(0.1, deadline - time.time()))
+                try:
+                    raw = ws.recv()
+                except websocket.WebSocketTimeoutException:
+                    break
+                data = json.loads(raw)
+
+                if data.get("method") == "Page.frameNavigated":
+                    frame = data.get("params", {}).get("frame", {})
+                    final_url = frame.get("url", "")
+
+                if data.get("method") == "Page.loadEventFired":
+                    loaded = True
+                    break
+
+            if loaded and final_url:
+                is_login = any(kw in final_url.lower() for kw in ("login", "signin", "sso/authorize"))
+                if is_login:
+                    logger.warning("refresh_session: landed on login page %s — SSO session fully expired", final_url)
+                    return False
+
+            logger.info("refresh_session[cdp]: page loaded=%s, final_url=%s", loaded, final_url or "unknown")
+            return loaded
+        finally:
+            ws.close()
+    finally:
+        if target_id:
+            try:
+                _cdp_call(control_ws_url, "Target.closeTarget", {"targetId": target_id})
+            except Exception:
+                pass
+
+
+def _refresh_via_applescript(url: str, wait_seconds: int = 8) -> bool:
+    """macOS fallback: use AppleScript to open *url* in Chrome, wait for SSO redirect, then close the tab.
+
+    Does NOT require --remote-debugging-port. Works with any running Chrome instance.
+    The tab is visible for ~wait_seconds then auto-closes.
+    """
+    if sys.platform != "darwin":
+        return False
+
+    script = (
+        'tell application "Google Chrome"\n'
+        "    if (count of windows) = 0 then\n"
+        "        make new window\n"
+        "    end if\n"
+        f'    set newTab to make new tab at end of tabs of window 1 with properties {{URL:"{url}"}}\n'
+        f"    delay {wait_seconds}\n"
+        "    close newTab\n"
+        "end tell\n"
+    )
+
+    try:
+        result = subprocess.run(
+            ["osascript", "-e", script],
+            capture_output=True,
+            text=True,
+            timeout=wait_seconds + 15,
+        )
+        if result.returncode == 0:
+            time.sleep(1)  # let Chrome flush cookies to SQLite
+            logger.info("refresh_session[applescript]: SSO refresh completed for %s", url)
+            return True
+        logger.warning("refresh_session[applescript]: osascript failed: %s", result.stderr.strip())
+        return False
+    except subprocess.TimeoutExpired:
+        logger.warning("refresh_session[applescript]: osascript timed out after %ds", wait_seconds + 15)
+        return False
+    except Exception as e:
+        logger.warning("refresh_session[applescript]: %s", e)
+        return False
+
+
+def refresh_session(
+    url: str,
+    *,
+    cdp_port: Optional[int] = None,
+    timeout: float = 15,
+) -> bool:
+    """Trigger silent SSO renewal by navigating Chrome to *url*.
+
+    Strategy chain:
+      1. CDP (requires --remote-debugging-port on Chrome)
+      2. AppleScript (macOS only, works with any running Chrome)
+    """
+    if _try_cdp_refresh(url, cdp_port, timeout):
+        return True
+    return _refresh_via_applescript(url, wait_seconds=max(8, int(timeout)))
