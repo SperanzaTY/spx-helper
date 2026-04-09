@@ -618,16 +618,20 @@ def diagnose_flink_app(
     app_id: int,
     minutes: int = 60,
 ) -> str:
-    """一键诊断 Flink 应用：聚合延迟趋势、异常、告警、资源，输出优化建议。
+    """一键诊断 Flink 应用：聚合 DataSuite + Keyhole + Grafana 全栈数据，输出问题与优化建议。
 
-    适用于收到告警后快速排查问题根因。自动调用多个 API 并综合分析。
+    适用于收到告警后快速排查问题根因。自动调用 9 个数据源并综合分析：
+    - DataSuite: 应用详情、实例状态、延迟趋势、异常列表、告警记录、资源估算
+    - Keyhole: Checkpoint 健康、Runtime 异常堆栈（best-effort）
+    - Grafana: 背压、Kafka Lag、CPU/内存指标（best-effort）
 
     Args:
         app_id: 应用 ID
         minutes: 回看时长（分钟），默认 60
 
     Returns:
-        综合诊断报告：应用概况、延迟分析、异常摘要、告警记录、资源状况、优化建议
+        综合诊断报告：应用概况、延迟分析、异常摘要、告警记录、资源状况、
+        Checkpoint 健康、Grafana 指标、优化建议
     """
     try:
         diagnosis: Dict[str, Any] = {"appId": app_id, "timeRange": f"最近 {minutes} 分钟"}
@@ -765,6 +769,92 @@ def diagnose_flink_app(
             res_data = _get_data(res_resp)
             if res_data:
                 diagnosis["resource"] = res_data
+        except Exception:
+            pass
+
+        # ── 以下为 Keyhole / Grafana 增强诊断（best-effort，失败不影响核心诊断）──
+
+        # 7. Checkpoint 健康（Keyhole）
+        try:
+            ck_data = _keyhole_get("/checkpoints", app_id)
+            counts = ck_data.get("counts", {})
+            failed = counts.get("failed", 0)
+            completed = counts.get("completed", 0)
+            latest = ck_data.get("latest", {})
+            diagnosis["checkpoints_keyhole"] = {
+                "completed": completed,
+                "failed": failed,
+                "in_progress": counts.get("in_progress", 0),
+                "latest_status": latest.get("status"),
+                "latest_duration_ms": latest.get("duration"),
+                "latest_size_bytes": latest.get("state_size"),
+            }
+            if failed > 0:
+                ratio = failed / max(completed + failed, 1)
+                issues.append(f"Checkpoint 失败 {failed} 次（失败率 {ratio:.0%}）")
+                if ratio > 0.3:
+                    suggestions.append("Checkpoint 失败率过高，检查状态大小、超时配置和 TaskManager 稳定性")
+            if latest.get("duration") and latest["duration"] > 120000:
+                issues.append(f"最近 Checkpoint 耗时 {latest['duration']/1000:.1f}s，超过 2 分钟")
+                suggestions.append("Checkpoint 耗时过长，考虑启用增量 Checkpoint 或减小状态大小")
+        except Exception:
+            pass
+
+        # 8. Runtime Exceptions（Keyhole — 比 DataSuite 更底层）
+        try:
+            exc_keyhole = _keyhole_get("/exceptions", app_id)
+            root_exc = exc_keyhole.get("root-exception", "")
+            truncated = root_exc[:500] + "..." if len(root_exc) > 500 else root_exc
+            if root_exc:
+                diagnosis["runtime_exception_keyhole"] = truncated
+                if "OutOfMemoryError" in root_exc:
+                    if "OutOfMemory" not in " ".join(issues):
+                        issues.append("Flink Runtime: OutOfMemoryError")
+                        suggestions.append("JVM 堆内存不足，增加 taskmanager.memory.process.size 或优化状态/缓存")
+                if "TimeoutException" in root_exc or "Checkpoint expired" in root_exc:
+                    if "Checkpoint" not in " ".join(suggestions):
+                        suggestions.append("Checkpoint 超时，增加 execution.checkpointing.timeout 或减少状态")
+        except Exception:
+            pass
+
+        # 9. Grafana 核心指标（背压 + Kafka Lag + CPU，30 分钟窗口）
+        try:
+            info = _get_instance_info(app_id)
+            sid = info.get("session_id")
+            if sid:
+                job_filter = f'job=~".*(flink_metrics|pushgateway_flink)",session_id="{sid}"'
+                quick_exprs = {
+                    "max_bp": f"max(flink_taskmanager_job_task_backPressuredTimeMsPerSecond{{{job_filter}}})",
+                    "max_busy": f"max(flink_taskmanager_job_task_busyTimeMsPerSecond{{{job_filter}}})",
+                    "kafka_lag": f"sum(flink_taskmanager_job_task_operator_KafkaConsumer_records_lag_max{{{job_filter}}} >= 0)",
+                    "tm_max_cpu": f"max(flink_taskmanager_Status_JVM_CPU_Load{{{job_filter}}})",
+                    "tm_max_heap": f"max(flink_taskmanager_Status_JVM_Memory_Heap_Used{{{job_filter}}} / flink_taskmanager_Status_JVM_Memory_Heap_Max{{{job_filter}}})",
+                }
+                grafana_data = _grafana_query_batch(quick_exprs, range_seconds=minutes * 60)
+                metrics_summary = {}
+                for k, v in grafana_data.items():
+                    if v and v.get("current") is not None:
+                        metrics_summary[k] = {"current": v["current"], "max": v.get("max"), "avg": v.get("avg")}
+                if metrics_summary:
+                    diagnosis["grafana_metrics"] = metrics_summary
+                    bp = metrics_summary.get("max_bp", {})
+                    if bp.get("max") and bp["max"] > 800:
+                        issues.append(f"严重背压: 最大 {bp['max']:.0f} ms/s（接近完全阻塞 1000）")
+                        suggestions.append("存在背压瓶颈，定位最慢算子（通常是 Sink 或窗口聚合），考虑增加并行度")
+                    elif bp.get("avg") and bp["avg"] > 500:
+                        issues.append(f"持续背压: 平均 {bp['avg']:.0f} ms/s")
+                    lag = metrics_summary.get("kafka_lag", {})
+                    if lag.get("current") and lag["current"] > 100000:
+                        issues.append(f"Kafka Lag 偏高: {lag['current']:.0f} records")
+                        suggestions.append("消费速度跟不上生产速度，增加 Source 并行度或优化下游处理")
+                    cpu = metrics_summary.get("tm_max_cpu", {})
+                    if cpu.get("max") and cpu["max"] > 0.9:
+                        issues.append(f"TM CPU 过高: 最大 {cpu['max']:.0%}")
+                        suggestions.append("CPU 接近满载，增加 TaskManager 数量或优化计算逻辑")
+                    heap = metrics_summary.get("tm_max_heap", {})
+                    if heap.get("max") and heap["max"] > 0.9:
+                        issues.append(f"TM Heap 使用率过高: 最大 {heap['max']:.0%}")
+                        suggestions.append("Heap 接近上限，增加 taskmanager.memory.process.size 或检查状态/缓存泄漏")
         except Exception:
             pass
 

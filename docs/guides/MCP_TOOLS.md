@@ -332,6 +332,9 @@ MCP 配置在 `~/.cursor/mcp.json`，新增或修改后需在 Cursor 设置中**
 
 ## 更新日志
 
+### v3.5.5
+- **Flink 一键诊断增强**: `diagnose_flink_app` 接入 Keyhole (Checkpoint 健康 + Runtime 异常) 和 Grafana (背压/Kafka Lag/CPU/Heap)，从 6 个数据源扩展到 9 个，新增自动阈值判断和优化建议
+
 ### v3.5.4
 - **Flink MCP 全栈诊断**: 新增 Keyhole (Flink REST API) 数据源 -- checkpoints / job config / runtime exceptions / task managers / vertices；新增 Grafana (VictoriaMetrics) 数据源 -- 6 个预定义指标类别 + 自定义 PromQL 查询
 - **Flink MCP 缓存层**: 新增 `_instance_cache` 减少 DataSuite API 重复调用

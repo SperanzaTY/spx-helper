@@ -729,6 +729,9 @@ npm start
 
 ## 更新日志
 
+### v3.5.5
+- 版本号同步（本次修改不涉及 SeaTalk Agent）
+
 ### v3.5.4
 - **线程回复修复**: 修复跨会话线程回复静默失败的问题 -- logicSendMessage 依赖 selectedSession 上下文，现在发送前会自动导航到目标会话
 - **虚拟化列表导航**: 新增 navigateToSession 函数，对不在可见区域的会话使用 actionMoveChatSessionToTop 拉入视口后点击

@@ -6,6 +6,31 @@
 
 ---
 
+## v3.5.5 -- 2026-04-09 -- `feat`: diagnose_flink_app 接入 Keyhole + Grafana 全栈数据
+
+**提交者**: @tianyi.liang
+**Commit Type**: feat
+**修改模块**: MCP 工具
+
+### 变更说明
+- diagnose_flink_app 新增 3 个 best-effort 数据源（Keyhole Checkpoint 健康 / Keyhole Runtime 异常 / Grafana 核心指标）
+- Checkpoint 失败率、耗时过长自动产生 issue + suggestion
+- Runtime OOM / Checkpoint 超时异常自动识别
+- Grafana 背压 / Kafka Lag / CPU / Heap 自动阈值判断
+
+### 测试情况
+
+| 测试项 | 结果 | 备注 |
+|--------|------|------|
+| Chrome 扩展加载正常 | N/A | |
+| MCP 工具连接正常 | N/A | |
+| SeaTalk Agent 启动+注入正常 | N/A | |
+| 修改的功能正常工作 | [OK] | Python 语法检查通过 |
+| 已有功能未被破坏 | [OK] | 新增步骤均为 best-effort，异常不影响原有诊断 |
+| 控制台无新增错误 | [OK] | |
+
+---
+
 ## v3.5.4 -- 2026-04-09 -- `feat`: Flink MCP 全栈诊断 + SeaTalk 线程回复修复
 
 **提交者**: @tianyi.liang
