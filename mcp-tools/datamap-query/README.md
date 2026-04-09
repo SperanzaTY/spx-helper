@@ -144,16 +144,23 @@ DataMap MCP 使用三组 API：
 
 ## Changelog
 
+### v3.5.1
+
+- 合并 `update_table_info` + `update_column_info` 为统一的 `update_datamap` 工具
+- 修复 tableStatus 更新无效：status 需嵌套在 `{"status": {"status": "MIGRATED", "migrationEntity": {...}}}` 结构中
+- 工具接受灵活 JSON payload，自动路由到 updateTableInfo / updateColumnInfo 端点
+- 删除冗余的 `batch_update_table_status.py`
+
 ### v3.5.0
 
 - `update_table_info` 新增 `table_status` 参数，支持设置表生命周期状态（ACTIVE/MIGRATED/DEPRECATED/OFFLINE）
-- 新增 `batch_update_table_status.py` 批量更新表状态脚本（从 Migration List Google Sheet 提取表列表）
+- 新增 `batch_update_table_status.py` 批量更新表状态脚本
 
 ## 注意事项
 
 - Cookie 有效期约 30 分钟自动刷新（chrome-auth 内置 TTL 缓存），如遇 401 错误会自动重试刷新 Cookie
 - 如果持续 401，请在 Chrome 中重新登录 [DataSuite](https://datasuite.shopee.io)
-- 写入操作（update_table_info / update_column_info）需要配置 `DATAMAP_OPEN_API_TOKEN` 环境变量
+- 写入操作（`update_datamap`）需要配置 `DATAMAP_OPEN_API_TOKEN` 环境变量
 - 写入操作默认 dry_run=True，预览确认后再设置 dry_run=False 执行
 - `search_global` 使用 SearchCenter API（`/datamap/searchcenter/api/v1/`），与其他工具的 API 前缀不同
 - Cookie 诊断逻辑由 `chrome_auth.diagnostic` 统一提供，各 MCP 工具共享

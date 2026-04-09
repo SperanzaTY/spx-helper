@@ -4,9 +4,13 @@ import os from 'node:os';
 
 // ── Types ──
 
+export interface PatternRule {
+  regex: string;
+  op: 'or' | 'and';
+}
+
 export interface SessionSettings {
-  patterns: string[];
-  matchMode: 'any' | 'all';
+  patterns: PatternRule[];
   requireMention: boolean;
   cancelOnHumanReply: boolean;
   workspace: string;
@@ -81,7 +85,6 @@ const MAX_CONCURRENT = 3;
 
 const DEFAULT_SESSION: SessionSettings = {
   patterns: [],
-  matchMode: 'any',
   requireMention: false,
   cancelOnHumanReply: true,
   workspace: '',
@@ -110,6 +113,15 @@ const DEFAULT_CONFIG: AlarmConfig = {
   sessionSettings: {},
 };
 
+function migratePatterns(raw: unknown, fallbackOp: 'or' | 'and' = 'or'): PatternRule[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((p: unknown) => {
+    if (typeof p === 'string') return { regex: p, op: fallbackOp };
+    if (p && typeof p === 'object' && 'regex' in p) return p as PatternRule;
+    return null;
+  }).filter(Boolean) as PatternRule[];
+}
+
 function migrateConfig(raw: Record<string, unknown>): AlarmConfig {
   const config: AlarmConfig = {
     enabled: !!raw.enabled,
@@ -119,23 +131,23 @@ function migrateConfig(raw: Record<string, unknown>): AlarmConfig {
   };
 
   const oldSS = (raw.sessionSettings || {}) as Record<string, Record<string, unknown>>;
-  const oldPatterns = (raw.patterns || []) as string[];
+  const oldPatterns = (raw.patterns || []) as unknown[];
   const oldMatchMode = (raw.matchMode as string) || 'any';
-  const oldTimeout = (raw.timeoutMinutes as number) || 5;
+  const oldTimeout = typeof raw.timeoutMinutes === 'number' ? raw.timeoutMinutes : 5;
   const oldCancel = raw.cancelOnHumanReply !== false;
   const oldMention = !!raw.requireMention;
   const oldModelId = (raw.modelId as string) || '';
 
   for (const session of config.monitoredSessions) {
     const prev = oldSS[session] || {};
+    const defaultOp: 'or' | 'and' = ((prev.matchMode || oldMatchMode) === 'all') ? 'and' : 'or';
     config.sessionSettings[session] = {
-      patterns: (prev.patterns as string[]) || oldPatterns.slice(),
-      matchMode: (prev.matchMode as 'any' | 'all') || oldMatchMode as 'any' | 'all',
+      patterns: migratePatterns(prev.patterns || oldPatterns, defaultOp),
       requireMention: typeof prev.requireMention === 'boolean' ? prev.requireMention : oldMention,
       cancelOnHumanReply: typeof prev.cancelOnHumanReply === 'boolean' ? prev.cancelOnHumanReply : oldCancel,
       workspace: (prev.workspace as string) || '',
       modelId: (prev.modelId as string) || oldModelId,
-      timeoutMinutes: (prev.timeoutMinutes as number) || oldTimeout,
+      timeoutMinutes: typeof prev.timeoutMinutes === 'number' ? prev.timeoutMinutes : oldTimeout,
       prompt: (prev.prompt as string) || '',
     };
   }
@@ -147,12 +159,15 @@ function loadConfig(): AlarmConfig {
   try {
     if (fs.existsSync(CONFIG_PATH)) {
       const raw = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8'));
-      if (raw.sessionSettings && Object.values(raw.sessionSettings as Record<string, unknown>).some(
-        (s: unknown) => Array.isArray((s as Record<string, unknown>).patterns)
-      )) {
-        return { ...DEFAULT_CONFIG, ...raw };
-      }
-      return migrateConfig(raw);
+      if (!raw.sessionSettings) return migrateConfig(raw);
+      const ss = raw.sessionSettings as Record<string, Record<string, unknown>>;
+      const needsMigration = Object.values(ss).some((s) => {
+        const pats = s.patterns;
+        if (!Array.isArray(pats) || pats.length === 0) return false;
+        return typeof pats[0] === 'string';
+      });
+      if (needsMigration || raw.matchMode) return migrateConfig(raw);
+      return { ...DEFAULT_CONFIG, ...raw };
     }
   } catch { /* corrupt config */ }
   return { ...DEFAULT_CONFIG };
@@ -172,7 +187,7 @@ export class AlarmManager {
   private config: AlarmConfig;
   private pending = new Map<string, PendingAlarm>();
   private records: AlarmRecord[] = [];
-  private compiledPatterns = new Map<string, RegExp[]>();
+  private compiledPatterns = new Map<string, Array<{ re: RegExp; op: 'or' | 'and' }>>();
   private activeInvestigations = 0;
   private investigationQueue: PendingAlarm[] = [];
   private callbacks: AlarmCallbacks;
@@ -199,24 +214,25 @@ export class AlarmManager {
 
   private compileSessionPatterns(session: string) {
     const sc = this.getSessionConfig(session);
-    const compiled: RegExp[] = [];
+    const compiled: Array<{ re: RegExp; op: 'or' | 'and' }> = [];
     for (const p of sc.patterns) {
       try {
-        compiled.push(new RegExp(p, 'i'));
+        compiled.push({ re: new RegExp(p.regex, 'i'), op: p.op || 'or' });
       } catch {
-        this.callbacks.log(`[alarm] invalid pattern ignored for ${session}: ${p}`);
+        this.callbacks.log(`[alarm] invalid pattern ignored for ${session}: ${p.regex}`);
       }
     }
     this.compiledPatterns.set(session, compiled);
   }
 
   private isAlarm(text: string, session: string): boolean {
-    const patterns = this.compiledPatterns.get(session);
-    if (!patterns || patterns.length === 0) return false;
-    const sc = this.getSessionConfig(session);
-    return sc.matchMode === 'all'
-      ? patterns.every((re) => re.test(text))
-      : patterns.some((re) => re.test(text));
+    const rules = this.compiledPatterns.get(session);
+    if (!rules || rules.length === 0) return false;
+    const andRules = rules.filter((r) => r.op === 'and');
+    const orRules = rules.filter((r) => r.op === 'or');
+    const andPass = andRules.length === 0 || andRules.every((r) => r.re.test(text));
+    const orPass = orRules.length === 0 || orRules.some((r) => r.re.test(text));
+    return andPass && orPass;
   }
 
   private isMonitoredSession(session: string): boolean {

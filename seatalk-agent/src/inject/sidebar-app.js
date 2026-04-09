@@ -2007,9 +2007,11 @@
     if (existing) existing.remove();
 
     var ss = (_alarmStatus.sessionSettings && _alarmStatus.sessionSettings[session]) || {};
-    var patterns = ss.patterns || [];
-    var matchMode = ss.matchMode || 'any';
-    var timeoutMin = ss.timeoutMinutes || 5;
+    var patterns = (ss.patterns || []).map(function (p) {
+      if (typeof p === 'string') return { regex: p, op: 'or' };
+      return p;
+    });
+    var timeoutMin = typeof ss.timeoutMinutes === 'number' ? ss.timeoutMinutes : 5;
 
     var panel = document.createElement('div');
     panel.className = 'alarm-group-settings-panel';
@@ -2017,9 +2019,13 @@
 
     var patternsHtml = '';
     for (var pi = 0; pi < patterns.length; pi++) {
-      patternsHtml += '<span class="gsp-chip" data-idx="' + pi + '" style="display:inline-flex;align-items:center;gap:3px;padding:2px 6px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:3px;font-size:9px;font-family:\'SF Mono\',Monaco,monospace;color:rgba(255,255,255,0.6);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + escapeHtml(patterns[pi]) + '">' +
-        '<span style="overflow:hidden;text-overflow:ellipsis">' + escapeHtml(patterns[pi]) + '</span>' +
-        '<span class="gsp-chip-del" data-idx="' + pi + '" style="cursor:pointer;color:rgba(255,255,255,0.3);font-size:11px;line-height:1;flex-shrink:0">\u00d7</span>' +
+      var rule = patterns[pi];
+      var opColor = rule.op === 'and' ? '#f9e2af' : '#89b4fa';
+      var opLabel = rule.op === 'and' ? 'AND' : 'OR';
+      patternsHtml += '<span class="gsp-chip" data-idx="' + pi + '" style="display:inline-flex;align-items:center;gap:3px;padding:2px 4px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:3px;font-size:9px;font-family:\'SF Mono\',Monaco,monospace;color:rgba(255,255,255,0.6);max-width:220px" title="' + escapeHtml(rule.regex) + '">' +
+        '<span class="gsp-chip-op" data-idx="' + pi + '" style="cursor:pointer;font-size:9px;font-weight:700;color:' + opColor + ';background:rgba(255,255,255,0.08);border:1px solid ' + opColor + '40;border-radius:2px;padding:0 4px;flex-shrink:0;user-select:none" title="点击切换 OR/AND">' + opLabel + '</span>' +
+        '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0">' + escapeHtml(rule.regex) + '</span>' +
+        '<span class="gsp-chip-del" data-idx="' + pi + '" style="cursor:pointer;color:rgba(255,255,255,0.3);font-size:13px;line-height:1;flex-shrink:0;padding:0 2px">&times;</span>' +
       '</span>';
     }
 
@@ -2039,13 +2045,7 @@
           '</div>' +
         '</div>' +
         '<div class="gsp-pattern-chips" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:4px">' + (patternsHtml || '<span style="font-size:9px;color:rgba(255,255,255,0.2);font-style:italic">无规则</span>') + '</div>' +
-        '<div style="display:flex;align-items:center;gap:6px;font-size:10px;color:rgba(255,255,255,0.4)">' +
-          '<span>逻辑:</span>' +
-          '<select class="gsp-match-mode" style="' + selectStyle + '">' +
-            '<option value="any"' + (matchMode === 'any' ? ' selected' : '') + '>任一匹配 (OR)</option>' +
-            '<option value="all"' + (matchMode === 'all' ? ' selected' : '') + '>全部匹配 (AND)</option>' +
-          '</select>' +
-        '</div>' +
+        (patterns.length > 0 ? '<div style="font-size:8px;color:rgba(255,255,255,0.2);margin-bottom:4px">点击规则前的 OR/AND 切换匹配逻辑</div>' : '') +
       '</div>' +
       '<div style="display:flex;gap:8px;margin-bottom:6px;flex-wrap:wrap;font-size:10px;color:rgba(255,255,255,0.4)">' +
         '<div style="display:flex;align-items:center;gap:3px">' +
@@ -2097,25 +2097,84 @@
     }
 
     // Pattern chip delete
-    var chipDels = panel.querySelectorAll('.gsp-chip-del');
-    for (var di = 0; di < chipDels.length; di++) {
-      chipDels[di].addEventListener('click', function (e) {
+    panel.querySelector('.gsp-pattern-chips').addEventListener('click', function (e) {
+      var target = e.target;
+      if (target.classList.contains('gsp-chip-del')) {
         e.stopPropagation();
-        var idx = parseInt(this.getAttribute('data-idx'), 10);
-        var cur = ((_alarmStatus.sessionSettings && _alarmStatus.sessionSettings[session]) || {}).patterns || [];
-        var newP = cur.slice();
-        newP.splice(idx, 1);
-        saveGroupSettings(session, panel, { patterns: newP });
-      });
-    }
-
-    // Add pattern
-    panel.querySelector('.gsp-add-btn').addEventListener('click', function () {
-      var regex = prompt('输入正则表达式:');
-      if (regex && regex.trim()) {
-        var cur = ((_alarmStatus.sessionSettings && _alarmStatus.sessionSettings[session]) || {}).patterns || [];
-        saveGroupSettings(session, panel, { patterns: cur.concat([regex.trim()]) });
+        var idx = parseInt(target.getAttribute('data-idx'), 10);
+        var cur = getCurrentPatterns(session);
+        cur.splice(idx, 1);
+        saveGroupSettings(session, panel, { patterns: cur });
+        showGroupSettingsPanel(session, name);
+      } else if (target.classList.contains('gsp-chip-op')) {
+        e.stopPropagation();
+        var idx2 = parseInt(target.getAttribute('data-idx'), 10);
+        var cur2 = getCurrentPatterns(session);
+        if (cur2[idx2]) {
+          cur2[idx2].op = cur2[idx2].op === 'and' ? 'or' : 'and';
+          saveGroupSettings(session, panel, { patterns: cur2 });
+          showGroupSettingsPanel(session, name);
+        }
       }
+    });
+
+    // Add pattern — inline input with OR/AND toggle
+    panel.querySelector('.gsp-add-btn').addEventListener('click', function () {
+      var chipsEl = panel.querySelector('.gsp-pattern-chips');
+      if (!chipsEl) return;
+      var existing = chipsEl.querySelector('.gsp-add-row');
+      if (existing) { existing.querySelector('input').focus(); return; }
+      var row = document.createElement('div');
+      row.className = 'gsp-add-row';
+      row.style.cssText = 'display:flex;align-items:center;gap:4px;margin-top:4px;width:100%';
+      var selectedOp = 'or';
+      var opBtn = document.createElement('span');
+      opBtn.style.cssText = 'cursor:pointer;font-size:9px;font-weight:700;color:#4ec9b0;background:rgba(255,255,255,0.08);border:1px solid rgba(78,201,176,0.4);border-radius:2px;padding:1px 5px;flex-shrink:0;user-select:none;min-width:28px;text-align:center';
+      opBtn.textContent = 'OR';
+      opBtn.title = '点击切换 OR/AND';
+      opBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        selectedOp = selectedOp === 'or' ? 'and' : 'or';
+        opBtn.textContent = selectedOp.toUpperCase();
+        opBtn.style.color = selectedOp === 'or' ? '#4ec9b0' : '#dcdcaa';
+        opBtn.style.borderColor = selectedOp === 'or' ? 'rgba(78,201,176,0.4)' : 'rgba(220,220,170,0.4)';
+      });
+      var inp = document.createElement('input');
+      inp.type = 'text';
+      inp.placeholder = '输入正则，回车确认';
+      inp.style.cssText = 'flex:1;min-width:0;background:rgba(255,255,255,0.06);border:1px solid rgba(78,201,176,0.4);border-radius:3px;color:rgba(255,255,255,0.8);font-size:10px;font-family:"SF Mono",Monaco,monospace;padding:3px 6px;outline:none';
+      row.appendChild(opBtn);
+      row.appendChild(inp);
+      chipsEl.appendChild(row);
+      inp.focus();
+      var added = false;
+      function addRule() {
+        if (added) return;
+        added = true;
+        var val = inp.value.trim();
+        if (val) {
+          var cur = getCurrentPatterns(session);
+          cur.push({ regex: val, op: selectedOp });
+          saveGroupSettings(session, null, { patterns: cur });
+          showGroupSettingsPanel(session, name);
+        } else {
+          row.remove();
+        }
+      }
+      inp.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); addRule(); }
+        else if (e.key === 'Escape') { added = true; row.remove(); }
+      });
+      var blurTimer = null;
+      inp.addEventListener('blur', function () {
+        blurTimer = setTimeout(function () { addRule(); }, 150);
+      });
+      inp.addEventListener('focus', function () {
+        if (blurTimer) { clearTimeout(blurTimer); blurTimer = null; }
+      });
+      opBtn.addEventListener('mousedown', function (e) {
+        e.preventDefault();
+      });
     });
 
     // AI generate
@@ -2143,8 +2202,7 @@
     // Save button
     panel.querySelector('.alarm-gsp-save').addEventListener('click', function () {
       var cfg = {};
-      cfg.patterns = getChipPatterns(panel);
-      cfg.matchMode = panel.querySelector('.gsp-match-mode').value;
+      cfg.patterns = getCurrentPatterns(session);
       var tv = parseInt(panel.querySelector('.gsp-timeout').value, 10);
       cfg.timeoutMinutes = isNaN(tv) ? 5 : tv;
       cfg.requireMention = panel.querySelector('.gsp-mention').checked;
@@ -2154,25 +2212,26 @@
       cfg.prompt = panel.querySelector('.gsp-prompt').value.trim();
       saveGroupSettings(session, null, cfg);
       panel.remove();
+      renderAlarmPopoverContent();
     });
 
     // Clear button
     panel.querySelector('.alarm-gsp-clear').addEventListener('click', function () {
       var allSS = Object.assign({}, _alarmStatus.sessionSettings || {});
       delete allSS[session];
+      _alarmStatus.sessionSettings = allSS;
       if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: 'alarm_config_update', config: { sessionSettings: allSS } }));
       panel.remove();
+      renderAlarmPopoverContent();
     });
   }
 
-  function getChipPatterns(panel) {
-    var chips = panel.querySelectorAll('.gsp-chip');
-    var result = [];
-    for (var i = 0; i < chips.length; i++) {
-      var title = chips[i].getAttribute('title');
-      if (title) result.push(title);
-    }
-    return result;
+  function getCurrentPatterns(session) {
+    var ss = (_alarmStatus.sessionSettings && _alarmStatus.sessionSettings[session]) || {};
+    return (ss.patterns || []).map(function (p) {
+      if (typeof p === 'string') return { regex: p, op: 'or' };
+      return { regex: p.regex, op: p.op || 'or' };
+    });
   }
 
   function saveGroupSettings(session, panel, overrides) {
@@ -2181,7 +2240,6 @@
     allSS[session] = Object.assign(cur, overrides);
     _alarmStatus.sessionSettings = allSS;
     if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: 'alarm_config_update', config: { sessionSettings: allSS } }));
-    renderAlarmPopoverContent();
   }
 
   function loadGroupList(filter) {
@@ -2336,6 +2394,7 @@
 
   function updateAlarmUI() {
     updateAlarmSidebarDot();
+    if (_alarmPopoverEl && _alarmPopoverEl.querySelector('.alarm-group-settings-panel')) return;
     renderAlarmPopoverContent();
   }
 

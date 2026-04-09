@@ -642,192 +642,111 @@ def get_table_audit_log(table_ref: str, engine: str = "HIVE", page_size: int = 2
 
 
 @mcp.tool()
-def update_table_info(
+def update_datamap(
     table_ref: str,
-    description: str = "",
-    technical_pic: str = "",
-    business_pic: str = "",
-    data_warehouse_layer: str = "",
-    market_region: str = "",
-    table_status: str = "",
+    payload: str,
     idc_region: str = "SG",
     dry_run: bool = True,
 ) -> str:
     """
-    更新 DataMap 中表的元数据信息（通过 Open API）。
+    更新 DataMap 表/字段元数据（Open API）。统一入口，自动路由到正确的 API 端点。
 
-    默认 dry_run=True，仅预览变更（对比当前值与目标值），不执行更新。
-    确认无误后设置 dry_run=False 执行实际更新。
+    payload 中包含 "columns" 字段时 → 调用 /system/hive/updateColumnInfo
+    payload 中不含 "columns" 字段时 → 调用 /system/hive/updateTableInfo
 
-    只需传入要修改的字段，未传入的字段不会被更新。
+    idcRegion / schema / table 由 table_ref 和 idc_region 参数自动填充，无需在 payload 中重复。
+    默认 dry_run=True 仅预览，设置 dry_run=False 执行实际更新。
 
     参数:
         table_ref: 表名，格式 "database.table" 或 "table"（默认 database=spx_mart）
-        description: 表描述
-        technical_pic: 技术负责人邮箱，多个用逗号分隔
-        business_pic: 业务负责人邮箱，多个用逗号分隔
-        data_warehouse_layer: 数仓分层（ODS/DWD/DWS/ADS/DIM）
-        market_region: 市场区域
-        table_status: 表生命周期状态（ACTIVE/MIGRATED/DEPRECATED/OFFLINE）
+        payload: JSON 字符串，直接映射到 API 请求体。
         idc_region: IDC 区域，默认 "SG"
         dry_run: True=仅预览，False=执行更新
 
-    示例:
-        update_table_info("spx_mart.dwd_spx_spsso_order_base_info_di_id", description="SPX order base")
-        update_table_info("spx_mart.dwd_spx_spsso_order_base_info_di_id", table_status="MIGRATED", dry_run=False)
+    ── updateTableInfo 支持的字段 ──
+        description: string — 表描述
+        technicalPIC: ["email1", "email2"] — 技术负责人
+        businessPIC: ["email1"] — 业务负责人
+        dataWarehouseLayer: string — ODS/DWD/DWS/ADS/DIM
+        marketRegion: string — 市场区域
+        status: object — 表生命周期状态（嵌套结构）
+            status.status: "ACTIVE" | "MIGRATED" | "DEPRECATED" | "OFFLINE"
+            status.migrationEntity: {idcRegion, schema, table, migrationDetails, migrationDate(ms)}
+            status.deprecatedEntity: {deprecationDetails, deprecationDate(ms)}
+        serviceLevelAgreement: {dayOfMonth, dayOfWeek, hour} — SLA
+        correspondingMartTables: [{table, schema, idcRegionEnum}] — 关联 Mart 表
+        updateToNullFields: ["field1"] — 要清空的字段
+
+    ── updateColumnInfo 支持的字段 ──
+        columns: [
+            {columnName: string, description: string, calculationLogic: string,
+             enumeration: string, bizPrimaryKey: boolean}
+        ]
+
+    示例 1 — 标记表为 MIGRATED:
+        payload = '{"status": {"status": "MIGRATED", "migrationEntity": {"idcRegion": "SG", "schema": "spx_datamart", "table": "dim_xxx_ri_tw", "migrationDate": 1743465600000}}}'
+
+    示例 2 — 修改表描述:
+        payload = '{"description": "新表描述"}'
+
+    示例 3 — 更新字段信息:
+        payload = '{"columns": [{"columnName": "order_id", "description": "订单ID", "bizPrimaryKey": true}]}'
+
+    示例 4 — 同时更新多个字段:
+        payload = '{"columns": [{"columnName": "col1", "description": "x"}, {"columnName": "col2", "description": "y"}]}'
     """
     try:
         database, table = _parse_table_ref(table_ref)
+        qn = _qualified_name(database, table)
 
-        payload = {"idcRegion": idc_region, "schema": database, "table": table}
-        changes = {}
+        try:
+            body = json.loads(payload)
+        except json.JSONDecodeError as e:
+            return json.dumps({"error": f"payload JSON 解析失败: {e}"}, ensure_ascii=False)
 
-        if description:
-            payload["description"] = description
-            changes["description"] = description
-        if technical_pic:
-            pic_list = [p.strip() for p in technical_pic.split(",") if p.strip()]
-            payload["technicalPIC"] = pic_list
-            changes["technicalPIC"] = pic_list
-        if business_pic:
-            pic_list = [p.strip() for p in business_pic.split(",") if p.strip()]
-            payload["businessPIC"] = pic_list
-            changes["businessPIC"] = pic_list
-        if data_warehouse_layer:
-            payload["dataWarehouseLayer"] = data_warehouse_layer
-            changes["dataWarehouseLayer"] = data_warehouse_layer
-        if market_region:
-            payload["marketRegion"] = market_region
-            changes["marketRegion"] = market_region
-        if table_status:
-            payload["tableStatus"] = table_status
-            changes["tableStatus"] = table_status
+        if not isinstance(body, dict) or not body:
+            return json.dumps({"error": "payload 必须是非空 JSON 对象"}, ensure_ascii=False)
 
-        if not changes:
-            return json.dumps({"error": "未指定任何要更新的字段"}, ensure_ascii=False)
+        is_column_update = "columns" in body
+        api_path = "/system/hive/updateColumnInfo" if is_column_update else "/system/hive/updateTableInfo"
+
+        request_body = {"idcRegion": idc_region, "schema": database, "table": table}
+        request_body.update(body)
 
         if dry_run:
             current = {}
             try:
-                qn = _qualified_name(database, table)
-                data = _request("GET", "/dataWarehouse/HIVE/info", params={"qualifiedName": qn})
-                if isinstance(data, dict):
-                    for field in changes:
-                        current[field] = data.get(field, "")
+                if is_column_update:
+                    for c in body["columns"]:
+                        cn = c.get("columnName", "")
+                        if cn:
+                            data = _request("GET", "/dataWarehouse/HIVE/columnDetail",
+                                            params={"qualifiedName": qn, "columnName": cn})
+                            if isinstance(data, dict):
+                                current[cn] = {k: data.get(k, "") for k in c if k != "columnName"}
+                else:
+                    data = _request("GET", "/dataWarehouse/HIVE/info", params={"qualifiedName": qn})
+                    if isinstance(data, dict):
+                        for key in body:
+                            current[key] = data.get(key if key != "status" else "tableStatus", "")
             except Exception as e:
                 current["_fetch_error"] = str(e)
 
             return json.dumps({
                 "mode": "DRY_RUN",
                 "table": f"{database}.{table}",
-                "idc_region": idc_region,
-                "proposed_changes": changes,
+                "api": api_path,
+                "request_body": request_body,
                 "current_values": current,
-                "note": "设置 dry_run=False 执行实际更新",
+                "note": "确认无误后设置 dry_run=False 执行实际更新",
             }, ensure_ascii=False, indent=2)
 
-        resp_data = _open_api_post("/system/hive/updateTableInfo", payload)
+        resp_data = _open_api_post(api_path, request_body)
         return json.dumps({
             "mode": "EXECUTED",
             "table": f"{database}.{table}",
-            "changes": changes,
-            "api_response": resp_data,
-        }, ensure_ascii=False, indent=2)
-    except Exception as e:
-        return json.dumps({"error": str(e)}, ensure_ascii=False)
-
-
-@mcp.tool()
-def update_column_info(
-    table_ref: str,
-    column_name: str,
-    description: str = "",
-    calculation_logic: str = "",
-    enumeration: str = "",
-    biz_primary_key: str = "",
-    idc_region: str = "SG",
-    dry_run: bool = True,
-) -> str:
-    """
-    更新 DataMap 中表的字段元数据信息（通过 Open API）。
-
-    默认 dry_run=True，仅预览变更，不执行更新。
-    确认无误后设置 dry_run=False 执行实际更新。
-
-    只需传入要修改的字段，未传入的字段不会被更新。
-
-    参数:
-        table_ref: 表名，格式 "database.table" 或 "table"（默认 database=spx_mart）
-        column_name: 列名
-        description: 列描述
-        calculation_logic: 计算逻辑说明
-        enumeration: 枚举值说明
-        biz_primary_key: 是否业务主键，"true"/"false"（为空不更新）
-        idc_region: IDC 区域，默认 "SG"
-        dry_run: True=仅预览，False=执行更新
-
-    示例:
-        update_column_info("spx_mart.dwd_spx_spsso_order_base_info_di_id", "order_id", description="order unique ID")
-        update_column_info("spx_mart.dwd_spx_spsso_order_base_info_di_id", "order_id", description="order unique ID", dry_run=False)
-    """
-    try:
-        database, table = _parse_table_ref(table_ref)
-
-        column_entry = {"columnName": column_name}
-        changes = {}
-
-        if description:
-            column_entry["description"] = description
-            changes["description"] = description
-        if calculation_logic:
-            column_entry["calculationLogic"] = calculation_logic
-            changes["calculationLogic"] = calculation_logic
-        if enumeration:
-            column_entry["enumeration"] = enumeration
-            changes["enumeration"] = enumeration
-        if biz_primary_key:
-            val = biz_primary_key.lower() == "true"
-            column_entry["bizPrimaryKey"] = val
-            changes["bizPrimaryKey"] = val
-
-        if not changes:
-            return json.dumps({"error": "未指定任何要更新的字段"}, ensure_ascii=False)
-
-        if dry_run:
-            current = {}
-            try:
-                qn = _qualified_name(database, table)
-                data = _request("GET", "/dataWarehouse/HIVE/columnDetail", params={
-                    "qualifiedName": qn,
-                    "columnName": column_name,
-                })
-                if isinstance(data, dict):
-                    for field in changes:
-                        current[field] = data.get(field, "")
-            except Exception as e:
-                current["_fetch_error"] = str(e)
-
-            return json.dumps({
-                "mode": "DRY_RUN",
-                "table": f"{database}.{table}",
-                "column": column_name,
-                "proposed_changes": changes,
-                "current_values": current,
-                "note": "设置 dry_run=False 执行实际更新",
-            }, ensure_ascii=False, indent=2)
-
-        payload = {
-            "idcRegion": idc_region,
-            "schema": database,
-            "table": table,
-            "columns": [column_entry],
-        }
-        resp_data = _open_api_post("/system/hive/updateColumnInfo", payload)
-        return json.dumps({
-            "mode": "EXECUTED",
-            "table": f"{database}.{table}",
-            "column": column_name,
-            "changes": changes,
+            "api": api_path,
+            "changes": body,
             "api_response": resp_data,
         }, ensure_ascii=False, indent=2)
     except Exception as e:

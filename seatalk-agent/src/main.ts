@@ -1548,11 +1548,13 @@ async function main() {
           const logFile = path.join(agentLogDir, 'restart.log');
           const logFd = fs.openSync(logFile, 'a');
           fs.writeSync(logFd, `\n--- restart at ${new Date().toISOString()} ---\n`);
+          const childEnv = { ...process.env };
+          delete childEnv.SEATALK_LAUNCHER;
           const child = spawnChild('npx', ['tsx', path.resolve(__dirname, 'main.ts')], {
             cwd: path.resolve(__dirname, '..'),
             detached: true,
             stdio: ['ignore', logFd, logFd],
-            env: { ...process.env, SEATALK_LAUNCHER: '1' },
+            env: childEnv,
             shell: true,
           });
           child.unref();

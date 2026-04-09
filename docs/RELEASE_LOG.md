@@ -6,6 +6,46 @@
 
 ---
 
+## v3.5.1 -- 2026-04-09 -- `fix`: Alarm Bot UI 修复 + DataMap MCP 重构 + Agent 重启修复
+
+**提交者**: @tianyi.liang
+**Commit Type**: fix
+**修改模块**: SeaTalk Agent / MCP 工具
+
+### 变更说明
+
+**[修复] Alarm Bot UI**
+- 修复添加规则时输入一条出两条的问题（Enter + blur 双触发）
+- 修复 OR/AND 切换按钮点击时输入框被 blur 移除的问题
+- 创建规则时可直接选择 OR/AND，不需要创建后再改
+- 每条规则独立设置 OR/AND 逻辑（去掉全局 matchMode）
+- 修复处理延迟 0 分钟无法保存的问题
+- OR/AND 标签增大字号加边框，增加提示文字
+
+**[修复] Agent 重启机制**
+- 修复独立模式重启时错误设置 SEATALK_LAUNCHER 环境变量，导致二次重启走 exit(42) 无人接管
+
+**[重构] DataMap MCP**
+- 合并 update_table_info + update_column_info 为统一的 update_datamap 工具
+- 修复 tableStatus 更新无效问题：status 需嵌套在 status 对象中，非顶层字段
+- 工具接受灵活 JSON payload，Agent 直接构造 API 请求体
+- 根据 payload 中是否含 columns 字段自动路由到 updateTableInfo / updateColumnInfo
+- 删除冗余的 batch_update_table_status.py
+
+### 测试情况
+
+| 测试项 | 结果 | 备注 |
+|--------|------|------|
+| Chrome 扩展加载正常 | N/A | |
+| MCP 工具连接正常 | [OK] | DataMap update_datamap 测试通过，tableStatus 成功改为 MIGRATED |
+| SeaTalk Agent 启动+注入正常 | [OK] | |
+| SeaTalk Agent 重启后 UI 恢复 | [OK] | |
+| 修改的功能正常工作 | [OK] | Alarm Bot 规则添加、OR/AND 切换、处理延迟保存均正常 |
+| 已有功能未被破坏 | [OK] | |
+| 控制台无新增错误 | [OK] | |
+
+---
+
 ## v3.5.0 -- 2026-04-09 -- `feat`: Alarm Bot 告警自动排查
 
 **提交者**: @tianyi.liang
