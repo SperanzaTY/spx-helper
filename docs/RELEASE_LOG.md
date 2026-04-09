@@ -6,6 +6,29 @@
 
 ---
 
+## v3.5.7 -- 2026-04-09 -- `feat`: Flink MCP 新增 Logify 日志链接生成
+
+**提交者**: @tianyi.liang
+**Commit Type**: feat
+**修改模块**: MCP 工具
+
+### 变更说明
+- 新增 `get_flink_log_url` 工具：生成 Logify (Kibana) 日志查看链接，附带常用排错关键词提示（Failed to execute sql / Exception / OOM 等）
+- `diagnose_flink_app` 诊断结果自动附带 `logifyUrl` 字段，有问题时 suggestions 里提示查看日志
+- URL 格式：`datasuite.shopee.io/logify/discover?logStoreId=73&app_id=flink-{app_id}&application_id=app{app_id}instance{instance_id}`
+
+### 测试情况
+
+| 测试项 | 结果 | 备注 |
+|--------|------|------|
+| Chrome 扩展加载正常 | N/A | |
+| MCP 工具连接正常 | N/A | |
+| 修改的功能正常工作 | [OK] | URL 格式与 DataSuite 页面一致 |
+| 已有功能未被破坏 | [OK] | |
+| 控制台无新增错误 | [OK] | |
+
+---
+
 ## v3.5.6 -- 2026-04-09 -- `feat`: Flink MCP 新增从表名反查上下游任务
 
 **提交者**: @tianyi.liang

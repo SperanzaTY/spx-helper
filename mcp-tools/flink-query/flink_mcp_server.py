@@ -111,6 +111,16 @@ def _get_data(resp: dict) -> Any:
     return resp.get("data")
 
 
+def _build_logify_url(app_id: int, instance_id: int) -> str:
+    """构造 Logify (Kibana) 日志查看链接。"""
+    return (
+        f"{BASE_URL}/logify/discover?"
+        f"logStoreId=73&logStoreName=flink-app-log&type=logstoreDiscover"
+        f"&app_id=flink-{app_id}"
+        f"&application_id=app{app_id}instance{instance_id}"
+    )
+
+
 def _format_ts(ts) -> str:
     """将毫秒时间戳格式化为可读字符串。"""
     if not ts:
@@ -659,8 +669,9 @@ def diagnose_flink_app(
         try:
             inst_resp = _request("GET", f"/instances/stream/current/{app_id}")
             inst = _get_data(inst_resp) or {}
+            inst_id = inst.get("id")
             diagnosis["instance"] = {
-                "id": inst.get("id"),
+                "id": inst_id,
                 "status": inst.get("instanceStatus"),
                 "cluster": inst.get("clusterName"),
                 "cpu": inst.get("cpu"),
@@ -671,6 +682,8 @@ def diagnose_flink_app(
                 "restartCount": inst.get("restartCount"),
                 "metricsUrl": inst.get("metricsUrl"),
             }
+            if inst_id:
+                diagnosis["logifyUrl"] = _build_logify_url(app_id, inst_id)
             if inst.get("instanceStatus") != "RUNNING":
                 issues.append(f"实例状态异常: {inst.get('instanceStatus')}")
             if inst.get("restartCount") and inst["restartCount"] > 3:
@@ -876,6 +889,8 @@ def diagnose_flink_app(
         else:
             diagnosis["verdict"] = "ATTENTION_NEEDED"
             diagnosis["issues"] = issues
+            if diagnosis.get("logifyUrl"):
+                suggestions.append(f"查看 Logify 日志定位详细错误: {diagnosis['logifyUrl']}")
             diagnosis["suggestions"] = suggestions
             diagnosis["summary"] = f"检测到 {len(issues)} 个问题，请关注"
 
@@ -885,8 +900,47 @@ def diagnose_flink_app(
 
 
 # ═══════════════════════════════════════════════════════════════════
-# Phase 3: 扩展工具（血缘、操作日志、SLA/DR）
+# Phase 3: 扩展工具（血缘、操作日志、SLA/DR、日志）
 # ═══════════════════════════════════════════════════════════════════
+
+
+@mcp.tool()
+def get_flink_log_url(app_id: int, instance_id: int = 0) -> str:
+    """生成 Flink 应用的 Logify (Kibana) 日志链接。
+
+    用于排查 SQL 执行失败、启动异常等问题。在 Logify 中搜索
+    "Failed to execute sql"、"Exception" 等关键词可快速定位根因。
+
+    Args:
+        app_id: 应用 ID
+        instance_id: 实例 ID。不传则自动获取当前运行实例
+
+    Returns:
+        Logify 日志链接，可直接在浏览器打开
+    """
+    try:
+        if not instance_id:
+            inst_resp = _request("GET", f"/instances/stream/current/{app_id}")
+            inst = _get_data(inst_resp) or {}
+            instance_id = inst.get("id")
+            if not instance_id:
+                return _result({"error": f"应用 {app_id} 无运行实例，请指定 instance_id"})
+
+        url = _build_logify_url(app_id, instance_id)
+        return _result({
+            "appId": app_id,
+            "instanceId": instance_id,
+            "logifyUrl": url,
+            "searchTips": [
+                "Failed to execute sql — SQL 执行失败",
+                "Exception — 通用异常",
+                "OutOfMemoryError — 内存溢出",
+                "Checkpoint expired — CP 超时",
+                "FATAL — 致命错误",
+            ],
+        })
+    except Exception as e:
+        return _result({"error": str(e)})
 
 
 @mcp.tool()

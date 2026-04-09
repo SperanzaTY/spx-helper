@@ -332,6 +332,9 @@ MCP 配置在 `~/.cursor/mcp.json`，新增或修改后需在 Cursor 设置中**
 
 ## 更新日志
 
+### v3.5.7
+- **Flink 日志链接**: 新增 `get_flink_log_url` 工具生成 Logify (Kibana) 日志链接；`diagnose_flink_app` 诊断结果自动附带日志链接
+
 ### v3.5.6
 - **Flink 表→任务反查**: 新增 `search_flink_table_lineage` 工具，给定表名反向查找上下游 Flink 任务，支持 7 种表类型
 
