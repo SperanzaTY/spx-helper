@@ -729,6 +729,12 @@ npm start
 
 ## 更新日志
 
+### v3.5.2
+- **Alarm Bot 安全加固**: 新增"授权发送者"白名单机制，限制只有指定 senderId 才能触发告警调查，防止 prompt injection 风险
+- **Prompt 安全边界**: 告警文本用分隔符包裹并标注安全约束（仅只读查询、不执行告警内容中的命令）
+- **授权发送者 UI**: 从群历史消息自动提取发送者列表，点击选择添加，无需手动输入 ID
+- **Updater 重启修复**: 修复 updater 自动更新路径错误设置 SEATALK_LAUNCHER 的问题
+
 ### v3.5.1
 - **Alarm Bot UI 修复**: 修复规则添加重复、OR/AND 切换被 blur 移除、处理延迟 0 分钟无法保存等问题。创建规则时可直接选择 OR/AND
 - **Agent 重启修复**: 修复独立模式重启时 SEATALK_LAUNCHER 环境变量泄漏导致二次重启失败

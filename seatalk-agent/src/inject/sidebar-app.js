@@ -1955,18 +1955,23 @@
     }
     var ss = (_alarmStatus.sessionSettings && _alarmStatus.sessionSettings[g.session]) || {};
     var patCount = (ss.patterns || []).length;
+    var senderCount = (ss.allowedSenders || []).length;
     var badges = [];
     if (patCount > 0) badges.push(patCount + '\u6761\u89C4\u5219');
     var tm = ss.timeoutMinutes;
     if (typeof tm === 'number') badges.push(tm === 0 ? '\u5373\u65F6' : tm + '\u5206\u949F');
     if (ss.workspace) badges.push('\u5DE5\u4F5C\u533A');
     if (ss.requireMention) badges.push('@\u6211');
+    var securityBadge = senderCount > 0
+      ? '<span style="font-size:8px;color:#a6e3a1;margin-left:2px" title="' + senderCount + ' 个授权发送者">[S:' + senderCount + ']</span>'
+      : '<span style="font-size:8px;color:#f9e2af;margin-left:2px" title="未设置授权发送者（不安全）">[!]</span>';
     var badgeColor = badges.length > 0 ? '#4ec9b0' : 'rgba(255,255,255,0.25)';
     var badgeText = badges.length > 0 ? badges.join(' | ') : '\u914D\u7F6E';
     return '<div style="display:flex;align-items:center;gap:4px;padding:2px 0">' +
       '<input type="checkbox" class="alarm-group-cb" data-session="' + escapeHtml(g.session) + '" data-was-checked="1" checked style="margin:0">' +
       '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:rgba(255,255,255,0.6);flex:1;cursor:default">' + escapeHtml(g.name) + '</span>' +
       '<span class="alarm-group-settings-btn" data-session="' + escapeHtml(g.session) + '" data-name="' + escapeHtml(g.name) + '" style="flex-shrink:0;font-size:9px;color:' + badgeColor + ';cursor:pointer;padding:1px 5px;font-family:monospace;border:1px solid ' + badgeColor + ';border-radius:3px;opacity:0.7" title="点击配置此群的告警规则">' + badgeText + '</span>' +
+      securityBadge +
     '</div>';
   }
 
@@ -2029,6 +2034,21 @@
       '</span>';
     }
 
+    var allowedSenders = (ss.allowedSenders || []).slice();
+    var sendersHtml = '';
+    for (var si = 0; si < allowedSenders.length; si++) {
+      var sender = allowedSenders[si];
+      var sLabel = sender.name ? escapeHtml(sender.name) + ' (' + escapeHtml(String(sender.id)) + ')' : escapeHtml(String(sender.id));
+      sendersHtml += '<span class="gsp-sender-chip" data-idx="' + si + '" style="display:inline-flex;align-items:center;gap:3px;padding:2px 6px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:3px;font-size:9px;color:rgba(255,255,255,0.6);max-width:220px">' +
+        '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0">' + sLabel + '</span>' +
+        '<span class="gsp-sender-del" data-idx="' + si + '" style="cursor:pointer;color:rgba(255,255,255,0.3);font-size:13px;line-height:1;flex-shrink:0;padding:0 2px">&times;</span>' +
+      '</span>';
+    }
+
+    var senderWarningHtml = allowedSenders.length === 0
+      ? '<div style="font-size:9px;color:#f9e2af;background:rgba(249,226,175,0.08);border:1px solid rgba(249,226,175,0.2);border-radius:3px;padding:3px 6px;margin-bottom:4px">[WARNING] 未设置授权发送者，任何群成员都可触发告警</div>'
+      : '';
+
     var selectStyle = 'background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.08);border-radius:4px;color:rgba(255,255,255,0.7);font-size:10px;padding:3px 6px;outline:none';
 
     panel.innerHTML =
@@ -2046,6 +2066,14 @@
         '</div>' +
         '<div class="gsp-pattern-chips" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:4px">' + (patternsHtml || '<span style="font-size:9px;color:rgba(255,255,255,0.2);font-style:italic">无规则</span>') + '</div>' +
         (patterns.length > 0 ? '<div style="font-size:8px;color:rgba(255,255,255,0.2);margin-bottom:4px">点击规则前的 OR/AND 切换匹配逻辑</div>' : '') +
+      '</div>' +
+      '<div style="margin-bottom:6px">' +
+        '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px">' +
+          '<span style="font-size:9px;color:rgba(255,255,255,0.35)">授权发送者</span>' +
+          '<button class="gsp-sender-add-btn" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:4px;color:rgba(255,255,255,0.5);font-size:9px;padding:1px 6px;cursor:pointer">+ 添加</button>' +
+        '</div>' +
+        senderWarningHtml +
+        '<div class="gsp-sender-chips" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:4px">' + (sendersHtml || '<span style="font-size:9px;color:rgba(255,255,255,0.2);font-style:italic">无限制（不安全）</span>') + '</div>' +
       '</div>' +
       '<div style="display:flex;gap:8px;margin-bottom:6px;flex-wrap:wrap;font-size:10px;color:rgba(255,255,255,0.4)">' +
         '<div style="display:flex;align-items:center;gap:3px">' +
@@ -2116,6 +2144,102 @@
           showGroupSettingsPanel(session, name);
         }
       }
+    });
+
+    // Sender chip delete
+    panel.querySelector('.gsp-sender-chips').addEventListener('click', function (e) {
+      var target = e.target;
+      if (target.classList.contains('gsp-sender-del')) {
+        e.stopPropagation();
+        var idx = parseInt(target.getAttribute('data-idx'), 10);
+        var cur = getCurrentAllowedSenders(session);
+        cur.splice(idx, 1);
+        saveGroupSettings(session, null, { allowedSenders: cur });
+        showGroupSettingsPanel(session, name);
+      }
+    });
+
+    // Add sender — pick from group's recent senders
+    panel.querySelector('.gsp-sender-add-btn').addEventListener('click', function () {
+      var chipsEl = panel.querySelector('.gsp-sender-chips');
+      if (!chipsEl) return;
+      var existingPicker = chipsEl.querySelector('.gsp-sender-picker');
+      if (existingPicker) { existingPicker.querySelector('input').focus(); return; }
+
+      var currentIds = {};
+      var curSenders = getCurrentAllowedSenders(session);
+      for (var ci = 0; ci < curSenders.length; ci++) currentIds[String(curSenders[ci].id)] = true;
+
+      var candidates = getGroupSenders(session, currentIds);
+
+      var picker = document.createElement('div');
+      picker.className = 'gsp-sender-picker';
+      picker.style.cssText = 'margin-top:4px;background:rgba(20,20,20,0.95);border:1px solid rgba(78,201,176,0.3);border-radius:4px;overflow:hidden;max-height:160px;display:flex;flex-direction:column';
+
+      var searchInp = document.createElement('input');
+      searchInp.type = 'text';
+      searchInp.placeholder = '搜索群成员名称...';
+      searchInp.style.cssText = 'background:rgba(255,255,255,0.06);border:none;border-bottom:1px solid rgba(255,255,255,0.08);color:rgba(255,255,255,0.8);font-size:10px;padding:5px 8px;outline:none;flex-shrink:0';
+
+      var listDiv = document.createElement('div');
+      listDiv.style.cssText = 'overflow-y:auto;flex:1;min-height:0';
+
+      function renderList(filter) {
+        var q = (filter || '').toLowerCase();
+        var filtered = candidates.filter(function (c) {
+          return !q || c.name.toLowerCase().indexOf(q) >= 0 || String(c.id).indexOf(q) >= 0;
+        });
+        if (filtered.length === 0) {
+          listDiv.innerHTML = '<div style="padding:8px;font-size:9px;color:rgba(255,255,255,0.2);font-style:italic;text-align:center">' +
+            (candidates.length === 0 ? '无法获取群成员（需要先收到群消息）' : '无匹配') + '</div>';
+          return;
+        }
+        var html = '';
+        for (var fi = 0; fi < filtered.length; fi++) {
+          var c = filtered[fi];
+          html += '<div class="gsp-sender-option" data-id="' + escapeHtml(String(c.id)) + '" data-name="' + escapeHtml(c.name) + '" style="padding:4px 8px;font-size:10px;color:rgba(255,255,255,0.7);cursor:pointer;display:flex;align-items:center;gap:6px;border-bottom:1px solid rgba(255,255,255,0.03)">' +
+            '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escapeHtml(c.name) + '</span>' +
+            '<span style="font-size:8px;color:rgba(255,255,255,0.25);font-family:monospace;flex-shrink:0">' + escapeHtml(String(c.id)) + '</span>' +
+          '</div>';
+        }
+        listDiv.innerHTML = html;
+      }
+
+      searchInp.addEventListener('input', function () { renderList(this.value); });
+      renderList('');
+
+      listDiv.addEventListener('click', function (e) {
+        var opt = e.target.closest('.gsp-sender-option');
+        if (!opt) return;
+        var sid = opt.getAttribute('data-id');
+        var sname = opt.getAttribute('data-name');
+        var cur = getCurrentAllowedSenders(session);
+        cur.push({ id: sid, name: sname });
+        saveGroupSettings(session, null, { allowedSenders: cur });
+        showGroupSettingsPanel(session, name);
+      });
+
+      listDiv.addEventListener('mouseover', function (e) {
+        var opt = e.target.closest('.gsp-sender-option');
+        if (opt) opt.style.background = 'rgba(78,201,176,0.1)';
+      });
+      listDiv.addEventListener('mouseout', function (e) {
+        var opt = e.target.closest('.gsp-sender-option');
+        if (opt) opt.style.background = '';
+      });
+
+      picker.appendChild(searchInp);
+      picker.appendChild(listDiv);
+      chipsEl.appendChild(picker);
+      searchInp.focus();
+
+      var closePicker = function (e) {
+        if (!picker.contains(e.target) && e.target !== panel.querySelector('.gsp-sender-add-btn')) {
+          picker.remove();
+          document.removeEventListener('mousedown', closePicker);
+        }
+      };
+      setTimeout(function () { document.addEventListener('mousedown', closePicker); }, 50);
     });
 
     // Add pattern — inline input with OR/AND toggle
@@ -2203,6 +2327,7 @@
     panel.querySelector('.alarm-gsp-save').addEventListener('click', function () {
       var cfg = {};
       cfg.patterns = getCurrentPatterns(session);
+      cfg.allowedSenders = getCurrentAllowedSenders(session);
       var tv = parseInt(panel.querySelector('.gsp-timeout').value, 10);
       cfg.timeoutMinutes = isNaN(tv) ? 5 : tv;
       cfg.requireMention = panel.querySelector('.gsp-mention').checked;
@@ -2232,6 +2357,51 @@
       if (typeof p === 'string') return { regex: p, op: 'or' };
       return { regex: p.regex, op: p.op || 'or' };
     });
+  }
+
+  function getCurrentAllowedSenders(session) {
+    var ss = (_alarmStatus.sessionSettings && _alarmStatus.sessionSettings[session]) || {};
+    return (ss.allowedSenders || []).map(function (s) {
+      return { id: String(s.id), name: s.name || '' };
+    });
+  }
+
+  function getGroupSenders(session, excludeIds) {
+    var senders = {};
+    try {
+      var state = window.store.getState();
+      var userInfo = (state.contact && state.contact.userInfo) || {};
+      var myUid = (state.login && (state.login.userid || (state.login.userInfo && state.login.userInfo.id))) || null;
+
+      // Extract from message store — messages keyed like "group-12345-msgid"
+      var msgSlice = state.messages;
+      var msgMap = {};
+      if (msgSlice) {
+        if (msgSlice.messages && typeof msgSlice.messages === 'object') msgMap = msgSlice.messages;
+        else if (msgSlice.data && typeof msgSlice.data === 'object') msgMap = msgSlice.data;
+      }
+      var prefix = session + '-';
+      for (var key in msgMap) {
+        if (key.indexOf(prefix) !== 0) continue;
+        var m = msgMap[key];
+        if (!m || typeof m !== 'object') continue;
+        var sid = m.senderId || m.sender_id || m.from;
+        if (!sid) continue;
+        var sidStr = String(sid);
+        if (excludeIds[sidStr]) continue;
+        if (myUid && sidStr === String(myUid)) continue;
+        if (!senders[sidStr]) {
+          var u = userInfo[sid];
+          senders[sidStr] = { id: sidStr, name: (u && u.name) || 'user-' + sidStr, ts: 0 };
+        }
+        var ts = m.timeStamp || m.timestamp || m.ts || 0;
+        if (ts > senders[sidStr].ts) senders[sidStr].ts = ts;
+      }
+    } catch (_) {}
+    var result = [];
+    for (var k in senders) result.push(senders[k]);
+    result.sort(function (a, b) { return b.ts - a.ts; });
+    return result;
   }
 
   function saveGroupSettings(session, panel, overrides) {

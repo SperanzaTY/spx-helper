@@ -837,7 +837,7 @@ async function main() {
   }
 
   async function investigateAlarm(alarm: PendingAlarm): Promise<string> {
-    log(`[alarm] investigating: ${alarm.sessionName} — "${alarm.text.substring(0, 80)}"`);
+    log(`[alarm] investigating: ${alarm.sessionName} — sender: ${alarm.sender}(${alarm.senderId}) — "${alarm.text.substring(0, 80)}"`);
     bridge.sendToPanel({ type: 'alarm_investigating', mid: alarm.mid, session: alarm.session, sessionName: alarm.sessionName }).catch(() => {});
 
     const promptText = alarmManager.buildPrompt(alarm);
@@ -1602,11 +1602,13 @@ async function main() {
               const updLogFile = path.join(updLogDir, 'restart.log');
               const updLogFd = fs.openSync(updLogFile, 'a');
               fs.writeSync(updLogFd, `\n--- updater restart at ${new Date().toISOString()} ---\n`);
+              const updChildEnv = { ...process.env };
+              delete updChildEnv.SEATALK_LAUNCHER;
               const child = spawnChild('npx', ['tsx', path.resolve(__dirname, 'main.ts')], {
                 cwd: path.resolve(__dirname, '..'),
                 detached: true,
                 stdio: ['ignore', updLogFd, updLogFd],
-                env: { ...process.env, SEATALK_LAUNCHER: '1' },
+                env: updChildEnv,
                 shell: true,
               });
               child.unref();

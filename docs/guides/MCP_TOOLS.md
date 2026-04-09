@@ -332,6 +332,9 @@ MCP 配置在 `~/.cursor/mcp.json`，新增或修改后需在 Cursor 设置中**
 
 ## 更新日志
 
+### v3.5.2
+- **DataMap MCP**: 自动解析 IDC 区域差异 -- 查询非 SG 表（如 BR 表，qualifiedName 为 `prod#USEast`）时，若默认 QN 查不到，自动搜索正确 qualifiedName 并重试，结果带缓存
+
 ### v3.5.1
 - **DataMap MCP**: 合并 `update_table_info` + `update_column_info` 为统一的 `update_datamap` 工具。修复 tableStatus 更新无效（需嵌套在 status 对象中）。工具接受灵活 JSON payload，自动路由到 updateTableInfo / updateColumnInfo 端点
 

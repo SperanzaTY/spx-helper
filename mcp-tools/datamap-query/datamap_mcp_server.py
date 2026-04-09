@@ -55,8 +55,56 @@ HEADERS = {
 
 MAX_RETRIES = 2
 
+_qn_cache: Dict[str, str] = {}
 
-def _request(method: str, path: str, params: dict = None, json_body: dict = None, *, prefix: str = None) -> Any:
+
+def _search_resolve_qn(orig_qn: str) -> Optional[str]:
+    """Search DataMap to find the correct qualifiedName (handles IDC region mismatch).
+
+    Some tables live in non-default IDC regions (e.g. prod#USEast for BR),
+    so the default hive@prod@db@table won't match. This searches by table name
+    and returns the actual qualifiedName.
+    """
+    parts = orig_qn.split("@")
+    if len(parts) < 3:
+        return None
+    table_name = parts[-1]
+    database = parts[-2]
+    cache_key = f"{database}.{table_name}"
+    if cache_key in _qn_cache:
+        return _qn_cache[cache_key]
+
+    try:
+        cookies = _load_cookies()
+        hdrs = HEADERS.copy()
+        hdrs["referer"] = f"{BASE_URL}/datamap"
+        if "CSRF-TOKEN" in cookies:
+            hdrs["x-csrf-token"] = cookies["CSRF-TOKEN"]
+        resp = requests.get(
+            f"{BASE_URL}{API_PREFIX}/dataWarehouse/previewSearch",
+            params={"keyword": table_name},
+            cookies=cookies, headers=hdrs, timeout=15,
+        )
+        if resp.status_code != 200:
+            return None
+        body = resp.json()
+        if not body.get("success"):
+            return None
+        data = body.get("data", {})
+        results = data.get("matchTableResultList", []) if isinstance(data, dict) else []
+        for r in results:
+            if r.get("schema") == database and r.get("tableName") == table_name:
+                qn = r.get("qualifiedName")
+                if qn and qn != orig_qn:
+                    logger.info(f"[QN] Resolved {database}.{table_name}: {orig_qn} → {qn}")
+                    _qn_cache[cache_key] = qn
+                    return qn
+    except Exception as e:
+        logger.debug(f"[QN] Search resolve failed: {e}")
+    return None
+
+
+def _request_raw(method: str, path: str, params: dict = None, json_body: dict = None, *, prefix: str = None) -> Any:
     """Send request and unwrap the DataSuite response envelope {success, code, data}."""
     url = BASE_URL + (prefix or API_PREFIX) + path
     cookies = _load_cookies()
@@ -101,6 +149,19 @@ def _request(method: str, path: str, params: dict = None, json_body: dict = None
                 continue
             raise RuntimeError(f"请求 {path} 失败: {e}") from e
     return {}
+
+
+def _request(method: str, path: str, params: dict = None, json_body: dict = None, *, prefix: str = None) -> Any:
+    """Wrapper around _request_raw with automatic qualifiedName IDC resolution."""
+    try:
+        return _request_raw(method, path, params, json_body, prefix=prefix)
+    except RuntimeError as e:
+        if "not found" in str(e).lower() and params and "qualifiedName" in params:
+            resolved = _search_resolve_qn(params["qualifiedName"])
+            if resolved:
+                params = {**params, "qualifiedName": resolved}
+                return _request_raw(method, path, params, json_body, prefix=prefix)
+        raise
 
 
 # ──────────────────────────── Open API (写入操作) ────────────────────────────
@@ -183,15 +244,16 @@ def get_table_info(table_ref: str, engine: str = "HIVE") -> str:
     try:
         database, table = _parse_table_ref(table_ref)
         qn = _qualified_name(database, table)
-        qn_b64 = _encode_qualified_name(database, table)
         data = _request("GET", f"/dataWarehouse/{engine}/info", params={"qualifiedName": qn})
+        actual_qn = _qn_cache.get(f"{database}.{table}", qn)
+        qn_b64 = base64.b64encode(actual_qn.encode()).decode()
 
         info = data if isinstance(data, dict) else {}
 
         result = {
             "table": f"{database}.{table}",
             "engine": engine,
-            "qualifiedName": qn,
+            "qualifiedName": actual_qn,
             "datamap_url": f"https://datasuite.shopee.io/datamap/data-warehouse/{engine}/{qn_b64}/Table_Info",
             "description": info.get("description", ""),
             "displayName": info.get("displayName", ""),

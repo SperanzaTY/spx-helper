@@ -16,6 +16,8 @@
   var _startTime = 0;
   var _msgCount = 0;
   var _sentTexts = {};
+  var _senderProbeCount = 0;
+  var _senderProbeMax = 5;
 
   function getMyUid() {
     try {
@@ -35,12 +37,16 @@
     } catch (_) { return key; }
   }
 
-  function getSenderName(senderId) {
+  function getSenderInfo(senderId) {
     try {
       var ui = window.store.getState().contact.userInfo || {};
-      var u = ui[senderId];
-      return u ? (u.name || 'user-' + senderId) : 'user-' + senderId;
-    } catch (_) { return 'user-' + senderId; }
+      return ui[senderId] || null;
+    } catch (_) { return null; }
+  }
+
+  function getSenderName(senderId) {
+    var u = getSenderInfo(senderId);
+    return u ? (u.name || 'user-' + senderId) : 'user-' + senderId;
   }
 
   function extractSessionKey(msgKey) {
@@ -171,6 +177,14 @@
         }
 
         var isMention = myUid && text.indexOf(String(myUid)) >= 0;
+
+        if (_senderProbeCount < _senderProbeMax) {
+          _senderProbeCount++;
+          var sInfo = getSenderInfo(senderId);
+          console.log('[seatalk-watch] sender probe #' + _senderProbeCount + ':', senderId,
+            sInfo ? JSON.stringify(Object.keys(sInfo)) : '(not in userInfo)',
+            sInfo ? JSON.stringify(sInfo) : '');
+        }
 
         newMsgs.push({
           mid: mid,

@@ -144,6 +144,12 @@ DataMap MCP 使用三组 API：
 
 ## Changelog
 
+### v3.5.2
+
+- 自动解析 IDC 区域差异：查询非 SG 表（如 BR 表，qualifiedName 为 `prod#USEast`）时，若默认 `hive@prod@db@table` 查不到，自动搜索正确 qualifiedName 并重试
+- QN 解析结果带内存缓存，同一表后续查询零开销
+- `get_table_info` 返回的 `qualifiedName` 和 `datamap_url` 反映实际解析后的值
+
 ### v3.5.1
 
 - 合并 `update_table_info` + `update_column_info` 为统一的 `update_datamap` 工具
