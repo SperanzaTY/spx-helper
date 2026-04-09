@@ -6,6 +6,32 @@
 
 ---
 
+## v3.5.8 -- 2026-04-09 -- `feat`: Flink MCP 新增 Logify 日志直查工具
+
+**提交者**: @tianyi.liang
+**Commit Type**: feat
+**修改模块**: MCP 工具
+
+### 变更说明
+- 新增 `query_flink_logs` MCP 工具，通过 Logify SSE API 直接查询 Flink 应用日志内容
+- 新增 `_logify_query_sse()` 底层函数，解析 SSE 流式响应（event:row / event:error / event:progress）
+- 支持 LogiQL 搜索语法（如 `message hasTokens 'Exception'`）、日志级别过滤、时间范围和实例过滤
+- 逆向工程 Logify API 协议：filter 格式（type: EQUAL/CONTAIN/IN 等）、请求体结构（page/pageSize/orderBy/dateRange/startTime/endTime/query/filters/prevQuery）
+
+### 测试情况
+
+| 测试项 | 结果 | 备注 |
+|--------|------|------|
+| Chrome 扩展加载正常 | N/A | |
+| MCP 工具连接正常 | N/A | uvx 环境下运行，本次 shell 环境 rpds 架构不兼容 |
+| SeaTalk Agent 启动+注入正常 | N/A | |
+| SeaTalk Agent 重启后 UI 恢复 | N/A | |
+| 修改的功能正常工作 | [OK] | SSE API 请求/响应/解析均已在 shell 中直接验证通过 |
+| 已有功能未被破坏 | [OK] | 仅新增函数和工具，未修改已有代码 |
+| 控制台无新增错误 | [OK] | Python 语法检查通过，无 linter 错误 |
+
+---
+
 ## v3.5.7 -- 2026-04-09 -- `feat`: Flink MCP 新增 Logify 日志链接生成
 
 **提交者**: @tianyi.liang

@@ -332,6 +332,9 @@ MCP 配置在 `~/.cursor/mcp.json`，新增或修改后需在 Cursor 设置中**
 
 ## 更新日志
 
+### v3.5.8
+- **Flink 日志直查**: 新增 `query_flink_logs` 工具，通过 Logify SSE API 直接查询 Flink 应用日志内容，支持 LogiQL 搜索语法和日志级别过滤，无需打开浏览器
+
 ### v3.5.7
 - **Flink 日志链接**: 新增 `get_flink_log_url` 工具生成 Logify (Kibana) 日志链接；`diagnose_flink_app` 诊断结果自动附带日志链接
 

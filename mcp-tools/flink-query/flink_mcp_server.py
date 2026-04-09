@@ -121,6 +121,92 @@ def _build_logify_url(app_id: int, instance_id: int) -> str:
     )
 
 
+LOGIFY_STORE_ID = 73
+
+
+def _logify_query_sse(
+    filters: Optional[List[Dict]],
+    query: Optional[str],
+    minutes: int,
+    page_size: int,
+) -> List[Dict]:
+    """调用 Logify SSE 流式查询 API，返回日志行列表。"""
+    cookies = _load_cookies()
+    headers = HEADERS.copy()
+    headers["referer"] = f"{BASE_URL}/logify/"
+    headers["content-type"] = "application/json"
+    if "CSRF-TOKEN" in cookies:
+        headers["x-csrf-token"] = cookies["CSRF-TOKEN"]
+
+    now_ms = int(time.time() * 1000)
+    start_ms = now_ms - minutes * 60 * 1000
+
+    body = {
+        "page": 0,
+        "pageSize": page_size,
+        "orderBy": None,
+        "dateRange": None,
+        "startTime": start_ms,
+        "endTime": now_ms,
+        "query": query if query else None,
+        "filters": filters if filters else None,
+        "prevQuery": None,
+    }
+
+    url = f"{BASE_URL}/logify/api/v1/discover/query/records/parallel-stream?logStoreId={LOGIFY_STORE_ID}"
+
+    for attempt in range(MAX_RETRIES + 1):
+        try:
+            resp = http_requests.post(
+                url,
+                json=body,
+                cookies=cookies,
+                headers=headers,
+                timeout=(10, 90),
+                stream=True,
+            )
+            if resp.status_code in (401, 403):
+                if attempt < MAX_RETRIES:
+                    cookies = _load_cookies(force=True)
+                    if "CSRF-TOKEN" in cookies:
+                        headers["x-csrf-token"] = cookies["CSRF-TOKEN"]
+                    continue
+                raise RuntimeError(f"Logify 认证失败: {resp.status_code}")
+            resp.raise_for_status()
+            break
+        except http_requests.RequestException as e:
+            if attempt < MAX_RETRIES:
+                continue
+            raise RuntimeError(f"Logify 请求失败: {e}")
+    else:
+        raise RuntimeError("Logify 请求超过最大重试次数")
+
+    rows: List[Dict] = []
+    event_type = ""
+    for line in resp.iter_lines(decode_unicode=True):
+        if line is None:
+            continue
+        if line == "":
+            event_type = ""
+            continue
+        if line.startswith("event:"):
+            event_type = line[6:]
+        elif line.startswith("data:"):
+            data_str = line[5:]
+            if event_type == "error":
+                resp.close()
+                raise RuntimeError(f"Logify 查询错误: {data_str}")
+            if event_type == "row":
+                try:
+                    rows.append(json.loads(data_str))
+                except json.JSONDecodeError:
+                    pass
+                if len(rows) >= page_size:
+                    break
+    resp.close()
+    return rows
+
+
 def _format_ts(ts) -> str:
     """将毫秒时间戳格式化为可读字符串。"""
     if not ts:
@@ -938,6 +1024,91 @@ def get_flink_log_url(app_id: int, instance_id: int = 0) -> str:
                 "Checkpoint expired — CP 超时",
                 "FATAL — 致命错误",
             ],
+        })
+    except Exception as e:
+        return _result({"error": str(e)})
+
+
+@mcp.tool()
+def query_flink_logs(
+    app_id: int,
+    query: str = "",
+    instance_id: int = 0,
+    log_level: str = "",
+    minutes: int = 30,
+    limit: int = 50,
+) -> str:
+    """直接查询 Flink 应用的 Logify 日志内容。
+
+    无需打开浏览器，直接返回日志行，用于排查 SQL 错误、异常栈等。
+    底层调用 Logify SSE API，自动过滤 app_id 和可选 instance_id。
+
+    Args:
+        app_id: Flink 应用 ID
+        query: LogiQL 搜索语句，例如：
+               - message hasTokens 'Exception'
+               - message hasTokens 'Failed to execute sql'
+               - message hasTokens 'OutOfMemoryError'
+               - log_level = 'ERROR'
+               留空则返回所有日志
+        instance_id: 实例 ID，0 表示不限（搜索该 app 所有实例）
+        log_level: 快捷过滤日志级别（ERROR / WARN / INFO），留空不过滤
+        minutes: 查询最近多少分钟，默认 30，最大 1440（24h）
+        limit: 返回日志行数，默认 50，最大 200
+
+    Returns:
+        日志行列表，每行含 timestamp、message、log_level、class 等字段
+    """
+    try:
+        minutes = min(max(minutes, 1), 1440)
+        limit = min(max(limit, 1), 200)
+
+        filters = [
+            {"type": "EQUAL", "columnName": "app_id", "values": [f"flink-{app_id}"]}
+        ]
+        if instance_id:
+            filters.append({
+                "type": "EQUAL",
+                "columnName": "application_id",
+                "values": [f"app{app_id}instance{instance_id}"],
+            })
+        if log_level:
+            filters.append({
+                "type": "EQUAL",
+                "columnName": "log_level",
+                "values": [log_level.upper()],
+            })
+
+        if log_level and not query:
+            query_str = None
+        else:
+            query_str = query or None
+
+        rows = _logify_query_sse(filters, query_str, minutes, limit)
+
+        compact_rows = []
+        for r in rows:
+            msg = r.get("message", "")
+            if len(msg) > 2000:
+                msg = msg[:2000] + "...(truncated)"
+            compact_rows.append({
+                "timestamp": _format_ts(r.get("timestamp")),
+                "log_level": r.get("log_level", ""),
+                "class": r.get("class", ""),
+                "message": msg,
+                "app_name": r.get("app_name", ""),
+                "application_id": r.get("application_id", ""),
+            })
+
+        return _result({
+            "appId": app_id,
+            "query": query or "(all)",
+            "timeRange": f"最近 {minutes} 分钟",
+            "totalReturned": len(compact_rows),
+            "logs": compact_rows,
+            "logifyUrl": _build_logify_url(
+                app_id, instance_id or 0
+            ),
         })
     except Exception as e:
         return _result({"error": str(e)})
