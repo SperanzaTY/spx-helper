@@ -1,7 +1,7 @@
 // SeaTalk programmatic send — extract React Fiber actions & expose __seatalkSend()
 // Based on seatalk-enhance's proven approach, adapted for seatalk-agent.
 (function () {
-  var SEND_SCRIPT_VERSION = 6;
+  var SEND_SCRIPT_VERSION = 7;
   if (window.__seatalkSendVersion >= SEND_SCRIPT_VERSION) return;
   window.__seatalkSendVersion = SEND_SCRIPT_VERSION;
 
@@ -108,20 +108,52 @@
 
   function ensureActions(sessionId) {
     if (cachedActions) return Promise.resolve(cachedActions);
+    return navigateToSession(sessionId).then(function () {
+      return new Promise(function (resolve, reject) {
+        var attempts = 0;
+        var timer = setInterval(function () {
+          if (cachedActions) { clearInterval(timer); resolve(cachedActions); return; }
+          var a = extractActions();
+          if (a) { cachedActions = a; clearInterval(timer); resolve(a); return; }
+          if (++attempts >= 20) { clearInterval(timer); reject(new Error('editor did not appear after selecting session')); }
+        }, 200);
+      });
+    });
+  }
+
+  function navigateToSession(sessionId) {
     var item = document.querySelector(
       '.messages-chat-session-list-item[data-id="' + sessionId + '"]'
     );
-    if (!item) return Promise.reject(new Error('actions not cached and session "' + sessionId + '" not in chat list. Use add_seatalk_contact first for new contacts.'));
-    item.click();
-    return new Promise(function (resolve, reject) {
-      var attempts = 0;
-      var timer = setInterval(function () {
-        if (cachedActions) { clearInterval(timer); resolve(cachedActions); return; }
-        var a = extractActions();
-        if (a) { cachedActions = a; clearInterval(timer); resolve(a); return; }
-        if (++attempts >= 20) { clearInterval(timer); reject(new Error('editor did not appear after selecting session')); }
-      }, 200);
-    });
+    if (item) {
+      item.click();
+      return Promise.resolve();
+    }
+    // Session not visible in virtualized list — use actionMoveChatSessionToTop
+    // to pull it into the rendered area, then click it.
+    if (cachedActions && typeof cachedActions.actionMoveChatSessionToTop === 'function') {
+      try {
+        var s = window.store.getState();
+        var sessions = s.messages.sessionList || [];
+        var sid = parseInt(sessionId, 10);
+        var sess = null;
+        for (var i = 0; i < sessions.length; i++) {
+          if (sessions[i] && sessions[i].id === sid) { sess = sessions[i]; break; }
+        }
+        if (sess) {
+          cachedActions.actionMoveChatSessionToTop({ session: { type: sess.type, id: sid } });
+          return new Promise(function (resolve, reject) {
+            var att = 0;
+            var t = setInterval(function () {
+              var el = document.querySelector('.messages-chat-session-list-item[data-id="' + sessionId + '"]');
+              if (el) { clearInterval(t); el.click(); resolve(); return; }
+              if (++att >= 15) { clearInterval(t); reject(new Error('session "' + sessionId + '" did not appear in list after moveToTop')); }
+            }, 200);
+          });
+        }
+      } catch (_) {}
+    }
+    return Promise.reject(new Error('session "' + sessionId + '" not in chat list. Use add_seatalk_contact first for new contacts.'));
   }
 
   function tryCache() {
@@ -172,6 +204,17 @@
     }
 
     var rootMid = opts.rootMid || undefined;
+
+    // logicSendMessage reads the draft from the *currently selected* session's
+    // context, so for thread replies we must navigate to the target session first.
+    if (rootMid) {
+      try {
+        var sel = window.store.getState().messages.selectedSession;
+        if (!sel || String(sel.id) !== String(id) || sel.type !== type) {
+          cachedActions = null;
+        }
+      } catch (_) { cachedActions = null; }
+    }
 
     return ensureActions(String(id)).then(function (actions) {
       var session = { type: type, id: id };
@@ -267,7 +310,35 @@
     });
   };
 
-  // ── Recall API ──
+  // ── Recall API (via chunk-service putRecallMessages) ──
+
+  var recallServicePromise = null;
+
+  function getRecallService() {
+    if (recallServicePromise) return recallServicePromise;
+    recallServicePromise = new Promise(function (resolve, reject) {
+      var resources = performance.getEntriesByType('resource');
+      var chunkUrl = null;
+      for (var i = 0; i < resources.length; i++) {
+        if (resources[i].name.indexOf('chunk-service-') >= 0 && resources[i].name.indexOf('.js') >= 0) {
+          chunkUrl = resources[i].name; break;
+        }
+      }
+      if (!chunkUrl) { recallServicePromise = null; reject(new Error('chunk-service not found')); return; }
+      import(chunkUrl).then(function (mod) {
+        var keys = Object.keys(mod);
+        for (var j = 0; j < keys.length; j++) {
+          var v = mod[keys[j]];
+          if (v && typeof v === 'object' && typeof v.putRecallMessages === 'function') {
+            resolve(v); return;
+          }
+        }
+        recallServicePromise = null;
+        reject(new Error('putRecallMessages not found in chunk-service'));
+      }).catch(function (e) { recallServicePromise = null; reject(e); });
+    });
+    return recallServicePromise;
+  }
 
   window.__seatalkRecall = function (opts) {
     if (!opts || !opts.session || !opts.mid) {
@@ -284,24 +355,11 @@
     var session = { type: type, id: id };
     var mid = String(opts.mid);
 
-    try {
-      var state = window.store.getState();
-      var loginUid = state.login && state.login.userInfo && state.login.userInfo.id;
-      if (!loginUid) return Promise.reject(new Error('cannot determine logged-in user'));
-
-      window.store.dispatch({
-        type: 'MESSAGES_ACTION_GENERALIZED_DELETE_MESSAGES',
-        data: {
-          session: session,
-          mids: [mid],
-          operatorId: loginUid,
-          operatorType: 'user'
-        }
-      });
-      return Promise.resolve({ ok: true, session: opts.session, mid: mid });
-    } catch (e) {
-      return Promise.reject(new Error('recall dispatch failed: ' + e.message));
-    }
+    return getRecallService().then(function (svc) {
+      return svc.putRecallMessages(session, [mid]);
+    }).then(function () {
+      return { ok: true, session: opts.session, mid: mid };
+    });
   };
 
   // ── Probe API (for debugging) ──
@@ -329,6 +387,7 @@
   observer.observe(document.body, { childList: true, subtree: true });
 
   getContactService().catch(function () {});
+  getRecallService().catch(function () {});
 
-  console.log('[seatalk-send] ready v6');
+  console.log('[seatalk-send] ready v7');
 })();

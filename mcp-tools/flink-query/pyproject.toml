@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "flink-mcp"
-version = "0.1.0"
-description = "DataSuite Flink 平台查询与诊断 MCP 工具"
+version = "0.2.0"
+description = "Flink 全栈查询与诊断 MCP 工具（DataSuite + Keyhole + Grafana）"
 requires-python = ">=3.9"
 dependencies = [
     "mcp>=1.0.0",

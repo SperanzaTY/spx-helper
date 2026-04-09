@@ -2,8 +2,11 @@
 # -*- coding: utf-8 -*-
 """
 Flink MCP Server
-DataSuite Flink 平台查询与诊断工具，支持流/批任务状态、延迟监控、异常诊断、血缘查询等。
-认证方式：自动从 Chrome 读取 datasuite.shopee.io 的 Cookie。
+Flink 全栈查询与诊断工具，整合三大数据源：
+  - DataSuite Flink API：任务管理、延迟、告警、血缘
+  - Flink REST API (Keyhole)：Checkpoint、异常栈、Job 配置、TM 资源
+  - Grafana / VictoriaMetrics：Kafka Lag、CPU/内存/GC、背压等实时指标
+认证方式：自动从 Chrome 读取各域的 Cookie。
 """
 
 import json
@@ -11,6 +14,7 @@ import logging
 import time
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse, parse_qs
 
 import requests as http_requests
 from chrome_auth import get_auth
@@ -921,6 +925,752 @@ def get_flink_sla_dr(app_id: int) -> str:
             result["sla"] = {"error": str(e)}
 
         return _result(result)
+    except Exception as e:
+        return _result({"error": str(e)})
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Keyhole / Grafana 基础设施
+# ═══════════════════════════════════════════════════════════════════
+
+KEYHOLE_BASE = "https://keyhole.data-infra.shopee.io"
+KEYHOLE_DOMAINS = ["data-infra.shopee.io", "keyhole.data-infra.shopee.io"]
+
+GRAFANA_BASE = "https://grafana.idata.shopeemobile.com"
+GRAFANA_DOMAIN = "grafana.idata.shopeemobile.com"
+GRAFANA_DS_NAME = "vm-prod-flink"
+
+_instance_cache: Dict[int, dict] = {}
+_grafana_ds_uid: Optional[str] = None
+
+
+def _get_instance_info(app_id: int) -> dict:
+    """获取当前运行实例的关键信息（含缓存）。"""
+    if app_id in _instance_cache:
+        return _instance_cache[app_id]
+
+    inst_resp = _request("GET", f"/instances/stream/current/{app_id}")
+    inst = _get_data(inst_resp) or {}
+    inst_id = inst.get("id")
+    info = {
+        "instance_id": inst_id,
+        "session_id": inst.get("sessionId") or (f"app{app_id}instance{inst_id}" if inst_id else ""),
+        "keyhole_url": inst.get("webKeyholeTrackUrl", ""),
+        "metrics_url": inst.get("metricsUrl", ""),
+    }
+    if inst_id:
+        _instance_cache[app_id] = info
+    return info
+
+
+# ──── Keyhole helpers ────
+
+def _load_keyhole_cookies() -> Dict[str, str]:
+    merged: Dict[str, str] = {}
+    for domain in KEYHOLE_DOMAINS:
+        result = get_auth(domain)
+        merged.update(result.cookies)
+    return merged
+
+
+def _parse_keyhole_params(keyhole_url: str) -> Dict[str, str]:
+    parsed = urlparse(keyhole_url)
+    qs = parse_qs(parsed.query)
+    return {k: v[0] for k, v in qs.items()}
+
+
+def _keyhole_get(path: str, app_id: int) -> Any:
+    """通过 Keyhole 代理调用 Flink REST API。"""
+    info = _get_instance_info(app_id)
+    kurl = info.get("keyhole_url", "")
+    if not kurl:
+        raise RuntimeError(f"应用 {app_id} 无 Keyhole URL（无运行实例或非 YARN 部署）")
+
+    params = _parse_keyhole_params(kurl)
+    cookies = _load_keyhole_cookies()
+    headers = {**HEADERS, "referer": kurl}
+
+    resp = http_requests.get(
+        KEYHOLE_BASE + path,
+        params=params,
+        cookies=cookies,
+        headers=headers,
+        timeout=30,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def _resolve_flink_jid(app_id: int) -> str:
+    """通过 Keyhole 获取 Flink Job ID。"""
+    data = _keyhole_get("/jobs/overview", app_id)
+    jobs = data.get("jobs", data) if isinstance(data, dict) else data
+    if not jobs:
+        raise RuntimeError(f"应用 {app_id} 无 Flink Job")
+    running = [j for j in jobs if j.get("state") == "RUNNING"]
+    target = running[0] if running else jobs[0]
+    return target["jid"]
+
+
+# ──── Grafana helpers ────
+
+def _load_grafana_cookies() -> Dict[str, str]:
+    return get_auth(GRAFANA_DOMAIN).cookies
+
+
+def _resolve_grafana_ds_uid() -> str:
+    global _grafana_ds_uid
+    if _grafana_ds_uid:
+        return _grafana_ds_uid
+
+    cookies = _load_grafana_cookies()
+    r = http_requests.get(
+        f"{GRAFANA_BASE}/api/frontend/settings",
+        cookies=cookies,
+        headers=HEADERS,
+        timeout=15,
+    )
+    r.raise_for_status()
+    ds_map = r.json().get("datasources", {})
+    ds = ds_map.get(GRAFANA_DS_NAME, {})
+    _grafana_ds_uid = ds.get("uid")
+    if not _grafana_ds_uid:
+        raise RuntimeError(
+            f"Grafana 数据源 '{GRAFANA_DS_NAME}' 未找到。"
+            f"可用数据源({len(ds_map)}): {', '.join(list(ds_map.keys())[:10])}..."
+        )
+    return _grafana_ds_uid
+
+
+def _grafana_query_batch(
+    exprs: Dict[str, str],
+    range_seconds: int = 1800,
+    instant: bool = False,
+) -> Dict[str, Any]:
+    """批量查询 Grafana 指标，返回 {refId: {current, avg, max, min, points}} 格式。"""
+    ds_uid = _resolve_grafana_ds_uid()
+    cookies = _load_grafana_cookies()
+    now = int(time.time())
+
+    queries = []
+    for ref_id, expr in exprs.items():
+        q: Dict[str, Any] = {
+            "refId": ref_id,
+            "expr": expr,
+            "datasource": {"type": "prometheus", "uid": ds_uid},
+        }
+        if instant:
+            q["instant"] = True
+            q["range"] = False
+        else:
+            q["range"] = True
+            q["instant"] = False
+            q["intervalMs"] = max(range_seconds * 1000 // 60, 15000)
+            q["maxDataPoints"] = 60
+        queries.append(q)
+
+    payload = {
+        "queries": queries,
+        "from": str((now - range_seconds) * 1000),
+        "to": str(now * 1000),
+    }
+    headers = {**HEADERS, "content-type": "application/json"}
+    r = http_requests.post(
+        f"{GRAFANA_BASE}/api/ds/query",
+        cookies=cookies,
+        headers=headers,
+        json=payload,
+        timeout=30,
+    )
+    r.raise_for_status()
+    raw = r.json()
+
+    parsed: Dict[str, Any] = {}
+    for ref_id, result in raw.get("results", {}).items():
+        frames = result.get("frames", [])
+        if not frames:
+            parsed[ref_id] = None
+            continue
+
+        if instant:
+            vals = frames[0].get("data", {}).get("values", [])
+            parsed[ref_id] = vals[1][-1] if len(vals) >= 2 and vals[1] else None
+        else:
+            vals = frames[0].get("data", {}).get("values", [])
+            if len(vals) < 2 or not vals[1]:
+                parsed[ref_id] = None
+                continue
+            numbers = [v for v in vals[1] if v is not None]
+            if not numbers:
+                parsed[ref_id] = None
+                continue
+            parsed[ref_id] = {
+                "current": numbers[-1],
+                "avg": round(sum(numbers) / len(numbers), 4),
+                "max": max(numbers),
+                "min": min(numbers),
+                "points": len(numbers),
+            }
+
+    return parsed
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Phase 4: Flink Runtime 工具（Keyhole / Flink REST API）
+# ═══════════════════════════════════════════════════════════════════
+
+
+@mcp.tool()
+def get_flink_checkpoints(app_id: int) -> str:
+    """获取 Flink 任务的 Checkpoint 详细统计（来自 Flink REST API）。
+
+    比 DataSuite API 更详细：包含每次 Checkpoint 的耗时、大小、失败原因、
+    触发类型、Savepoint 状态，以及 Checkpoint 配置（间隔、超时、状态后端）。
+
+    Args:
+        app_id: 应用 ID（如 741498）
+
+    Returns:
+        Checkpoint 统计：完成/失败次数、最近成功/失败详情、历史记录、配置参数
+    """
+    try:
+        jid = _resolve_flink_jid(app_id)
+
+        cp_data = _keyhole_get(f"/jobs/{jid}/checkpoints", app_id)
+
+        result: Dict[str, Any] = {"appId": app_id, "jobId": jid}
+
+        counts = cp_data.get("counts", {})
+        result["counts"] = counts
+
+        summary = cp_data.get("summary", {})
+        if summary:
+            result["summary"] = {
+                "checkpointed_size": summary.get("checkpointed_size", {}),
+                "state_size": summary.get("state_size", {}),
+                "end_to_end_duration": summary.get("end_to_end_duration", {}),
+            }
+
+        latest = cp_data.get("latest", {})
+        if latest.get("completed"):
+            lc = latest["completed"]
+            result["latestCompleted"] = {
+                "id": lc.get("id"),
+                "trigger_timestamp": _format_ts(lc.get("trigger_timestamp")),
+                "duration": lc.get("end_to_end_duration"),
+                "checkpointed_size": lc.get("checkpointed_size"),
+                "state_size": lc.get("state_size"),
+                "checkpoint_type": lc.get("checkpoint_type"),
+                "is_savepoint": lc.get("is_savepoint"),
+            }
+        if latest.get("failed"):
+            lf = latest["failed"]
+            result["latestFailed"] = {
+                "id": lf.get("id"),
+                "trigger_timestamp": _format_ts(lf.get("trigger_timestamp")),
+                "failure_message": lf.get("failure_message"),
+                "failure_timestamp": _format_ts(lf.get("failure_timestamp")),
+            }
+        if latest.get("savepoint"):
+            ls = latest["savepoint"]
+            result["latestSavepoint"] = {
+                "id": ls.get("id"),
+                "trigger_timestamp": _format_ts(ls.get("trigger_timestamp")),
+                "status": ls.get("status"),
+            }
+
+        history = cp_data.get("history", [])
+        result["recentHistory"] = [
+            {
+                "id": h.get("id"),
+                "status": h.get("status"),
+                "trigger_timestamp": _format_ts(h.get("trigger_timestamp")),
+                "duration": h.get("end_to_end_duration"),
+                "size": h.get("checkpointed_size"),
+                "is_savepoint": h.get("is_savepoint"),
+                "failure_message": h.get("failure_message"),
+            }
+            for h in history[:10]
+        ]
+
+        try:
+            cp_config = _keyhole_get(f"/jobs/{jid}/checkpoints/config", app_id)
+            result["config"] = {
+                "mode": cp_config.get("mode"),
+                "interval": cp_config.get("interval"),
+                "timeout": cp_config.get("timeout"),
+                "min_pause": cp_config.get("min_pause"),
+                "max_concurrent": cp_config.get("max_concurrent"),
+                "externalization": cp_config.get("externalization"),
+                "state_backend": cp_config.get("state_backend"),
+                "checkpoint_storage": cp_config.get("checkpoint_storage"),
+                "unaligned_checkpoints": cp_config.get("unaligned_checkpoints"),
+            }
+        except Exception as e:
+            result["config"] = {"error": str(e)}
+
+        return _result(result)
+    except Exception as e:
+        return _result({"error": str(e)})
+
+
+@mcp.tool()
+def get_flink_job_config(app_id: int) -> str:
+    """获取 Flink 任务的运行时配置（来自 Flink REST API）。
+
+    包含执行参数（并行度、重启策略等）和所有用户自定义配置。
+
+    Args:
+        app_id: 应用 ID
+
+    Returns:
+        运行时配置：并行度、重启策略、Checkpoint 配置、用户自定义参数等
+    """
+    try:
+        jid = _resolve_flink_jid(app_id)
+
+        config = _keyhole_get(f"/jobs/{jid}/config", app_id)
+
+        execution_config = config.get("execution-config", {})
+        result = {
+            "appId": app_id,
+            "jobId": jid,
+            "name": config.get("name"),
+            "jid": config.get("jid"),
+            "executionConfig": {
+                "execution_mode": execution_config.get("execution-mode"),
+                "restart_strategy": execution_config.get("restart-strategy"),
+                "parallelism": execution_config.get("job-parallelism"),
+                "object_reuse": execution_config.get("object-reuse-mode"),
+            },
+        }
+
+        user_config = execution_config.get("user-config", {})
+        key_configs: Dict[str, str] = {}
+        other_configs: Dict[str, str] = {}
+        important_prefixes = (
+            "state.", "execution.checkpointing.", "restart-strategy.",
+            "parallelism.", "taskmanager.", "jobmanager.",
+            "table.", "pipeline.", "flink.hadoop.",
+        )
+        for k, v in user_config.items():
+            if any(k.startswith(p) for p in important_prefixes):
+                key_configs[k] = v
+            else:
+                other_configs[k] = v
+
+        result["keyConfigs"] = key_configs
+        result["otherConfigCount"] = len(other_configs)
+        if len(other_configs) <= 20:
+            result["otherConfigs"] = other_configs
+
+        return _result(result)
+    except Exception as e:
+        return _result({"error": str(e)})
+
+
+@mcp.tool()
+def get_flink_runtime_exceptions(app_id: int, max_exceptions: int = 20) -> str:
+    """获取 Flink 任务的完整异常堆栈（来自 Flink REST API）。
+
+    比 DataSuite 的异常列表更详细，包含完整的 Java 堆栈跟踪和异常发生的
+    TaskManager/Task 位置。
+
+    Args:
+        app_id: 应用 ID
+        max_exceptions: 最大返回异常数，默认 20
+
+    Returns:
+        根异常和所有异常列表（含完整堆栈、Task 名称、TaskManager 位置）
+    """
+    try:
+        jid = _resolve_flink_jid(app_id)
+
+        data = _keyhole_get(
+            f"/jobs/{jid}/exceptions?maxExceptions={max_exceptions}", app_id
+        )
+
+        result: Dict[str, Any] = {"appId": app_id, "jobId": jid}
+
+        root = data.get("root-exception")
+        if root:
+            lines = root.strip().split("\n")
+            result["rootException"] = {
+                "message": lines[0] if lines else root[:200],
+                "fullStackTrace": root[:3000],
+                "truncated": len(root) > 3000,
+            }
+
+        all_exc = data.get("all-exceptions", [])
+        result["exceptions"] = [
+            {
+                "exception": exc.get("exception", "")[:1000],
+                "task": exc.get("task"),
+                "location": exc.get("location"),
+                "timestamp": _format_ts(exc.get("timestamp")),
+            }
+            for exc in all_exc[:max_exceptions]
+        ]
+        result["totalExceptions"] = len(all_exc)
+        result["truncated"] = data.get("truncated", False)
+
+        return _result(result)
+    except Exception as e:
+        return _result({"error": str(e)})
+
+
+@mcp.tool()
+def get_flink_taskmanagers(app_id: int) -> str:
+    """获取 Flink 任务的 TaskManager 列表和资源详情（来自 Flink REST API）。
+
+    Args:
+        app_id: 应用 ID
+
+    Returns:
+        TaskManager 列表：ID、路径、Slot 数量/空闲、CPU/内存/磁盘等硬件信息
+    """
+    try:
+        data = _keyhole_get("/taskmanagers", app_id)
+        tms = data.get("taskmanagers", [])
+
+        result_tms = []
+        for tm in tms:
+            hw = tm.get("hardware", {})
+            result_tms.append({
+                "id": tm.get("id"),
+                "path": tm.get("path"),
+                "dataPort": tm.get("dataPort"),
+                "slotsNumber": tm.get("slotsNumber"),
+                "freeSlots": tm.get("freeSlots"),
+                "totalResource": tm.get("totalResource"),
+                "freeResource": tm.get("freeResource"),
+                "hardware": {
+                    "cpuCores": hw.get("cpuCores"),
+                    "physicalMemory_MB": round(hw.get("physicalMemory", 0) / 1024 / 1024)
+                    if hw.get("physicalMemory")
+                    else None,
+                    "freeMemory_MB": round(hw.get("freeMemory", 0) / 1024 / 1024)
+                    if hw.get("freeMemory")
+                    else None,
+                    "managedMemory_MB": round(hw.get("managedMemory", 0) / 1024 / 1024)
+                    if hw.get("managedMemory")
+                    else None,
+                },
+            })
+
+        return _result({
+            "appId": app_id,
+            "taskmanagerCount": len(result_tms),
+            "taskmanagers": result_tms,
+        })
+    except Exception as e:
+        return _result({"error": str(e)})
+
+
+@mcp.tool()
+def get_flink_vertices(app_id: int) -> str:
+    """获取 Flink 作业的算子拓扑（Vertices），包含各算子的并行度和运行状态。
+
+    Args:
+        app_id: 应用 ID
+
+    Returns:
+        作业状态和算子列表（名称、并行度、状态、时间戳）
+    """
+    try:
+        jid = _resolve_flink_jid(app_id)
+        data = _keyhole_get(f"/jobs/{jid}", app_id)
+
+        vertices = data.get("vertices", [])
+        result_vertices = []
+        for v in vertices:
+            result_vertices.append({
+                "id": v.get("id"),
+                "name": v.get("name"),
+                "parallelism": v.get("parallelism"),
+                "maxParallelism": v.get("maxParallelism"),
+                "status": v.get("status"),
+                "start_time": _format_ts(v.get("start-time")),
+                "duration": v.get("duration"),
+                "tasks": v.get("tasks"),
+                "metrics": v.get("metrics"),
+            })
+
+        return _result({
+            "appId": app_id,
+            "jobId": jid,
+            "jobName": data.get("name"),
+            "state": data.get("state"),
+            "start_time": _format_ts(data.get("start-time")),
+            "duration": data.get("duration"),
+            "vertexCount": len(result_vertices),
+            "vertices": result_vertices,
+        })
+    except Exception as e:
+        return _result({"error": str(e)})
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Phase 5: Flink 实时指标（Grafana / VictoriaMetrics）
+# ═══════════════════════════════════════════════════════════════════
+
+_METRIC_CATEGORIES = {
+    "overview": {
+        "name": "任务概览",
+        "instant": True,
+        "metrics": {
+            "uptime_ms": ("flink_jobmanager_job_uptime", "运行时间（毫秒）"),
+            "full_restarts": ("flink_jobmanager_job_fullRestarts", "完全重启次数"),
+            "completed_checkpoints": ("flink_jobmanager_job_numberOfCompletedCheckpoints", "已完成 Checkpoint 数"),
+            "failed_checkpoints": ("flink_jobmanager_job_numberOfFailedCheckpoints", "失败 Checkpoint 数"),
+            "last_cp_duration_ms": ("flink_jobmanager_job_lastCheckpointDuration", "最近 CP 耗时（毫秒）"),
+            "last_cp_size_bytes": ("flink_jobmanager_job_lastCheckpointSize", "最近 CP 大小（字节）"),
+        },
+    },
+    "kafka": {
+        "name": "Kafka 消费指标",
+        "instant": False,
+        "metrics": {
+            "lag_max_sum": (
+                "sum(flink_taskmanager_job_task_operator_KafkaConsumer_records_lag_max{__FILTER__} >= 0)",
+                "Kafka Lag Max 总计",
+            ),
+            "lag_sum": (
+                "sum(flink_taskmanager_job_task_operator_KafkaConsumer_records_lag{__FILTER__} >= 0)",
+                "Kafka Lag 总计",
+            ),
+            "consume_rate": (
+                "sum(rate(flink_taskmanager_job_task_operator_KafkaConsumer_records_consumed_total{__FILTER__}[1m]))",
+                "消费速率（records/s）",
+            ),
+            "fetch_throttle": (
+                "sum(flink_taskmanager_job_task_operator_KafkaConsumer_throttle_time_total{__FILTER__})",
+                "Fetch 限流时间",
+            ),
+        },
+    },
+    "cpu_memory": {
+        "name": "CPU / 内存指标",
+        "instant": False,
+        "metrics": {
+            "tm_avg_cpu": (
+                "avg(flink_taskmanager_Status_JVM_CPU_Load{__FILTER__})",
+                "TM 平均 CPU 使用率",
+            ),
+            "tm_max_cpu": (
+                "max(flink_taskmanager_Status_JVM_CPU_Load{__FILTER__})",
+                "TM 最大 CPU 使用率",
+            ),
+            "tm_avg_heap_pct": (
+                "avg(flink_taskmanager_Status_JVM_Memory_Heap_Used{__FILTER__} / flink_taskmanager_Status_JVM_Memory_Heap_Max{__FILTER__})",
+                "TM 平均 Heap 使用率",
+            ),
+            "tm_max_heap_pct": (
+                "max(flink_taskmanager_Status_JVM_Memory_Heap_Used{__FILTER__} / flink_taskmanager_Status_JVM_Memory_Heap_Max{__FILTER__})",
+                "TM 最大 Heap 使用率",
+            ),
+            "jm_cpu": (
+                "flink_jobmanager_Status_JVM_CPU_Load{__FILTER__}",
+                "JM CPU 使用率",
+            ),
+            "jm_heap_pct": (
+                "flink_jobmanager_Status_JVM_Memory_Heap_Used{__FILTER__} / flink_jobmanager_Status_JVM_Memory_Heap_Max{__FILTER__}",
+                "JM Heap 使用率",
+            ),
+        },
+    },
+    "checkpoint": {
+        "name": "Checkpoint 指标趋势",
+        "instant": False,
+        "metrics": {
+            "failed_count": (
+                "flink_jobmanager_job_numberOfFailedCheckpoints{__FILTER__}",
+                "失败 CP 累计数",
+            ),
+            "duration": (
+                "flink_jobmanager_job_lastCheckpointDuration{__FILTER__}",
+                "最近 CP 耗时（毫秒）",
+            ),
+            "size": (
+                "flink_jobmanager_job_lastCheckpointSize{__FILTER__}",
+                "最近 CP 大小（字节）",
+            ),
+        },
+    },
+    "backpressure": {
+        "name": "背压 / 繁忙度指标",
+        "instant": False,
+        "metrics": {
+            "max_backpressure": (
+                "max(flink_taskmanager_job_task_backPressuredTimeMsPerSecond{__FILTER__})",
+                "最大背压（ms/s，1000=完全阻塞）",
+            ),
+            "max_busy": (
+                "max(flink_taskmanager_job_task_busyTimeMsPerSecond{__FILTER__})",
+                "最大繁忙度（ms/s，1000=满负载）",
+            ),
+            "avg_backpressure": (
+                "avg(flink_taskmanager_job_task_backPressuredTimeMsPerSecond{__FILTER__})",
+                "平均背压",
+            ),
+            "avg_busy": (
+                "avg(flink_taskmanager_job_task_busyTimeMsPerSecond{__FILTER__})",
+                "平均繁忙度",
+            ),
+        },
+    },
+    "gc": {
+        "name": "GC 指标",
+        "instant": False,
+        "metrics": {
+            "tm_old_gc_count_rate": (
+                'avg(rate({__name__=~"flink_taskmanager_Status_JVM_GarbageCollector_(G1_Old_Generation|PS_MarkSweep|ConcurrentMarkSweep)_Count",__FILTER__}[1m]))',
+                "TM Old GC 次数/分钟",
+            ),
+            "tm_old_gc_time_rate": (
+                'avg(rate({__name__=~"flink_taskmanager_Status_JVM_GarbageCollector_(G1_Old_Generation|PS_MarkSweep|ConcurrentMarkSweep)_Time",__FILTER__}[1m]))',
+                "TM Old GC 时间/分钟（毫秒）",
+            ),
+            "tm_young_gc_count_rate": (
+                'avg(rate({__name__=~"flink_taskmanager_Status_JVM_GarbageCollector_(G1_Young_Generation|PS_Scavenge|Copy|ParNew)_Count",__FILTER__}[1m]))',
+                "TM Young GC 次数/分钟",
+            ),
+            "tm_young_gc_time_rate": (
+                'avg(rate({__name__=~"flink_taskmanager_Status_JVM_GarbageCollector_(G1_Young_Generation|PS_Scavenge|Copy|ParNew)_Time",__FILTER__}[1m]))',
+                "TM Young GC 时间/分钟（毫秒）",
+            ),
+        },
+    },
+}
+
+
+@mcp.tool()
+def get_flink_metrics(
+    app_id: int,
+    category: str = "overview",
+    minutes: int = 30,
+) -> str:
+    """查询 Flink 任务的实时监控指标（来自 Grafana / VictoriaMetrics）。
+
+    支持 6 个指标类别，覆盖 Kafka 消费、CPU/内存、Checkpoint、背压、GC 等维度。
+    每个类别返回当前值 + 趋势摘要（均值/最大/最小）。
+
+    Args:
+        app_id: 应用 ID
+        category: 指标类别，可选值：
+            - overview: 概览（运行时间、重启次数、Checkpoint 汇总）
+            - kafka: Kafka 消费指标（Lag、消费速率、Fetch 限流）
+            - cpu_memory: CPU 和内存（TM/JM 的 CPU、Heap 使用率）
+            - checkpoint: Checkpoint 趋势（失败数、耗时、大小的变化）
+            - backpressure: 背压和繁忙度（最大/平均值）
+            - gc: GC 指标（Old/Young GC 频率和耗时）
+        minutes: 回看时长（分钟），默认 30，仅对非 overview 类别生效
+
+    Returns:
+        各指标的当前值和趋势摘要。对于 overview 返回瞬时值，其他类别返回趋势统计。
+        附带 Grafana Dashboard 链接供进一步查看。
+    """
+    try:
+        cat = _METRIC_CATEGORIES.get(category)
+        if not cat:
+            return _result({
+                "error": f"未知类别: {category}",
+                "available": list(_METRIC_CATEGORIES.keys()),
+                "descriptions": {k: v["name"] for k, v in _METRIC_CATEGORIES.items()},
+            })
+
+        info = _get_instance_info(app_id)
+        session_id = info.get("session_id")
+        if not session_id:
+            return _result({"error": f"应用 {app_id} 无运行实例，无法查询 Grafana 指标"})
+
+        job_filter = f'job=~".*(flink_metrics|pushgateway_flink)",session_id="{session_id}"'
+
+        exprs: Dict[str, str] = {}
+        labels: Dict[str, str] = {}
+        for key, (expr_tpl, label) in cat["metrics"].items():
+            expr = expr_tpl.replace("__FILTER__", job_filter)
+            if "{__FILTER__}" not in expr_tpl and "__FILTER__" not in expr:
+                expr = expr_tpl + "{" + job_filter + "}" if "{" not in expr_tpl else expr
+            exprs[key] = expr
+            labels[key] = label
+
+        data = _grafana_query_batch(
+            exprs,
+            range_seconds=minutes * 60,
+            instant=cat.get("instant", False),
+        )
+
+        metrics_out: Dict[str, Any] = {}
+        for key in cat["metrics"]:
+            val = data.get(key)
+            metrics_out[key] = {
+                "label": labels[key],
+                "data": val,
+            }
+
+        grafana_url = (
+            f"{GRAFANA_BASE}/d/pDjovynVc/flink-job-general-support-local"
+            f"?var-application_id={session_id}&var-datasource={GRAFANA_DS_NAME}"
+        )
+
+        return _result({
+            "appId": app_id,
+            "sessionId": session_id,
+            "category": category,
+            "categoryName": cat["name"],
+            "timeRange": "瞬时值" if cat.get("instant") else f"最近 {minutes} 分钟",
+            "metrics": metrics_out,
+            "grafanaUrl": grafana_url,
+        })
+    except Exception as e:
+        return _result({"error": str(e)})
+
+
+@mcp.tool()
+def get_flink_grafana_custom(
+    app_id: int,
+    promql: str,
+    minutes: int = 30,
+    instant: bool = False,
+) -> str:
+    """执行自定义 PromQL 查询 Flink 监控指标（高级用法）。
+
+    适用于需要查询特定指标或自定义聚合的场景。会自动注入 session_id 过滤。
+    PromQL 中使用 __FILTER__ 占位符会被替换为 job + session_id 过滤条件。
+
+    Args:
+        app_id: 应用 ID
+        promql: PromQL 表达式，可使用 __FILTER__ 占位符
+        minutes: 回看时长（分钟），默认 30
+        instant: 是否瞬时查询（默认 False 为范围查询）
+
+    Returns:
+        查询结果（当前值或趋势摘要）
+    """
+    try:
+        info = _get_instance_info(app_id)
+        session_id = info.get("session_id")
+        if not session_id:
+            return _result({"error": f"应用 {app_id} 无运行实例"})
+
+        job_filter = f'job=~".*(flink_metrics|pushgateway_flink)",session_id="{session_id}"'
+        expr = promql.replace("__FILTER__", job_filter)
+
+        data = _grafana_query_batch(
+            {"result": expr},
+            range_seconds=minutes * 60,
+            instant=instant,
+        )
+
+        return _result({
+            "appId": app_id,
+            "sessionId": session_id,
+            "query": expr,
+            "instant": instant,
+            "timeRange": "瞬时值" if instant else f"最近 {minutes} 分钟",
+            "result": data.get("result"),
+        })
     except Exception as e:
         return _result({"error": str(e)})
 

@@ -6,6 +6,44 @@
 
 ---
 
+## v3.5.4 -- 2026-04-09 -- `feat`: Flink MCP 全栈诊断 + SeaTalk 线程回复修复
+
+**提交者**: @tianyi.liang
+**Commit Type**: feat
+**修改模块**: MCP 工具 / SeaTalk Agent
+
+### 变更说明
+
+Flink MCP 工具:
+- 新增 Keyhole (Flink REST API) 数据源集成: get_flink_checkpoints / get_flink_job_config / get_flink_runtime_exceptions / get_flink_taskmanagers / get_flink_vertices
+- 新增 Grafana (VictoriaMetrics) 数据源集成: get_flink_metrics (6 个预定义类别) / get_flink_grafana_custom (自定义 PromQL)
+- 新增缓存层 (_instance_cache) 减少 DataSuite API 重复调用
+- Keyhole cookie、URL 解析、Grafana datasource UID 动态解析等基础设施
+
+SeaTalk 消息发送 (seatalk-send.js v6 -> v7):
+- 修复线程回复静默失败: logicSendMessage 依赖 selectedSession 上下文，当 cachedActions 来自其他会话时线程草稿键 (group-{id}-{rootMid}) 无法被读取。修复方式：rootMid 存在时检查 selectedSession 是否匹配，不匹配则强制重新导航
+- 增强虚拟化列表导航: 新增 navigateToSession 函数，对不在可见 DOM 中的会话使用 actionMoveChatSessionToTop 拉入可见区域
+- 修复撤回 API: 原 __seatalkRecall 使用 Redux dispatch (MESSAGES_ACTION_GENERALIZED_DELETE_MESSAGES) 和错误的 uid 路径 (login.userInfo.id)，改为使用 chunk-service 的 putRecallMessages 服务 API
+
+### 测试情况
+
+| 测试项 | 结果 | 备注 |
+|--------|------|------|
+| Chrome 扩展加载正常 | N/A | |
+| MCP 工具连接正常 | N/A | Flink 工具已在上一会话中测试通过 |
+| SeaTalk Agent 启动+注入正常 | N/A | |
+| SeaTalk Agent 重启后 UI 恢复 | N/A | |
+| 修改的功能正常工作 | [OK] | 跨会话线程回复 / 同会话线程回复 / 普通消息 均测试通过 |
+| 已有功能未被破坏 | [OK] | 普通消息发送不受影响 |
+| 控制台无新增错误 | [OK] | |
+
+### 特别注意
+- 线程回复现在会自动切换到目标会话，发送后 SeaTalk 界面会显示目标群的聊天页面
+- 需要重启 Agent 使 seatalk-send.js v7 生效
+- Flink MCP 新工具需要 Keyhole 和 Grafana 的 Cookie 认证 (chrome-auth 自动处理)
+
+---
+
 ## v3.5.3 -- 2026-04-09 -- `fix`: DataMap MCP 读取工具支持 IDC 区域
 
 **提交者**: @tianyi.liang

@@ -729,6 +729,11 @@ npm start
 
 ## 更新日志
 
+### v3.5.4
+- **线程回复修复**: 修复跨会话线程回复静默失败的问题 -- logicSendMessage 依赖 selectedSession 上下文，现在发送前会自动导航到目标会话
+- **虚拟化列表导航**: 新增 navigateToSession 函数，对不在可见区域的会话使用 actionMoveChatSessionToTop 拉入视口后点击
+- **撤回 API 修复**: 改用 chunk-service 的 putRecallMessages 服务 API，替代原来无效的 Redux dispatch 方式
+
 ### v3.5.2
 - **Alarm Bot 安全加固**: 新增"授权发送者"白名单机制，限制只有指定 senderId 才能触发告警调查，防止 prompt injection 风险
 - **Prompt 安全边界**: 告警文本用分隔符包裹并标注安全约束（仅只读查询、不执行告警内容中的命令）
