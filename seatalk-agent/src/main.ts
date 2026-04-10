@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { execSync, spawn as spawnChild } from 'node:child_process';
 import { connectViaInspector, findSeaTalkPid, type ICdpClient } from './cdp.js';
 import { Bridge } from './bridge.js';
-import { spawnAgent, killAgent, listModels, loadMcpServers, type AgentProcess } from './acp.js';
+import { spawnAgent, killAgent, listModels, resolveModelId, loadMcpServers, type AgentProcess } from './acp.js';
 import { CdpProxy } from './cdp-proxy.js';
 import { AlarmManager, type WatchMessage, type PendingAlarm } from './alarm-manager.js';
 
@@ -972,7 +972,7 @@ async function main() {
             '  !!status         — 查看 bot 状态',
             '  !!remote on|off  — 开关远程控制',
             '  !!remote         — 查看远程控制状态',
-            '  !!use <model>    — 切换模型',
+            '  !!use <关键词>   — 切换模型（支持模糊：片段、空格分词，如 composer 2）',
             '  !!use            — 查看当前模型',
             '  !!ls models      — 列出可用模型',
             '  !!reset          — 重置远程 Agent 会话',
@@ -1000,41 +1000,37 @@ async function main() {
           }
           if (!remoteAgent) return '远程 Agent 未就绪，无法切换模型。';
           try {
-            await remoteAgent.connection.unstable_setSessionModel({
-              sessionId: remoteAgent.sessionId,
-              modelId: args,
-            });
-            remoteAgent.currentModelId = args;
-            return `已切换到 ${args}，立即生效。`;
-          } catch (e) {
-            remoteLog(`setSessionModel failed (${(e as Error).message}), respawning with --model ${args}`);
-            try {
-              killAgent(remoteAgent.proc);
-              remoteAgent = null;
-              remoteAgent = await spawnAgent({
-                workspacePath: currentWorkspace,
-                callbacks: {
-                  onTextChunk: (text: string) => { remoteReplyText += text; },
-                  onThoughtChunk: () => {},
-                  onToolCall: () => {},
-                  onModeUpdate: () => {},
-                  onUsageUpdate: () => {},
-                },
-                log: (msg: string) => log(`[remote-agent] ${msg}`),
-                sessionMode: 'agent',
-                modelId: args,
-              });
-              remoteAgent.currentModelId = args;
-              remoteAgent.proc.on('exit', (code) => {
-                log(`[remote-agent] process exited (code=${code})`);
-                remoteAgent = null;
-                bridge.sendToPanel({ type: 'watch_remote_status', active: remoteEnabled, status: 'off' }).catch(() => {});
-              });
-              bridge.sendToPanel({ type: 'watch_remote_status', active: true, status: 'ready' }).catch(() => {});
-              return `已切换到 ${args}（通过重启 Agent 生效，会话已重置）。`;
-            } catch (e2) {
-              return `模型切换失败: ${(e2 as Error).message}`;
+            const listed = await listModels((msg) => log(`[remote-model-list] ${msg}`));
+            const resolved = resolveModelId(args, listed.models);
+            if ('error' in resolved) {
+              return resolved.error;
             }
+            const modelId = resolved.modelId;
+            remoteLog(`切换模型为 ${modelId}（重启 Agent，--model；不使用热切换 API）`);
+            killAgent(remoteAgent.proc);
+            remoteAgent = null;
+            remoteAgent = await spawnAgent({
+              workspacePath: currentWorkspace,
+              callbacks: {
+                onTextChunk: (text: string) => { remoteReplyText += text; },
+                onThoughtChunk: () => {},
+                onToolCall: () => {},
+                onModeUpdate: () => {},
+                onUsageUpdate: () => {},
+              },
+              log: (msg: string) => log(`[remote-agent] ${msg}`),
+              sessionMode: 'agent',
+              modelId,
+            });
+            remoteAgent.currentModelId = modelId;
+            remoteAgent.proc.on('exit', (code) => {
+              remoteLog(`Agent 进程退出 (code=${code})`, code === 0 ? 'info' : 'warn');
+              remoteAgent = null;
+            });
+            bridge.sendToPanel({ type: 'watch_remote_status', active: true, status: 'ready' }).catch(() => {});
+            return `已切换到 ${modelId}（已用 --model 重启 Agent，会话已重置）。`;
+          } catch (e2) {
+            return `模型切换失败: ${(e2 as Error).message}`;
           }
         }
 
@@ -1397,45 +1393,41 @@ async function main() {
           log(`mode saved as default: ${mode} (agent not connected yet)`);
         }
       } else if (data.type === 'set_model') {
-        const modelId = data.modelId as string;
-        if (!modelId || !agent) return;
-        log(`switching model to: ${modelId}`);
+        const raw = data.modelId as string;
+        if (!raw || !agent) return;
+        log(`switching model (respawn with --model, skip hot-swap API): ${raw}`);
 
+        bridge.sendToPanel({ type: 'status', connected: false, text: '切换模型中...' }).catch(() => {});
         try {
-          await agent.connection.unstable_setSessionModel({
-            sessionId: agent.sessionId,
-            modelId,
-          });
-          currentModelId = modelId;
-          agent.currentModelId = modelId;
-          bridge.sendToPanel({ type: 'status', connected: true, text: 'Connected' }).catch(() => {});
-          log(`model switched to ${modelId} (session preserved: ${agent.sessionId})`);
-        } catch (e) {
-          log(`setSessionModel failed: ${(e as Error).message}, respawning with --model ${modelId}`);
-          bridge.sendToPanel({ type: 'status', connected: false, text: '切换模型中...' }).catch(() => {});
-          try {
-            killAgent(agent.proc);
-            agent = null;
-            currentModelId = modelId;
-            const ok = await startAcp();
-            const ag = agent as AgentProcess | null;
-            if (ok && ag) {
-              ag.currentModelId = modelId;
-              bridge.sendToPanel({ type: 'status', connected: true, text: 'Connected' }).catch(() => {});
-              bridge.sendToPanel({ type: 'mode', mode: defaultMode }).catch(() => {});
-              if (ag.availableModels.length) {
-                bridge.sendToPanel({ type: 'models', models: ag.availableModels, currentModelId: ag.currentModelId }).catch(() => {});
-              }
-              log(`model switched to ${modelId} (via respawn, new session: ${ag.sessionId})`);
-            } else {
-              bridge.sendToPanel({ type: 'status', connected: false, text: '模型切换失败' }).catch(() => {});
-              bridge.sendToPanel({ type: 'error', text: `模型切换失败: Agent 重启异常` }).catch(() => {});
-            }
-          } catch (e2) {
-            log(`respawn for model switch failed: ${(e2 as Error).message}`);
-            bridge.sendToPanel({ type: 'status', connected: false, text: '模型切换失败' }).catch(() => {});
-            bridge.sendToPanel({ type: 'error', text: `模型切换失败: ${(e2 as Error).message}` }).catch(() => {});
+          const listed = await listModels(log);
+          const resolved = resolveModelId(raw, listed.models);
+          if ('error' in resolved) {
+            bridge.sendToPanel({ type: 'status', connected: true, text: 'Connected' }).catch(() => {});
+            bridge.sendToPanel({ type: 'error', text: resolved.error }).catch(() => {});
+            return;
           }
+          const modelId = resolved.modelId;
+          killAgent(agent.proc);
+          agent = null;
+          currentModelId = modelId;
+          const ok = await startAcp();
+          const ag = agent as AgentProcess | null;
+          if (ok && ag) {
+            ag.currentModelId = modelId;
+            bridge.sendToPanel({ type: 'status', connected: true, text: 'Connected' }).catch(() => {});
+            bridge.sendToPanel({ type: 'mode', mode: defaultMode }).catch(() => {});
+            if (ag.availableModels.length) {
+              bridge.sendToPanel({ type: 'models', models: ag.availableModels, currentModelId: ag.currentModelId }).catch(() => {});
+            }
+            log(`model switched to ${modelId} (via --model respawn, new session: ${ag.sessionId})`);
+          } else {
+            bridge.sendToPanel({ type: 'status', connected: false, text: '模型切换失败' }).catch(() => {});
+            bridge.sendToPanel({ type: 'error', text: `模型切换失败: Agent 重启异常` }).catch(() => {});
+          }
+        } catch (e2) {
+          log(`respawn for model switch failed: ${(e2 as Error).message}`);
+          bridge.sendToPanel({ type: 'status', connected: false, text: '模型切换失败' }).catch(() => {});
+          bridge.sendToPanel({ type: 'error', text: `模型切换失败: ${(e2 as Error).message}` }).catch(() => {});
         }
       } else if (data.type === 'browse_folder') {
         try {

@@ -6,6 +6,35 @@
 
 ---
 
+## v3.5.10 -- 2026-04-10 -- `feat`: SeaTalk Remote 模型切换与 Git hooks 提交前校验
+
+**提交者**: @tianyi.liang
+**Commit Type**: feat
+**修改模块**: SeaTalk Agent、根目录脚本与规则、文档
+
+### 变更说明
+- [Agent] Remote `!!use` / 面板切换模型：不再调用易报 `Invalid params` 的 `unstable_setSessionModel`，改为 `spawnAgent --model` 重启进程，与 Cursor CLI 行为一致
+- [Agent] `resolveModelId()`：支持模糊匹配（片段、多词、`composer2` 与 `composer-2` 等价等）
+- [Repo] 新增 `scripts/verify-hooks.sh` 与 `npm run verify:hooks`，校验 `core.hooksPath` 指向 `.githooks/` 且 hook 可执行
+- [规则] `git-workflow.mdc`、`.cursorrules`、release-publish Skill：提交/发版前须通过 hooks 校验，避免 hook 更新后未 `npm run setup` 导致推送漏检
+- [文档] `SEATALK_AGENT.md`、`SKILL.md`、`CHROME_EXTENSION.md` 版本与说明同步
+
+### 测试情况
+
+| 测试项 | 结果 | 备注 |
+|--------|------|------|
+| `npm run verify:hooks` | [OK] | 本机通过 |
+| `npx tsc --noEmit`（seatalk-agent） | [OK] | |
+| `resolveModelId` 模糊匹配自测 | [OK] | tsx 冒烟用例 |
+| Agent 重启与 CDP 验证 | [OK] | 用户确认 SeaTalk 侧 Remote 正常 |
+| `node scripts/verify-cdp.js` | [OK] | |
+
+### 特别注意
+- 切换模型会重置 ACP 会话（与文档一致）
+- 其他成员拉取后若推送被 hook 拦下，请执行 `npm run setup`
+
+---
+
 ## v3.5.9 -- 2026-04-09 -- `feat`: chrome-auth Cookie 过期自动检测与 SSO 静默刷新
 
 **提交者**: @tianyi.liang

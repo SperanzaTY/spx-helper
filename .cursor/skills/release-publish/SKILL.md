@@ -39,6 +39,10 @@ description: >-
 # 确认分支
 git rev-parse --abbrev-ref HEAD   # 必须是 release
 
+# 确认 Git hooks 已安装（避免 .githooks 更新后未 setup，推送漏检）
+npm run verify:hooks
+# 失败则: npm run setup
+
 # 拉取远程最新（以 GitLab 为基准）
 git fetch gitlab release
 
@@ -47,7 +51,7 @@ git rev-list --count HEAD..gitlab/release
 # 若 >0，必须先 git pull --rebase gitlab release
 ```
 
-**阻断条件**：不在 release 分支、本地落后于远程 → 必须先解决。
+**阻断条件**：不在 release 分支、本地落后于远程、`verify:hooks` 失败 → 必须先解决。
 
 ## Step 2：版本号同步
 

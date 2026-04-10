@@ -490,6 +490,109 @@ export async function listModels(log: (msg: string) => void): Promise<{ models: 
   });
 }
 
+/** Lowercase alnum only — "composer-2" and "composer2" both become "composer2". */
+function compactKey(s: string): string {
+  return s.toLowerCase().replace(/[-_\s./]+/g, '');
+}
+
+function tokensFromInput(s: string): string[] {
+  return s
+    .toLowerCase()
+    .trim()
+    .split(/[-_\s./]+/)
+    .filter((x) => x.length > 0);
+}
+
+/**
+ * Fuzzy score: higher = better. No need for exact CLI id — e.g. "composer 2", "composer2", "comp" (if unique enough).
+ */
+function fuzzyModelScore(userInput: string, m: ModelInfo): number {
+  const raw = userInput.trim().toLowerCase();
+  const id = m.modelId.toLowerCase();
+  const name = m.name.toLowerCase();
+  const hay = `${id} ${name}`;
+  const cid = compactKey(id);
+  const cname = compactKey(name);
+  const chay = compactKey(hay);
+  const cRaw = compactKey(raw);
+
+  let score = 0;
+
+  if (id === raw) return 1_000_000;
+  if (cid === cRaw) return 950_000;
+
+  if (id.includes(raw)) score += 80_000 + raw.length * 100;
+  if (name.includes(raw)) score += 70_000 + raw.length * 80;
+  if (chay.includes(cRaw) && cRaw.length >= 2) score += 60_000 + cRaw.length * 50;
+
+  const toks = tokensFromInput(userInput);
+  if (toks.length >= 1) {
+    const allToksInHay = toks.every(
+      (t) => hay.includes(t) || cid.includes(compactKey(t)) || cname.includes(compactKey(t)),
+    );
+    if (allToksInHay && toks.length > 0) {
+      score += 40_000 + toks.length * 500;
+    }
+    for (const t of toks) {
+      if (t.length < 2) continue;
+      if (hay.includes(t)) score += 2000 + t.length * 20;
+      if (cid.includes(compactKey(t))) score += 1500 + t.length * 15;
+    }
+  }
+
+  if (raw.length >= 3) {
+    if (id.startsWith(raw)) score += 25_000;
+    if (name.startsWith(raw)) score += 20_000;
+  }
+
+  return score;
+}
+
+const MIN_FUZZY_SCORE = 1500;
+
+/**
+ * Map user input to a model id from `agent models` output.
+ * Supports fuzzy match (partial name, "composer 2", "composer2" vs "composer-2", etc.).
+ * When the list is empty (CLI glitch), pass through trimmed input so `--model` still works.
+ */
+export function resolveModelId(
+  userInput: string,
+  models: ModelInfo[],
+): { modelId: string } | { error: string } {
+  const t = userInput.trim();
+  if (!t) return { error: '模型 ID 为空' };
+
+  if (models.length > 0) {
+    const exact = models.find((m) => m.modelId === t);
+    if (exact) return { modelId: exact.modelId };
+
+    const ci = models.find((m) => m.modelId.toLowerCase() === t.toLowerCase());
+    if (ci) return { modelId: ci.modelId };
+
+    const scored = models.map((m) => ({ m, s: fuzzyModelScore(t, m) }));
+    scored.sort((a, b) => {
+      if (b.s !== a.s) return b.s - a.s;
+      return a.m.modelId.length - b.m.modelId.length;
+    });
+
+    const best = scored[0];
+    if (best && best.s >= MIN_FUZZY_SCORE) {
+      return { modelId: best.m.modelId };
+    }
+
+    const sample = models
+      .slice(0, 12)
+      .map((m) => m.modelId)
+      .join(', ');
+    const more = models.length > 12 ? ' …' : '';
+    return {
+      error: `无法根据 "${userInput}" 匹配到模型（可试关键词片段，如 composer、gpt；完整列表: !!ls models）。示例: ${sample}${more}`,
+    };
+  }
+
+  return { modelId: t };
+}
+
 export function killAgent(proc: ChildProcess) {
   if (!proc.killed) {
     proc.kill('SIGTERM');
