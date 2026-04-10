@@ -272,7 +272,24 @@ if [ -n "$BASE_REF" ]; then
   fi
 fi
 
-# 4. 提醒：SeaTalk Agent 修改需要重启
+# 4. 检查发版通知文件是否存在
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+NOTIFICATION_FILE="$REPO_ROOT/.release-notification"
+if [ ! -f "$NOTIFICATION_FILE" ] || [ ! -s "$NOTIFICATION_FILE" ]; then
+  echo "❌ 缺少发版通知文件 .release-notification！"
+  echo "   推送成功后会自动发送 SeaTalk 群通知，需要先准备通知内容。"
+  echo ""
+  echo "   请创建文件（内容为本次发版的自然语言描述）:"
+  echo "     echo \"📦 SPX Helper vX.Y.Z 已发布 ...\" > .release-notification"
+  echo ""
+  echo "   提示：让 AI Agent 提交时自动生成此文件。"
+  echo ""
+  HAS_ERRORS=1
+else
+  echo "✅ 发版通知文件已准备"
+fi
+
+# 5. 提醒：SeaTalk Agent 修改需要重启
 AGENT_CHANGED=$(git diff --name-only "$PRIMARY_REMOTE/release"...HEAD 2>/dev/null | grep -c "^seatalk-agent/" || true)
 if [ "$AGENT_CHANGED" -gt 0 ]; then
   echo ""

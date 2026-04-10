@@ -6,6 +6,25 @@
 
 ---
 
+## v3.5.13 -- 2026-04-10 -- `fix`: pre-push hook 强制检查发版通知文件
+
+**提交者**: @yufei.wang
+**Commit Type**: fix
+**修改模块**: Git Hooks
+
+### 变更说明
+- [Hook] `.githooks/pre-push`：新增 `.release-notification` 文件存在性检查，推送 release 分支前必须准备好通知内容，否则阻止推送
+
+### 测试情况
+
+| 测试项 | 结果 | 备注 |
+|--------|------|------|
+| `bash -n .githooks/pre-push` | [OK] | 语法检查通过 |
+| 无 `.release-notification` 时推送 | [BLOCKED] | 符合预期 |
+| 有 `.release-notification` 时推送 | [OK] | 通过检查并自动发送通知 |
+
+---
+
 ## v3.5.12 -- 2026-04-10 -- `fix`: pre-push hook 兼容任意 remote 名称 & scheduler 打包修复
 
 **提交者**: @yufei.wang
