@@ -13,5 +13,9 @@ dependencies = [
     "browser-cookie3>=0.19.1",
 ]
 
+[tool.hatch.build.targets.wheel]
+packages = ["."]
+only-include = ["scheduler_mcp_server.py"]
+
 [project.scripts]
 scheduler-mcp = "scheduler_mcp_server:main"
