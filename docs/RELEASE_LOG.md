@@ -6,6 +6,31 @@
 
 ---
 
+## v3.5.12 -- 2026-04-10 -- `fix`: pre-push hook 兼容任意 remote 名称 & scheduler 打包修复
+
+**提交者**: @yufei.wang
+**Commit Type**: fix
+**修改模块**: Git Hooks、MCP Tools（scheduler-query）、文档
+
+### 变更说明
+- [Hook] `.githooks/pre-push`：移除对 remote 名称的硬编码依赖（原先仅对名为 `gitlab` 的 remote 执行检查），改为对所有推送到 `release` 分支的 remote 均执行完整校验；推送成功后自动同步到其他所有 remote
+- [MCP] `scheduler-query/pyproject.toml`：补充 `[tool.hatch.build.targets.wheel]` 配置，修复 `uvx` 远程安装时 `hatchling` 找不到打包文件的问题
+- [文档] `scheduler-query/README.md`：新增 `uvx` 远程安装（方式一）配置说明，补充 `chrome-auth` 依赖声明
+
+### 测试情况
+
+| 测试项 | 结果 | 备注 |
+|--------|------|------|
+| `bash -n .githooks/pre-push` | [OK] | 语法检查通过 |
+| `uvx` 远程安装 scheduler-query | [OK] | 修复后可正常安装 |
+| scheduler-query 功能测试 | [OK] | search_tasks / get_task_info / get_task_instances / get_task_lineage / get_task_metric_summary 均正常 |
+
+### 特别注意
+- 上一次 `f0f8013` 提交因 hook 未生效而跳过了 RELEASE_LOG 检查，本条记录一并补齐
+- 克隆仓库后 remote 名称不一定是 `gitlab`（默认为 `origin`），修改后对任何 remote 均有效
+
+---
+
 ## v3.5.11 -- 2026-04-10 -- `fix`: Alarm Bot 线程回复外层去重与 Flink 告警 prompt 对齐
 
 **提交者**: @tianyi.liang

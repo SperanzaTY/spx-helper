@@ -4,9 +4,8 @@
 # git 会传入: $1=remote名称  $2=remote URL
 #
 # 推送策略：
-#   GitLab (gitlab) 是主仓库，所有检查以 gitlab/release 为基准
-#   推送 GitLab 通过后，自动尝试推送 GitHub（失败不阻塞）
-#   推送 GitHub 时跳过检查（已在 GitLab 推送时检查过）
+#   推送到 release 分支时，无论目标 remote 是什么，都执行完整检查
+#   推送成功后，自动尝试同步到其他 remote（失败不阻塞）
 
 set -e
 
@@ -29,15 +28,8 @@ if [ "$BRANCH" != "release" ]; then
   exit 0
 fi
 
-PRIMARY_REMOTE="gitlab"
-
-# 推送非 GitLab remote 时，跳过检查直接放行
-if [ "$PUSH_REMOTE" != "$PRIMARY_REMOTE" ]; then
-  echo ""
-  echo "📌 推送到 ${PUSH_REMOTE}，跳过检查（检查以 ${PRIMARY_REMOTE} 为基准）"
-  echo ""
-  exit 0
-fi
+# 以推送目标 remote 作为基准进行检查
+PRIMARY_REMOTE="$PUSH_REMOTE"
 
 RELEASE_LOG="docs/RELEASE_LOG.md"
 VERSION=$(grep '"version"' chrome-extension/manifest.json | head -1 | sed 's/.*"\([0-9.]*\)".*/\1/')
@@ -303,17 +295,17 @@ fi
 echo "✅ 所有检查通过，正在推送..."
 echo ""
 
-# GitLab 推送成功后，自动尝试同步到 GitHub + 发送群通知（失败不阻塞）
+# 推送成功后，自动尝试同步到其他 remote + 发送群通知（失败不阻塞）
 post_push() {
-  # 同步 GitHub
-  if git remote get-url origin >/dev/null 2>&1; then
-    echo "  Syncing to GitHub (origin)..."
-    if git push origin release 2>/dev/null; then
-      echo "  [OK] GitHub sync successful"
+  for r in $(git remote); do
+    [ "$r" = "$PUSH_REMOTE" ] && continue
+    echo "  Syncing to ${r}..."
+    if git push "$r" release 2>/dev/null; then
+      echo "  [OK] ${r} sync successful"
     else
-      echo "  [WARNING] GitHub sync failed (owner will sync later)"
+      echo "  [WARNING] ${r} sync failed (owner will sync later)"
     fi
-  fi
+  done
 
   # 发送 SeaTalk 群通知
   REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"

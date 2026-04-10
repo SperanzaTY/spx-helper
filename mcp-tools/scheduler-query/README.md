@@ -11,7 +11,25 @@
 
 ## 配置
 
+### 方式一：uvx 远程安装（免克隆）
+
 在 `~/.cursor/mcp.json` 中添加：
+
+```json
+{
+  "scheduler-query": {
+    "command": "uvx",
+    "args": [
+      "-p", "3.12",
+      "--from", "git+https://git.garena.com/tianyi.liang/spx-helper@release#subdirectory=mcp-tools/scheduler-query",
+      "--with", "chrome-auth@git+https://git.garena.com/tianyi.liang/spx-helper@release#subdirectory=mcp-tools/chrome-auth",
+      "scheduler-mcp"
+    ]
+  }
+}
+```
+
+### 方式二：本地路径（开发者推荐）
 
 ```json
 {
@@ -19,12 +37,13 @@
     "command": "python3",
     "args": [
       "/你的路径/spx-helper/mcp-tools/scheduler-query/scheduler_mcp_server.py"
-    ]
+    ],
+    "env": { "PYTHONPATH": "/你的路径/spx-helper/mcp-tools/chrome-auth" }
   }
 }
 ```
 
-> 替换 `/你的路径/spx-helper` 为实际的项目路径。
+> 替换 `/你的路径/spx-helper` 为实际的项目路径。使用方式二前需先 `pip install -e chrome-auth`。
 
 ## 工具列表
 
