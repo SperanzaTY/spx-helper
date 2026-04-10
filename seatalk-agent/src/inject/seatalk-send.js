@@ -1,7 +1,7 @@
 // SeaTalk programmatic send — extract React Fiber actions & expose __seatalkSend()
 // Based on seatalk-enhance's proven approach, adapted for seatalk-agent.
 (function () {
-  var SEND_SCRIPT_VERSION = 7;
+  var SEND_SCRIPT_VERSION = 9;
   if (window.__seatalkSendVersion >= SEND_SCRIPT_VERSION) return;
   window.__seatalkSendVersion = SEND_SCRIPT_VERSION;
 
@@ -77,6 +77,12 @@
   // ── React Fiber actions extraction ──
 
   var cachedActions = null;
+  /** 与 cachedActions 对应的会话，如 "group-123"；与当前选中不一致时必须丢弃缓存 */
+  var cachedActionsSessionKey = null;
+
+  function sessionKeyNormalized(type, id) {
+    return String(type).toLowerCase() + '-' + id;
+  }
 
   function extractActions() {
     var el = document.querySelector('.ProseMirror.seatalk-editor-content');
@@ -106,16 +112,40 @@
     return '';
   }
 
-  function ensureActions(sessionId) {
-    if (cachedActions) return Promise.resolve(cachedActions);
-    return navigateToSession(sessionId).then(function () {
+  function ensureActions(sessType, sessIdNum) {
+    var idStr = String(sessIdNum);
+    var wantKey = sessionKeyNormalized(sessType, sessIdNum);
+    var selectedOk = false;
+    try {
+      var sel = window.store.getState().messages.selectedSession;
+      if (sel && String(sel.id) === idStr) {
+        selectedOk = sessionKeyNormalized(sel.type, sel.id) === wantKey;
+      }
+    } catch (_) { selectedOk = false; }
+
+    if (cachedActions && cachedActionsSessionKey === wantKey && selectedOk) {
+      return Promise.resolve(cachedActions);
+    }
+
+    cachedActions = null;
+    cachedActionsSessionKey = null;
+
+    return navigateToSession(idStr).then(function () {
       return new Promise(function (resolve, reject) {
         var attempts = 0;
         var timer = setInterval(function () {
-          if (cachedActions) { clearInterval(timer); resolve(cachedActions); return; }
           var a = extractActions();
-          if (a) { cachedActions = a; clearInterval(timer); resolve(a); return; }
-          if (++attempts >= 20) { clearInterval(timer); reject(new Error('editor did not appear after selecting session')); }
+          if (a) {
+            cachedActions = a;
+            cachedActionsSessionKey = wantKey;
+            clearInterval(timer);
+            resolve(a);
+            return;
+          }
+          if (++attempts >= 20) {
+            clearInterval(timer);
+            reject(new Error('editor did not appear after selecting session'));
+          }
         }, 200);
       });
     });
@@ -129,12 +159,19 @@
       item.click();
       return Promise.resolve();
     }
+    // 列表里暂时看不到目标时，尝试从当前已打开的编辑器拿到 moveToTop（不依赖过期的 cachedActions）
+    if (!cachedActions || typeof cachedActions.actionMoveChatSessionToTop !== 'function') {
+      var boot = extractActions();
+      if (boot && typeof boot.actionMoveChatSessionToTop === 'function') cachedActions = boot;
+    }
     // Session not visible in virtualized list — use actionMoveChatSessionToTop
     // to pull it into the rendered area, then click it.
     if (cachedActions && typeof cachedActions.actionMoveChatSessionToTop === 'function') {
       try {
         var s = window.store.getState();
-        var sessions = s.messages.sessionList || [];
+        var sl = (s.messages && s.messages.sessionList) || [];
+        var sessions =
+          sl.length > 0 ? sl : (s.messages && s.messages.sessions) || [];
         var sid = parseInt(sessionId, 10);
         var sess = null;
         for (var i = 0; i < sessions.length; i++) {
@@ -159,7 +196,14 @@
   function tryCache() {
     if (cachedActions) return;
     var a = extractActions();
-    if (a) { cachedActions = a; console.log('[seatalk-send] actions cached'); }
+    if (a) {
+      cachedActions = a;
+      try {
+        var sel = window.store.getState().messages.selectedSession;
+        cachedActionsSessionKey = sel ? sessionKeyNormalized(sel.type, sel.id) : null;
+      } catch (_) { cachedActionsSessionKey = null; }
+      console.log('[seatalk-send] actions cached');
+    }
   }
 
   // ── Main API ──
@@ -205,18 +249,7 @@
 
     var rootMid = opts.rootMid || undefined;
 
-    // logicSendMessage reads the draft from the *currently selected* session's
-    // context, so for thread replies we must navigate to the target session first.
-    if (rootMid) {
-      try {
-        var sel = window.store.getState().messages.selectedSession;
-        if (!sel || String(sel.id) !== String(id) || sel.type !== type) {
-          cachedActions = null;
-        }
-      } catch (_) { cachedActions = null; }
-    }
-
-    return ensureActions(String(id)).then(function (actions) {
+    return ensureActions(type, id).then(function (actions) {
       var session = { type: type, id: id };
       actions.actionChangeDraft({
         session: session,

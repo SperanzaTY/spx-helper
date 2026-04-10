@@ -179,7 +179,7 @@ seatalk
 
 #### B.3 验证
 
-- SeaTalk 左侧出现 ✦ 图标 → 点击打开 AI 面板 → 输入"你好"测试
+- SeaTalk **最左侧栏**应出现：**✦**（打开 Cursor 对话面板）、其下方 **Agent 专用竖条**（连接圆点、版本号、齿轮菜单）。点击 **✦** 打开面板后，在输入框输入「你好」发送测试。
 
 > 详细功能和使用说明参见 [SeaTalk Agent 指南](docs/guides/SEATALK_AGENT.md)
 >
@@ -226,7 +226,7 @@ git pull origin release
 ```
 
 - **MCP**：uvx 通过 git 远程安装，**不需要改 `mcp.json`**，重启 MCP 即可
-- **SeaTalk Agent**：终端运行 `seatalk`，或在面板中点击"检查更新"
+- **SeaTalk Agent**：终端运行 `seatalk`；更新可在左侧栏点 **版本号** 打开更新气泡，或点 **齿轮** →「检查更新」
 - **Chrome 扩展**：`chrome://extensions/` 点击刷新按钮
 
 > 如果从 v3.0 之前升级，SeaTalk Agent 目录已从 `mcp-tools/seatalk-agent/` 移到顶级 `seatalk-agent/`，需要先卸载旧版（`bash mcp-tools/seatalk-agent/install.sh uninstall`）再重新安装。
@@ -239,7 +239,7 @@ git pull origin release
 |------|---------|
 | `uvx` 找不到 | 安装 uv 后重启终端，或 `export PATH="$HOME/.local/bin:$PATH"` |
 | MCP 一直红点 | 确认 VPN 连接 + `uvx --version` 可用 |
-| SeaTalk 没有 Cursor 面板 | 确认 `bash install.sh` 已执行，终端运行 `seatalk` |
+| SeaTalk 没有 ✦ / Agent 侧栏入口 | 确认 `bash install.sh` 已执行，终端运行 `seatalk`，SeaTalk 完全重启后再看最左侧栏 |
 | node 版本低于 22 | `brew install node` |
 | Python 版本低于 3.10 | `uv python install 3.12` |
 

@@ -1,0 +1,36 @@
+---
+description: SeaTalk 本机 CDP 可达性与调试方式。用户要读 SeaTalk 界面、评 Alarm Bot、或 Agent/注入联调时自动参考；避免误判「无法连接 SeaTalk」。
+globs:
+alwaysApply: true
+---
+
+# SeaTalk 本机 CDP（避免误判）
+
+## 必须遵守
+
+在 **用户本机** 上通过 Cursor 执行任务时，**不要**在未验证的情况下声称「无法连接 SeaTalk」「看不到 SeaTalk 里的消息」。本仓库约定 SeaTalk 桌面端使用 **CDP 端口 `19222`**（见 `seatalk-agent` 与 `seatalk-agent.mdc`）。
+
+用户有 **Alarm Bot 效果评审、SeaTalk UI/注入调试、会话内容核对** 等需求时，应优先尝试：
+
+1. **探测**：`curl -sS --connect-timeout 2 http://127.0.0.1:19222/json`，或运行仓库脚本 `node scripts/probe-seatalk-cdp.js`（一键摘要；`--snippet` 可打印正文片段）。  
+   - 返回 JSON 列表且含 `webSocketDebuggerUrl` 即表示本机 SeaTalk 页面可被 CDP 附着。
+2. **读页面文本**：对 `/json` 返回的 `page` 目标建立 WebSocket，调用 CDP `Runtime.evaluate`（例如读取 `document.body.innerText` 或项目注入脚本暴露的全局），用于抓列表/可见区文案。  
+   - **局限**：全页 `innerText` 多为会话列表与摘要；要看**某条线程全文**，需用户打开对应会话，或使用 `seatalk-reader` MCP / 注入侧已有 API，必要时用终端脚本封装。
+3. **操作**：复杂 UI 操作以 **seatalk-agent 注入脚本 + `main.ts` 里已有 `evaluate` 路径** 为准；本规则不替代 `seatalk-agent-testing.mdc` 的注入测试流程。
+
+## 禁止
+
+- 用「助手不在本机」作为**唯一**理由拒绝尝试 CDP（在 Cursor 中执行终端命令时，命令在用户机器上运行，**可以**访问 `127.0.0.1:19222`）。
+- 用「只能打开 link.seatalk.io 落地页」替代 **直连 Electron CDP**：网页链接与 `19222` 调试会话不是同一通道。
+
+## 与浏览器 MCP 的关系
+
+`cursor-ide-browser` 用于打开 **HTTP(S) 页**；SeaTalk **桌面客户端内** 的会话应以 **本机 CDP `19222`** 或 **seatalk-agent / seatalk-reader** 为准，二者不可混用。
+
+## 相关文件
+
+| 路径 | 说明 |
+|------|------|
+| `seatalk-agent/src/cdp.ts` | CDP 客户端封装 |
+| `seatalk-agent/src/main.ts` | `evaluate`、注入、Alarm Bot 等 |
+| `.cursor/rules/seatalk-agent.mdc` | Agent 开发与 `curl` 验 CDP |

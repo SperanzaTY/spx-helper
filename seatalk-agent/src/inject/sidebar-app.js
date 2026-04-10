@@ -10,6 +10,17 @@
   if (window.__cursorSidebarCleanup) {
     try { window.__cursorSidebarCleanup(); } catch (_) {}
   }
+  // Orphan rail from previous injection must go: cleanup aborts listeners but old #spx-agent-rail
+  // would make mountSeatalkAgentRail() return early, leaving new script without wired handlers.
+  var oldRail = document.getElementById('spx-agent-rail');
+  if (oldRail) oldRail.remove();
+  document.querySelectorAll('.spx-rail-settings-dd').forEach(function (el) {
+    try {
+      el.remove();
+    } catch (_) {}
+  });
+  var oldGlobalSettingsPop = document.getElementById('spx-agent-global-settings-pop');
+  if (oldGlobalSettingsPop) oldGlobalSettingsPop.remove();
   var oldPanel = document.getElementById('cursor-panel');
   if (oldPanel) oldPanel.remove();
   var oldPopover = document.getElementById('cursor-remote-popover');
@@ -71,7 +82,9 @@
   var cachedModels = { models: [], currentModelId: '' };
   var cachedWorkspace = '', cachedWorkspaceList = [];
   var panelHandle = null, messagesEl = null, inputEl = null, sendBtn = null, stopBtn = null;
-  var statusDot = null, statusText = null, statusModelEl = null;
+  var statusDot = null, statusText = null;
+  /** Last context-window stats from ACP usage_update; turn total from prompt result (fallback when size is 0). */
+  var _usageCtxSize = 0, _usageCtxUsed = 0, _usageTurnTotal = 0;
   var modeSelect = null, modelSelect = null, ctxBar = null, ctxLabel = null;
   var wsLabel = null;
   var turnView = null, turnEl = null, turnFullText = '', turnFullThinking = '';
@@ -82,7 +95,12 @@
   var MAX_IMAGES = 4, MAX_IMAGE_BYTES = 5 * 1024 * 1024;
   var ACCEPTED_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
   var cachedUpdate = { available: false, local: '', remote: '', behind: 0, changelog: '' };
-  var verBadgeEl = null, updateOverlay = null;
+  var verBadgeEl = null;
+  var railUpdatePopEl = null;
+  var _railUpdatePopOutsideHandler = null;
+  var settingsBtn = null, settingsDd = null, usageBadgeEl = null;
+  var globalAgentSettingsPopEl = null, grantToggleEl = null, _globalSettingsPopOutsideHandler = null;
+  var _railSettingsResizeHandler = null;
   var _updateJustApplied = false;
 
   // Remote state
@@ -292,7 +310,8 @@
 
     // Input area
     '.cursor-input-area { padding:0; border-top:1px solid var(--cp-border); background:var(--cp-bg); flex-shrink:0; }',
-    '.cursor-input-meta { display:flex; align-items:center; gap:6px; padding:6px 12px 0; position:relative; }',
+    '.cursor-input-meta { display:flex; align-items:center; gap:6px; padding:6px 12px 0; position:relative; width:100%; box-sizing:border-box; }' +
+    '.cursor-input-meta .cursor-panel-usage-badge { margin-left:auto; flex-shrink:0; }',
     '.cursor-input-wrap { display:flex; align-items:flex-end; padding:8px 12px; gap:8px; }',
     '.cursor-input { flex:1; background:transparent; border:1px solid var(--cp-border2); border-radius:6px; padding:8px 10px; color:var(--cp-text); font-size:13px; font-family:inherit; resize:none; outline:none; min-height:36px; max-height:120px; transition:border-color .15s; }',
     '.cursor-input:focus { border-color:var(--cp-accent); }',
@@ -342,9 +361,6 @@
     '.cursor-status-dot.off { background:var(--cp-error); }',
     '.cursor-status-dot.none { background:var(--cp-text-dim2); }',
     '.cursor-status-text { }',
-    '.cursor-status-reconnect { display:none; padding:1px 8px; border-radius:3px; border:1px solid var(--cp-border2); background:var(--cp-bg3); color:var(--cp-accent); font-size:9px; cursor:pointer; transition:background .12s; white-space:nowrap; font-family:inherit; }',
-    '.cursor-status-reconnect:hover { background:var(--cp-bg2); border-color:var(--cp-accent); }',
-    '.cursor-status-reconnect.show { display:inline-block; }',
     '.cursor-status-model { flex:1; text-align:right; color:var(--cp-text-dim2); }',
     '.cursor-usage-badge { font-size:9px; color:var(--cp-text-dim2); display:flex; align-items:center; gap:2px; cursor:default; white-space:nowrap; }',
     '.cursor-turn-usage { font-size:10px; color:var(--cp-text-dim2); padding:4px 0 0; opacity:0.7; text-align:right; }',
@@ -357,6 +373,79 @@
     '.cursor-settings-dd-item:hover { background:var(--cp-bg3); }',
     '.cursor-settings-dd-item .dd-icon { width:16px; text-align:center; font-size:12px; opacity:.7; }',
     '.cursor-settings-dd-sep { height:1px; background:var(--cp-border2); margin:4px 0; }',
+
+    // Agent rail: same control pattern as createSidebarButton — div.cursor-sidebar-btn (see cursor-ui.js)
+    '#spx-agent-rail.spx-agent-rail { position:relative; z-index:10050; pointer-events:auto; -webkit-app-region:no-drag; flex:1 1 auto; display:flex; flex-direction:column; align-items:center; min-height:0; width:100%; box-sizing:border-box; overflow:visible; }' +
+    '#spx-agent-rail .cursor-sidebar-btn { margin:4px 0; flex-shrink:0; }' +
+    '.spx-agent-rail-top { flex:0 0 auto; display:flex; flex-direction:column; align-items:center; padding-top:4px; }' +
+    '.spx-agent-rail .cursor-status-text { display:none !important; }' +
+    '#spx-agent-rail .cursor-sidebar-btn.spx-agent-status-btn { display:flex; align-items:center; justify-content:center; }' +
+    '.spx-agent-rail .cursor-sidebar-btn.spx-agent-status-btn .cursor-status-dot { margin:0; }' +
+    '.spx-agent-rail-footer { flex:0 0 auto; margin-top:auto; display:flex; flex-direction:column; align-items:center; gap:4px; width:100%; padding:6px 0 4px; }' +
+    '#spx-agent-rail .cursor-sidebar-btn.spx-agent-ver-btn { width:auto; min-width:32px; max-width:56px; min-height:28px; height:auto; padding:3px 4px; font-size:9px; line-height:1.2; font-weight:500; justify-content:center; text-align:center; color:rgba(255,255,255,0.72); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; border-radius:6px; transition:background .15s,border-color .15s,box-shadow .2s,color .15s; }' +
+    '#spx-agent-rail .cursor-sidebar-btn.spx-agent-ver-btn:hover { color:#fff; background:rgba(255,255,255,0.06); }' +
+    '#spx-agent-rail .cursor-sidebar-btn.spx-agent-ver-btn.has-update { max-width:60px; min-width:44px; min-height:34px; padding:5px 3px; white-space:normal; overflow:visible; color:#fecaca; border:1px solid rgba(248,113,113,0.5); background:linear-gradient(165deg, rgba(239,68,68,0.2) 0%, rgba(88,28,28,0.45) 100%); box-shadow:0 0 0 1px rgba(0,0,0,0.2), 0 4px 14px rgba(220,38,38,0.22); animation:ver-rail-glow 2.8s ease-in-out infinite; }' +
+    '#spx-agent-rail .cursor-sidebar-btn.spx-agent-ver-btn.has-update:hover { color:#fff; border-color:#f87171; background:linear-gradient(165deg, rgba(248,113,113,0.35) 0%, rgba(127,29,29,0.55) 100%); box-shadow:0 0 0 1px rgba(0,0,0,0.25), 0 6px 18px rgba(220,38,38,0.35); }' +
+    '@keyframes ver-rail-glow { 0%,100%{ box-shadow:0 0 0 1px rgba(0,0,0,0.2), 0 4px 14px rgba(220,38,38,0.18); } 50%{ box-shadow:0 0 0 1px rgba(0,0,0,0.2), 0 4px 18px rgba(248,113,113,0.38); } }' +
+    '.ver-rail-update-stack { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; text-align:center; }' +
+    '.ver-rail-ico-row { display:flex; align-items:center; justify-content:center; line-height:0; }' +
+    '.ver-rail-ico { width:14px; height:14px; color:#fca5a5; flex-shrink:0; }' +
+    '#spx-agent-rail .cursor-sidebar-btn.spx-agent-ver-btn.has-update:hover .ver-rail-ico { color:#fff; }' +
+    '.ver-rail-tag { font-size:6px; font-weight:800; letter-spacing:0.14em; text-transform:uppercase; color:#fff; line-height:1; margin-top:1px; }' +
+    '.ver-rail-sub { font-size:7px; font-weight:600; color:rgba(254,226,226,0.92); letter-spacing:-0.01em; line-height:1.05; max-width:100%; overflow:hidden; text-overflow:ellipsis; }' +
+    '#spx-agent-rail .cursor-sidebar-btn.spx-agent-ver-btn.has-update:hover .ver-rail-sub { color:#fff; }' +
+    '#spx-agent-rail .cursor-sidebar-btn.spx-agent-ver-btn.ver-just-updated { animation:none; border-color:rgba(52,211,153,0.55); color:#a7f3d0; background:linear-gradient(165deg, rgba(16,185,129,0.22) 0%, rgba(6,78,59,0.45) 100%); box-shadow:0 0 0 1px rgba(0,0,0,0.2), 0 4px 14px rgba(16,185,129,0.2); }' +
+    '#spx-agent-rail .cursor-sidebar-btn.spx-agent-ver-btn.ver-just-updated:hover { border-color:#34d399; color:#ecfdf5; background:linear-gradient(165deg, rgba(52,211,153,0.32) 0%, rgba(6,95,70,0.5) 100%); }' +
+    '.ver-rail-sync-stack { display:flex; flex-direction:column; align-items:center; gap:2px; }' +
+    '.ver-rail-sync-ico { width:13px; height:13px; color:#6ee7b7; }' +
+    '.ver-rail-sync-ver { font-size:8px; font-weight:600; color:rgba(236,253,245,0.95); }' +
+    '.ver-rail-sync-tag { font-size:6px; font-weight:800; letter-spacing:0.1em; text-transform:uppercase; color:#d1fae5; line-height:1; }' +
+    '.spx-rail-settings-wrap { position:relative; z-index:10051; -webkit-app-region:no-drag; display:flex; flex-direction:column; align-items:center; }' +
+    '.spx-rail-settings-dd { display:none; position:fixed; left:0; top:0; margin:0; z-index:2147483646; min-width:188px; padding:4px 0; border-radius:8px; background:#2b2d31; border:1px solid rgba(255,255,255,0.12); box-shadow:0 8px 24px rgba(0,0,0,0.45); pointer-events:auto; -webkit-app-region:no-drag; }' +
+    '.spx-rail-settings-dd.show { display:block; }' +
+    '.spx-rail-dd-item { display:flex; align-items:center; gap:8px; padding:7px 12px; font-size:11px; color:#e4e4e7; cursor:pointer; white-space:nowrap; transition:background .1s; }' +
+    '.spx-rail-dd-item:hover { background:rgba(255,255,255,0.08); }' +
+    '.spx-rail-dd-item .dd-icon { width:16px; text-align:center; font-size:12px; opacity:.75; }' +
+    '.spx-rail-dd-sep { height:1px; background:rgba(255,255,255,0.08); margin:4px 0; }' +
+    '#spx-rail-update-pop.spx-rail-update-pop { position:fixed; z-index:2147483640; width:280px; max-height:min(420px,calc(100vh - 24px)); display:flex; flex-direction:column; border-radius:10px; background:#2b2d31; border:1px solid rgba(255,255,255,0.14); box-shadow:0 12px 40px rgba(0,0,0,0.5); font-family:-apple-system,BlinkMacSystemFont,sans-serif; overflow:hidden; pointer-events:auto; }' +
+    '.spx-rail-update-pop-body { flex:1; display:flex; flex-direction:column; min-height:0; overflow:hidden; padding:0; font-size:11px; color:#d4d4d8; }' +
+    '.spx-rail-update-pop-main { flex:0 0 auto; overflow-y:auto; max-height:min(260px,40vh); padding:12px; }' +
+    '.spx-rail-update-pop-logs { flex:0 1 auto; min-height:0; overflow-y:auto; max-height:120px; padding:0 12px 12px; }' +
+    '.spx-rail-update-pop-hd { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:8px 10px; border-bottom:1px solid rgba(255,255,255,0.1); color:#f4f4f5; font-size:12px; font-weight:600; flex-shrink:0; }' +
+    '.spx-rail-update-pop-title { display:flex; align-items:center; gap:8px; flex-wrap:wrap; min-width:0; flex:1; }' +
+    '.spx-rail-update-pop-ribbon { flex-shrink:0; font-size:8px; font-weight:800; letter-spacing:0.1em; text-transform:uppercase; color:#fecaca; padding:3px 8px; border-radius:999px; background:rgba(239,68,68,0.38); border:1px solid rgba(248,113,113,0.55); line-height:1.2; }' +
+    '.spx-rail-update-pop-title-plain { font-size:12px; font-weight:600; color:#f4f4f5; }' +
+    '.spx-rail-update-pop-close { border:none; background:transparent; color:#a1a1aa; cursor:pointer; font-size:16px; line-height:1; padding:2px 6px; border-radius:4px; }' +
+    '.spx-rail-update-pop-close:hover { background:rgba(255,255,255,0.1); color:#fff; }' +
+    '.spx-rail-update-info { font-size:12px; line-height:1.6; color:#e4e4e7; }' +
+    '.spx-rail-update-info .ver-current { color:#a1a1aa; }' +
+    '.spx-rail-update-info .ver-new { color:#4ade80; font-weight:600; }' +
+    '.spx-rail-update-info .ver-behind { color:#fbbf24; }' +
+    '.spx-rail-update-changelog { margin-top:10px; padding:8px 10px; background:#1e1f23; border:1px solid rgba(255,255,255,0.08); border-radius:6px; font-family:Menlo,Consolas,monospace; font-size:10px; line-height:1.5; color:#a1a1aa; max-height:160px; overflow-y:auto; white-space:pre-wrap; }' +
+    '.spx-rail-update-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:14px; }' +
+    '.spx-rail-update-btn { padding:6px 12px; border-radius:6px; border:none; font-size:11px; cursor:pointer; font-family:inherit; }' +
+    '.spx-rail-update-btn.primary { background:#3b82f6; color:#fff; } .spx-rail-update-btn.primary:hover { background:#2563eb; }' +
+    '.spx-rail-update-btn.secondary { background:rgba(255,255,255,0.08); color:#e4e4e7; border:1px solid rgba(255,255,255,0.12); } .spx-rail-update-btn.secondary:hover { background:rgba(255,255,255,0.12); }' +
+    '.spx-rail-update-btn:disabled { opacity:0.5; cursor:not-allowed; }' +
+    '.spx-rail-update-noup { text-align:center; padding:16px 8px; color:#a1a1aa; font-size:12px; }' +
+    '.spx-rail-update-log { margin-top:10px; padding:8px 10px; background:#1e1f23; border-radius:6px; font-family:Menlo,Consolas,monospace; font-size:10px; color:#a1a1aa; line-height:1.7; max-height:140px; overflow-y:auto; }' +
+    '.spx-rail-update-log-line { padding:1px 0; opacity:0; transition:opacity 0.3s; }' +
+    '.spx-rail-update-log-line.show { opacity:1; }' +
+    '.spx-rail-update-log-line .log-ts { color:#71717a; margin-right:6px; }' +
+    '.spx-rail-update-log-line .log-ok { color:#4ade80; }' +
+    '.spx-rail-update-log-line .log-err { color:#f87171; }' +
+    '.spx-rail-update-log-line .log-info { color:#60a5fa; }' +
+    '.cursor-panel-usage-badge { flex-shrink:0; display:flex; align-items:center; gap:3px; font-size:10px; color:var(--cp-text-dim2); }' +
+    '.spx-agent-global-settings-pop { position:fixed; z-index:2147483640; width:260px; display:none; border-radius:10px; background:#2b2d31; border:1px solid rgba(255,255,255,0.14); box-shadow:0 12px 40px rgba(0,0,0,0.5); font-family:-apple-system,BlinkMacSystemFont,sans-serif; overflow:hidden; pointer-events:auto; }' +
+    '.spx-agent-settings-pop-hd { display:flex; align-items:center; justify-content:space-between; padding:8px 10px; border-bottom:1px solid rgba(255,255,255,0.1); color:#f4f4f5; font-size:12px; font-weight:600; flex-shrink:0; }' +
+    '.spx-agent-settings-pop-body { padding:10px 12px 12px; font-size:11px; color:#d4d4d8; }' +
+    '.spx-agent-settings-pop-row { display:flex; align-items:center; justify-content:space-between; gap:12px; }' +
+    '.spx-agent-settings-pop-label { color:#a1a1aa; }' +
+    '.spx-agent-settings-pop-hint { margin:10px 0 0; font-size:10px; line-height:1.45; color:#71717a; }' +
+    '.spx-agent-global-settings-pop .cursor-grant-toggle { margin-left:0; }' +
+    '.spx-agent-global-settings-pop .cursor-grant-toggle .gt-label { display:none; }' +
+    '.spx-agent-global-settings-pop .spx-agent-settings-pop-close { border:none; background:transparent; color:#a1a1aa; cursor:pointer; font-size:16px; line-height:1; padding:2px 6px; border-radius:4px; }' +
+    '.spx-agent-global-settings-pop .spx-agent-settings-pop-close:hover { background:rgba(255,255,255,0.1); color:#fff; }',
 
     // Logs overlay
     '.cursor-logs { position:absolute; top:0; left:0; right:0; bottom:0; background:var(--cp-bg); z-index:10; display:none; flex-direction:column; }',
@@ -407,6 +496,16 @@
     // Workspace bar
     '.cursor-ws-bar { display:flex; align-items:center; padding:4px 12px; border-bottom:1px solid var(--cp-border); font-size:10px; color:var(--cp-text-dim); gap:4px; flex-shrink:0; cursor:pointer; transition:background .12s; }',
     '.cursor-ws-bar:hover { background:var(--cp-bg2); }',
+    '.cursor-acp-status-bar { display:flex; align-items:center; gap:6px; padding:4px 12px; border-bottom:1px solid var(--cp-border); font-size:10px; color:var(--cp-text-dim2); flex-shrink:0; }',
+    '.cursor-acp-dot { width:6px; height:6px; border-radius:50%; flex-shrink:0; }',
+    '.cursor-acp-dot.on { background:var(--cp-ok); }',
+    '.cursor-acp-dot.off { background:var(--cp-error); }',
+    '.cursor-acp-dot.none { background:var(--cp-text-dim2); }',
+    '.cursor-acp-label { font-weight:600; color:var(--cp-text-dim); letter-spacing:0.02em; flex-shrink:0; }',
+    '.cursor-acp-text { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }',
+    '.cursor-acp-reconnect { display:none; padding:1px 8px; border-radius:3px; border:1px solid var(--cp-border2); background:var(--cp-bg3); color:var(--cp-accent); font-size:9px; cursor:pointer; transition:background .12s; white-space:nowrap; font-family:inherit; flex-shrink:0; }',
+    '.cursor-acp-reconnect:hover { background:var(--cp-bg2); border-color:var(--cp-accent); }',
+    '.cursor-acp-reconnect.show { display:inline-block; }',
     '.cursor-ws-icon { opacity:.6; }',
     '.cursor-ws-name { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--cp-text2); }',
     '.cursor-ws-arrow { opacity:.4; font-size:8px; }',
@@ -434,6 +533,10 @@
     '.cursor-ws-picker-section { font-size:10px; font-weight:600; color:var(--cp-text-dim2); padding:8px 12px 4px; text-transform:uppercase; letter-spacing:.5px; border-bottom:1px solid var(--cp-border); margin-bottom:2px; }',
 
     // Cursor icon injected into SeaTalk native quick-operation-menu
+    // 与已移除的 seatalk-native-md 一致：防止插入 ✦ 后 flex 把「更多」(.last-icon) 挤扁或 overflow 裁掉下拉
+    '.quick-operation-menu, .thread-quick-operation-menu { overflow:visible !important; }',
+    '.quick-operation-menu .quick-operation-icon.cursor-qo-icon, .thread-quick-operation-menu .quick-operation-icon.cursor-qo-icon { flex-shrink:0 !important; min-width:20px; }',
+    '.quick-operation-menu .last-icon, .thread-quick-operation-menu .last-icon { flex-shrink:0 !important; }',
     '.quick-operation-icon.cursor-qo-icon { color:var(--cp-qo-icon, #a78bfa); transition:color .12s; }',
     '.quick-operation-icon.cursor-qo-icon:hover { color:var(--cp-qo-icon-hover, #8b5cf6); }',
 
@@ -450,9 +553,9 @@
     // Version badge in status bar
     '.cursor-ver-badge { display:inline-flex; align-items:center; gap:3px; padding:1px 6px; border-radius:3px; font-size:9px; cursor:pointer; transition:all .12s; white-space:nowrap; color:var(--cp-text-dim2); }',
     '.cursor-ver-badge:hover { color:var(--cp-text2); }',
-    '.cursor-ver-badge.has-update { color:var(--cp-warn); font-weight:600; }',
-    '.cursor-ver-badge.has-update:hover { color:#e0a030; }',
-    '.cursor-ver-badge .ver-dot { display:none; width:6px; height:6px; border-radius:50%; background:var(--cp-warn); flex-shrink:0; animation:ca-pulse 2s infinite; }',
+    '.cursor-ver-badge.has-update { color:#fecaca; font-weight:600; padding:2px 8px; border-radius:999px; background:rgba(239,68,68,0.14); border:1px solid rgba(248,113,113,0.38); }',
+    '.cursor-ver-badge.has-update:hover { color:#fff; border-color:#f87171; background:rgba(239,68,68,0.22); }',
+    '.cursor-ver-badge .ver-dot { display:none; width:6px; height:6px; border-radius:50%; background:#f87171; flex-shrink:0; animation:ca-pulse 2s infinite; }',
     '.cursor-ver-badge.has-update .ver-dot { display:inline-block; }',
     '@keyframes ca-pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }',
 
@@ -1045,6 +1148,10 @@
         turnView.processChunk({ type: 'tool_call', toolCall: tc });
         if (turnEl) { var r2 = turnEl.querySelector('.ca-result:not(.ca-result-frozen)'); if (r2) turnEl.appendChild(r2); }
       } else if (d.type === 'turn_usage') {
+        var tt = d.totalTokens || 0;
+        if (!tt && (d.inputTokens || d.outputTokens)) tt = (d.inputTokens || 0) + (d.outputTokens || 0);
+        _usageTurnTotal = tt;
+        refreshUsageBadge();
         if (turnEl) {
           var uEl = document.createElement('div');
           uEl.className = 'cursor-turn-usage';
@@ -1064,11 +1171,7 @@
         cachedStatus = { connected: !!d.connected, text: d.text || (d.connected ? 'Connected' : 'Disconnected') };
         if (statusDot) statusDot.className = 'cursor-status-dot ' + (cachedStatus.connected ? 'on' : 'off');
         if (statusText) statusText.textContent = cachedStatus.text;
-        var rcBtn = panelHandle && panelHandle.el ? panelHandle.el.querySelector('.cursor-status-reconnect') : null;
-        if (rcBtn) {
-          if (cachedStatus.connected) { rcBtn.classList.remove('show'); rcBtn.textContent = '重连'; }
-          else { rcBtn.classList.add('show'); rcBtn.textContent = '重连'; }
-        }
+        updatePanelAcpStatus();
         updateSidebarBtnStatus();
         if (wasDisconnected && cachedStatus.connected && _restartTimer) {
           clearInterval(_restartTimer);
@@ -1082,7 +1185,7 @@
           appendUpdateProgress('Agent 已重新连接');
           if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: 'update_check' }));
           setTimeout(function () {
-            if (updateOverlay) updateOverlay.classList.remove('show');
+            closeRailUpdatePop();
             showNewBadge();
           }, 1500);
         }
@@ -1104,7 +1207,6 @@
       } else if (d.type === 'models') {
         cachedModels = { models: d.models || [], currentModelId: d.currentModelId || '' };
         updateModelBadge();
-        if (statusModelEl) updateStatusModel();
       } else if (d.type === 'workspace') {
         if (d.workspaces) cachedWorkspaceList = d.workspaces;
         // Read saved workspace BEFORE overwriting localStorage
@@ -1137,7 +1239,7 @@
       } else if (d.type === 'update_available') {
         cachedUpdate = { available: !!d.available, local: d.local || '', remote: d.remote || '', behind: d.behind || 0, changelog: d.changelog || '', error: d.error };
         updateVerBadge();
-        if (updateOverlay && updateOverlay.classList.contains('show')) renderUpdateOverlay();
+        if (railUpdatePopEl) renderRailUpdateForm();
       } else if (d.type === 'update_progress') {
         appendUpdateProgress(d.text || '');
       } else if (d.type === 'update_done') {
@@ -1148,16 +1250,16 @@
           setTimeout(function () { appendUpdateProgress('等待 Agent 重新连接...'); }, 2000);
           setTimeout(function () {
             appendUpdateProgress('如果长时间未重连，请在 Cursor IDE 中打开 SPX Helper 工作区，让 AI 重启 SeaTalk Agent');
-            if (!updateOverlay) return;
-            var actions = updateOverlay.querySelector('.cursor-update-actions');
-            if (actions) actions.innerHTML = '<button class="cursor-update-btn secondary" data-act="check">重新检查</button>';
+            if (!railUpdatePopEl) return;
+            var actions = railUpdatePopEl.querySelector('.spx-rail-update-actions');
+            if (actions) actions.innerHTML = '<button class="spx-rail-update-btn secondary" data-act="check">重新检查</button>';
           }, 15000);
         } else {
           appendUpdateProgress('[err] 更新失败');
-          if (updateOverlay) {
-            var actions2 = updateOverlay.querySelector('.cursor-update-actions');
-            if (actions2) actions2.innerHTML = '<button class="cursor-update-btn primary" data-act="apply">重试更新</button>' +
-              '<button class="cursor-update-btn secondary" data-act="check">重新检查</button>';
+          if (railUpdatePopEl) {
+            var actions2 = railUpdatePopEl.querySelector('.spx-rail-update-actions');
+            if (actions2) actions2.innerHTML = '<button class="spx-rail-update-btn primary" data-act="apply">重试更新</button>' +
+              '<button class="spx-rail-update-btn secondary" data-act="check">重新检查</button>';
           }
         }
       } else if (d.type === 'send_confirm_request') {
@@ -1218,7 +1320,8 @@
   var _grantToggleVisible = true;
 
   function updateGrantToggle() {
-    var el = panelHandle && panelHandle.el ? panelHandle.el.querySelector('.cursor-grant-toggle') : null;
+    var el = grantToggleEl;
+    if (!el && globalAgentSettingsPopEl) el = globalAgentSettingsPopEl.querySelector('.cursor-grant-toggle');
     if (!el) return;
     if (_grantToggleVisible) el.classList.add('visible');
     else el.classList.remove('visible');
@@ -1227,10 +1330,12 @@
   }
 
   function bindGrantToggle() {
-    var el = panelHandle && panelHandle.el ? panelHandle.el.querySelector('.cursor-grant-toggle') : null;
+    var el = grantToggleEl;
+    if (!el && globalAgentSettingsPopEl) el = globalAgentSettingsPopEl.querySelector('.cursor-grant-toggle');
     if (!el || el._bound) return;
     el._bound = true;
-    el.addEventListener('click', function () {
+    el.addEventListener('click', function (e) {
+      e.stopPropagation();
       if (_sendGrantActive) {
         if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: 'send_grant_off' }));
       } else {
@@ -1350,10 +1455,26 @@
     messagesEl.scrollTop = messagesEl.scrollHeight;
   }
 
+  function updatePanelAcpStatus() {
+    if (!panelHandle || !panelHandle.el) return;
+    var bar = panelHandle.el.querySelector('.cursor-acp-status-bar');
+    if (!bar) return;
+    var dot = bar.querySelector('.cursor-acp-dot');
+    var txt = bar.querySelector('.cursor-acp-text');
+    var rc = bar.querySelector('.cursor-acp-reconnect');
+    if (dot) dot.className = 'cursor-acp-dot ' + (cachedStatus.connected ? 'on' : 'off');
+    if (txt) txt.textContent = cachedStatus.text || (cachedStatus.connected ? '已连接' : '断开');
+    if (rc) {
+      if (cachedStatus.connected) rc.classList.remove('show');
+      else rc.classList.add('show');
+    }
+  }
+
   window.__agentSetStatus = function (connected, text) {
     cachedStatus = { connected: connected, text: text || (connected ? 'Connected' : 'Disconnected') };
     if (statusDot) statusDot.className = 'cursor-status-dot ' + (connected ? 'on' : 'off');
     if (statusText) statusText.textContent = cachedStatus.text;
+    updatePanelAcpStatus();
     updateSidebarBtnStatus();
   };
 
@@ -1367,26 +1488,112 @@
     }
   }
 
-  function showUpdateOverlay() {
-    if (!panelHandle || !panelHandle.el) return;
-    var existing = panelHandle.el.querySelector('.cursor-update');
-    if (existing) {
-      existing.classList.add('show');
-      renderUpdateOverlay();
-      return;
+  function closeRailUpdatePop() {
+    if (_railUpdatePopOutsideHandler) {
+      document.removeEventListener('mousedown', _railUpdatePopOutsideHandler, true);
+      _railUpdatePopOutsideHandler = null;
     }
-    updateOverlay = document.createElement('div');
-    updateOverlay.className = 'cursor-update show';
-    updateOverlay.innerHTML =
-      '<div class="cursor-update-hd">' +
-        '<button class="cursor-update-back"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg></button>' +
-        '<svg class="cursor-update-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>' +
-        '<span class="cursor-update-title">版本更新</span>' +
+    if (railUpdatePopEl && railUpdatePopEl.parentNode) railUpdatePopEl.parentNode.removeChild(railUpdatePopEl);
+    railUpdatePopEl = null;
+  }
+
+  function closeGlobalAgentSettingsPop() {
+    if (_globalSettingsPopOutsideHandler) {
+      document.removeEventListener('mousedown', _globalSettingsPopOutsideHandler, true);
+      _globalSettingsPopOutsideHandler = null;
+    }
+    if (globalAgentSettingsPopEl) globalAgentSettingsPopEl.style.display = 'none';
+  }
+
+  function positionGlobalSettingsPop(anchorEl) {
+    if (!globalAgentSettingsPopEl || !anchorEl) return;
+    var r = anchorEl.getBoundingClientRect();
+    var pw = globalAgentSettingsPopEl.offsetWidth || 260;
+    var ph = globalAgentSettingsPopEl.offsetHeight || 120;
+    var left = r.right + 8;
+    var top = r.top;
+    if (left + pw > window.innerWidth - 8) left = Math.max(8, r.left - pw - 8);
+    if (top + ph > window.innerHeight - 8) top = Math.max(8, window.innerHeight - ph - 8);
+    globalAgentSettingsPopEl.style.left = left + 'px';
+    globalAgentSettingsPopEl.style.top = top + 'px';
+  }
+
+  function positionRailSettingsDd() {
+    if (!settingsBtn || !settingsDd || !settingsDd.classList.contains('show')) return;
+    var r = settingsBtn.getBoundingClientRect();
+    var pw = settingsDd.offsetWidth || 188;
+    var ph = settingsDd.offsetHeight || 360;
+    var gap = 8;
+    var left = r.right + gap;
+    if (left + pw > window.innerWidth - 8) left = Math.max(8, r.left - pw - gap);
+    var top = r.top;
+    if (top + ph > window.innerHeight - 8) top = Math.max(8, window.innerHeight - ph - 8);
+    if (top < 8) top = 8;
+    settingsDd.style.left = left + 'px';
+    settingsDd.style.top = top + 'px';
+    settingsDd.style.right = 'auto';
+    settingsDd.style.bottom = 'auto';
+  }
+
+  function showGlobalAgentSettingsPop(anchorEl) {
+    closeRailUpdatePop();
+    if (!globalAgentSettingsPopEl) return;
+    globalAgentSettingsPopEl.style.display = 'block';
+    positionGlobalSettingsPop(anchorEl || settingsBtn);
+    requestAnimationFrame(function () {
+      positionGlobalSettingsPop(anchorEl || settingsBtn);
+    });
+    if (_globalSettingsPopOutsideHandler) {
+      document.removeEventListener('mousedown', _globalSettingsPopOutsideHandler, true);
+      _globalSettingsPopOutsideHandler = null;
+    }
+    _globalSettingsPopOutsideHandler = function (ev) {
+      if (!globalAgentSettingsPopEl || globalAgentSettingsPopEl.style.display === 'none') return;
+      if (globalAgentSettingsPopEl.contains(ev.target)) return;
+      if (ev.target.closest && ev.target.closest('#spx-agent-rail')) return;
+      if (ev.target.closest && ev.target.closest('.spx-rail-settings-dd')) return;
+      closeGlobalAgentSettingsPop();
+    };
+    setTimeout(function () {
+      document.addEventListener('mousedown', _globalSettingsPopOutsideHandler, true);
+    }, 0);
+  }
+
+  function positionRailUpdatePop(anchorEl) {
+    if (!railUpdatePopEl || !anchorEl) return;
+    var r = anchorEl.getBoundingClientRect();
+    var pw = railUpdatePopEl.offsetWidth || 280;
+    var ph = railUpdatePopEl.offsetHeight || 200;
+    var left = r.right + 8;
+    var top = r.top;
+    if (left + pw > window.innerWidth - 8) left = Math.max(8, r.left - pw - 8);
+    if (top + ph > window.innerHeight - 8) top = Math.max(8, window.innerHeight - ph - 8);
+    railUpdatePopEl.style.left = left + 'px';
+    railUpdatePopEl.style.top = top + 'px';
+  }
+
+  function showRailUpdatePopover(anchorEl) {
+    closeGlobalAgentSettingsPop();
+    closeRailUpdatePop();
+    railUpdatePopEl = document.createElement('div');
+    railUpdatePopEl.id = 'spx-rail-update-pop';
+    railUpdatePopEl.className = 'spx-rail-update-pop';
+    railUpdatePopEl.innerHTML =
+      '<div class="spx-rail-update-pop-hd">' +
+        '<span class="spx-rail-update-pop-title"><span class="spx-rail-update-pop-title-plain">版本更新</span></span>' +
+        '<button type="button" class="spx-rail-update-pop-close" aria-label="关闭">&times;</button>' +
       '</div>' +
-      '<div class="cursor-update-body"></div>';
-    updateOverlay.querySelector('.cursor-update-back').addEventListener('click', function () { updateOverlay.classList.remove('show'); });
-    updateOverlay.querySelector('.cursor-update-body').addEventListener('click', function (e) {
-      var btn = e.target.closest('.cursor-update-btn');
+      '<div class="spx-rail-update-pop-body">' +
+        '<div class="spx-rail-update-pop-main"></div>' +
+        '<div class="spx-rail-update-pop-logs"></div>' +
+      '</div>';
+    document.body.appendChild(railUpdatePopEl);
+    railUpdatePopEl.querySelector('.spx-rail-update-pop-close').addEventListener('click', function (e) {
+      e.stopPropagation();
+      closeRailUpdatePop();
+    });
+    railUpdatePopEl.addEventListener('click', function (e) {
+      var btn = e.target.closest('.spx-rail-update-btn');
       if (!btn) return;
       var act = btn.dataset.act;
       if (act === 'apply') {
@@ -1401,11 +1608,23 @@
         setTimeout(function () { btn.disabled = false; btn.textContent = '检查更新'; }, 5000);
       }
     });
-    panelHandle.el.appendChild(updateOverlay);
-    renderUpdateOverlay();
-    // Auto-trigger check if no data yet
-    if (!cachedUpdate.local) {
-      if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: 'update_check' }));
+    renderRailUpdateForm();
+    positionRailUpdatePop(anchorEl || verBadgeEl);
+    requestAnimationFrame(function () {
+      positionRailUpdatePop(anchorEl || verBadgeEl);
+    });
+    _railUpdatePopOutsideHandler = function (ev) {
+      if (!railUpdatePopEl) return;
+      if (railUpdatePopEl.contains(ev.target)) return;
+      if (ev.target.closest && ev.target.closest('#spx-agent-rail')) return;
+      if (ev.target.closest && ev.target.closest('.spx-rail-settings-dd')) return;
+      closeRailUpdatePop();
+    };
+    setTimeout(function () {
+      document.addEventListener('mousedown', _railUpdatePopOutsideHandler, true);
+    }, 0);
+    if (!cachedUpdate.local && typeof window.__agentSend === 'function') {
+      window.__agentSend(JSON.stringify({ type: 'update_check' }));
     }
   }
 
@@ -1413,6 +1632,7 @@
   var _restartTimer = null;
 
   function showRestartProgress() {
+    ensurePanelOpenForOverlay();
     if (!messagesEl) return;
     var existing = messagesEl.querySelector('.cursor-restart-progress');
     if (existing) existing.remove();
@@ -1440,6 +1660,12 @@
     }, 1000);
   }
 
+  /** Logs / 诊断 / 重启进度等浮层挂在 Cursor 面板上；从左侧 rail 齿轮进入时面板可能未打开，需先拉起面板。 */
+  function ensurePanelOpenForOverlay() {
+    if (panelHandle && panelHandle.el) return;
+    if (typeof window.__agentToggle === 'function') window.__agentToggle(true);
+  }
+
   function appendRestartLog(text) {
     if (!_restartLogEl) return;
     var line = document.createElement('div');
@@ -1454,6 +1680,7 @@
   }
 
   function showLogsOverlay(lines) {
+    ensurePanelOpenForOverlay();
     if (!panelHandle || !panelHandle.el) return;
     var existing = panelHandle.el.querySelector('.cursor-logs');
     if (existing) { existing.classList.add('show'); existing.querySelector('.cursor-logs-body').textContent = lines.join('\n'); return; }
@@ -1473,11 +1700,12 @@
   }
 
   function showDiagOverlay(info) {
+    ensurePanelOpenForOverlay();
     if (!panelHandle || !panelHandle.el) return;
     var existing = panelHandle.el.querySelector('.cursor-diag');
     if (existing) existing.remove();
     var rows = [
-      { key: 'CDP 端口', val: info.cdpPort || '?', ok: true },
+      { key: 'CDP 代理端口', val: info.cdpProxyPort != null ? String(info.cdpProxyPort) : info.cdpPort || '?', ok: true },
       { key: 'CDP 连接', val: info.cdpConnected ? '已连接' : '断开', ok: info.cdpConnected },
       { key: 'ACP 连接', val: info.acpConnected ? '已连接' : '断开', ok: info.acpConnected },
       { key: '工作区', val: info.workspace || '—', ok: true },
@@ -1519,12 +1747,6 @@
     if (!modelBadgeEl) return;
     var cur = cachedModels.models.find(function (m) { return m.modelId === cachedModels.currentModelId; });
     modelBadgeEl.innerHTML = '<span class="dot"></span>' + escapeHtml(cur ? cur.name : cachedModels.currentModelId || 'Model');
-  }
-
-  function updateStatusModel() {
-    if (!statusModelEl) return;
-    var cur = cachedModels.models.find(function (m) { return m.modelId === cachedModels.currentModelId; });
-    statusModelEl.textContent = cur ? cur.name : cachedModels.currentModelId || '';
   }
 
   function buildModelDropdown() {
@@ -2634,35 +2856,75 @@
     return String(n);
   }
   function updateUsageBadge(d) {
-    if (!panelHandle || !panelHandle.el) return;
-    var badge = panelHandle.el.querySelector('.cursor-usage-badge');
+    if (d) {
+      if (typeof d.contextSize === 'number') _usageCtxSize = d.contextSize;
+      if (typeof d.contextUsed === 'number') _usageCtxUsed = d.contextUsed;
+    }
+    refreshUsageBadge();
+  }
+
+  function refreshUsageBadge() {
+    var badge = usageBadgeEl;
+    if (!badge && panelHandle && panelHandle.el) {
+      badge = panelHandle.el.querySelector('.cursor-panel-usage-badge');
+    }
     if (!badge) return;
-    var used = d.contextUsed || 0;
-    var size = d.contextSize || 0;
-    if (size === 0) { badge.style.display = 'none'; return; }
-    var pct = Math.round((used / size) * 100);
-    var color = pct > 80 ? '#e74c3c' : pct > 50 ? '#f39c12' : 'var(--hp-fg-muted, #888)';
-    badge.style.display = '';
-    badge.style.color = color;
-    badge.title = 'Context: ' + formatTokens(used) + ' / ' + formatTokens(size) + ' tokens (' + pct + '%)';
-    badge.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10" opacity="0.25"/><path d="M12 2a10 10 0 0 1 0 20" style="stroke-dasharray:' + (pct * 0.628) + ' 62.8;stroke-dashoffset:0;transform-origin:center;transform:rotate(-90deg)"/></svg> ' + pct + '%';
+    var used = _usageCtxUsed;
+    var size = _usageCtxSize;
+    if (size > 0) {
+      var pct = Math.round((used / size) * 100);
+      var color = pct > 80 ? '#e74c3c' : pct > 50 ? '#f39c12' : 'var(--hp-fg-muted, #888)';
+      badge.style.display = 'flex';
+      badge.style.color = color;
+      badge.title = '上下文窗口: ' + formatTokens(used) + ' / ' + formatTokens(size) + ' tokens (' + pct + '%)';
+      badge.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10" opacity="0.25"/><path d="M12 2a10 10 0 0 1 0 20" style="stroke-dasharray:' + (pct * 0.628) + ' 62.8;stroke-dashoffset:0;transform-origin:center;transform:rotate(-90deg)"/></svg> ' + pct + '%';
+      return;
+    }
+    badge.style.display = 'flex';
+    badge.style.color = 'var(--cp-text-dim2)';
+    if (_usageTurnTotal > 0) {
+      badge.title = '本回合 token 合计（来自 prompt 返回）；若需「占满上下文窗口」比例，需 Cursor 通过 ACP usage_update 上报 context size';
+      badge.textContent = '本回合 ' + formatTokens(_usageTurnTotal);
+      return;
+    }
+    badge.title = '尚无用量：完成一轮对话后显示本回合 token；窗口占用比例依赖 Cursor 上报 usage_update';
+    badge.textContent = '—';
   }
 
   // ── Update helpers ──
   var _showingNewBadge = false;
+  var VER_RAIL_SVG_UP =
+    '<svg class="ver-rail-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>';
+  var VER_RAIL_SVG_OK =
+    '<svg class="ver-rail-sync-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>';
 
   function updateVerBadge() {
     if (!verBadgeEl) return;
     if (_showingNewBadge) return;
+    verBadgeEl.classList.remove('ver-just-updated');
     if (cachedUpdate.available) {
       verBadgeEl.classList.add('has-update');
       var behind = cachedUpdate.behind > 9 ? '9+' : String(cachedUpdate.behind);
-      if (cachedUpdate.local !== cachedUpdate.remote) {
-        verBadgeEl.innerHTML = '<span class="ver-dot"></span>v' + escapeHtml(cachedUpdate.local) + ' <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px"><polyline points="9 18 15 12 9 6"/></svg> v' + escapeHtml(cachedUpdate.remote);
-      } else {
-        verBadgeEl.innerHTML = '<span class="ver-dot"></span>v' + escapeHtml(cachedUpdate.local) + ' +' + behind;
-      }
-      verBadgeEl.title = '有新版本可用 (落后 ' + cachedUpdate.behind + ' 个提交)，点击查看';
+      var subLine =
+        cachedUpdate.local !== cachedUpdate.remote ? 'v' + escapeHtml(cachedUpdate.remote) : '+' + behind;
+      verBadgeEl.innerHTML =
+        '<span class="ver-rail-update-stack">' +
+        '<span class="ver-rail-ico-row">' +
+        VER_RAIL_SVG_UP +
+        '</span>' +
+        '<span class="ver-rail-tag">new</span>' +
+        '<span class="ver-rail-sub">' +
+        subLine +
+        '</span>' +
+        '</span>';
+      verBadgeEl.title =
+        '新版本可更新：远程 v' +
+        cachedUpdate.remote +
+        '（当前 v' +
+        cachedUpdate.local +
+        '，落后 ' +
+        cachedUpdate.behind +
+        ' 个提交）点击查看详情';
     } else {
       verBadgeEl.classList.remove('has-update');
       verBadgeEl.innerHTML = 'v' + escapeHtml(cachedUpdate.local || '...');
@@ -2674,52 +2936,74 @@
     if (!verBadgeEl) return;
     _showingNewBadge = true;
     verBadgeEl.classList.remove('has-update');
-    verBadgeEl.innerHTML = 'v' + escapeHtml(cachedUpdate.local || '...') + '<span class="ver-new">NEW</span>';
+    verBadgeEl.classList.add('ver-just-updated');
+    verBadgeEl.innerHTML =
+      '<span class="ver-rail-sync-stack">' +
+      VER_RAIL_SVG_OK +
+      '<span class="ver-rail-sync-tag">synced</span>' +
+      '<span class="ver-rail-sync-ver">v' +
+      escapeHtml(cachedUpdate.local || '...') +
+      '</span>' +
+      '</span>';
     verBadgeEl.title = '已更新到最新版本';
-    setTimeout(function () { _showingNewBadge = false; }, 30000);
+    setTimeout(function () {
+      _showingNewBadge = false;
+    }, 30000);
   }
 
-  function renderUpdateOverlay() {
-    if (!updateOverlay) return;
-    var body = updateOverlay.querySelector('.cursor-update-body');
-    if (!body) return;
+  function renderRailUpdateForm() {
+    if (!railUpdatePopEl) return;
+    var titleEl = railUpdatePopEl.querySelector('.spx-rail-update-pop-title');
+    if (titleEl) {
+      if (cachedUpdate.available) {
+        titleEl.innerHTML =
+          '<span class="spx-rail-update-pop-ribbon">New release</span><span class="spx-rail-update-pop-title-plain">版本更新</span>';
+      } else {
+        titleEl.innerHTML = '<span class="spx-rail-update-pop-title-plain">版本更新</span>';
+      }
+    }
+    var main = railUpdatePopEl.querySelector('.spx-rail-update-pop-main');
+    if (!main) return;
     if (cachedUpdate.available) {
       var verChanged = cachedUpdate.local !== cachedUpdate.remote;
-      var html = '<div class="cursor-update-info">' +
+      var html = '<div class="spx-rail-update-info">' +
         '<div>当前版本: <span class="ver-current">v' + escapeHtml(cachedUpdate.local) + '</span></div>' +
         (verChanged ? '<div>最新版本: <span class="ver-new">v' + escapeHtml(cachedUpdate.remote) + '</span></div>' : '') +
         '<div>落后: <span class="ver-behind">' + cachedUpdate.behind + ' 个提交</span></div>' +
         '</div>';
       if (cachedUpdate.changelog) {
-        html += '<div style="margin-top:12px;font-size:11px;color:var(--cp-text-dim)">最近更新:</div>';
-        html += '<div class="cursor-update-changelog">' + escapeHtml(cachedUpdate.changelog) + '</div>';
+        html += '<div style="margin-top:10px;font-size:10px;color:#a1a1aa">最近更新:</div>';
+        html += '<div class="spx-rail-update-changelog">' + escapeHtml(cachedUpdate.changelog) + '</div>';
       }
-      html += '<div class="cursor-update-actions">' +
-        '<button class="cursor-update-btn primary" data-act="apply"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:4px"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>更新</button>' +
-        '<button class="cursor-update-btn secondary" data-act="check"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:4px"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>重新检查</button>' +
+      html += '<div class="spx-rail-update-actions">' +
+        '<button class="spx-rail-update-btn primary" data-act="apply"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:4px"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>更新</button>' +
+        '<button class="spx-rail-update-btn secondary" data-act="check"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:4px"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>重新检查</button>' +
         '</div>';
-      body.innerHTML = html;
+      main.innerHTML = html;
     } else {
       var msg = cachedUpdate.error ? '检查失败: ' + escapeHtml(cachedUpdate.error) : '已是最新版本 (v' + escapeHtml(cachedUpdate.local || '...') + ')';
-      body.innerHTML = '<div class="cursor-update-noup">' + msg + '</div>' +
-        '<div class="cursor-update-actions" style="justify-content:center">' +
-        '<button class="cursor-update-btn secondary" data-act="check">检查更新</button>' +
+      main.innerHTML = '<div class="spx-rail-update-noup">' + msg + '</div>' +
+        '<div class="spx-rail-update-actions" style="justify-content:center">' +
+        '<button class="spx-rail-update-btn secondary" data-act="check">检查更新</button>' +
         '</div>';
     }
   }
 
   function appendUpdateProgress(text) {
-    if (!updateOverlay) return;
-    var logEl = updateOverlay.querySelector('.cursor-update-log');
+    if (!railUpdatePopEl && verBadgeEl) {
+      showRailUpdatePopover(verBadgeEl);
+    }
+    if (!railUpdatePopEl) return;
+    var logsHost = railUpdatePopEl.querySelector('.spx-rail-update-pop-logs');
+    if (!logsHost) return;
+    var logEl = logsHost.querySelector('.spx-rail-update-log');
     if (!logEl) {
-      var body = updateOverlay.querySelector('.cursor-update-body');
-      if (!body) return;
       logEl = document.createElement('div');
-      logEl.className = 'cursor-update-log';
-      body.appendChild(logEl);
+      logEl.className = 'spx-rail-update-log';
+      logsHost.appendChild(logEl);
     }
     var line = document.createElement('div');
-    line.className = 'cursor-update-log-line';
+    line.className = 'spx-rail-update-log-line';
     var now = new Date();
     var ts = [now.getHours(), now.getMinutes(), now.getSeconds()].map(function (n) { return n < 10 ? '0' + n : '' + n; }).join(':');
     var icon = '';
@@ -2731,8 +3015,194 @@
     logEl.appendChild(line);
     requestAnimationFrame(function () { line.classList.add('show'); });
     logEl.scrollTop = logEl.scrollHeight;
-    var applyBtn = updateOverlay.querySelector('[data-act="apply"]');
+    var applyBtn = railUpdatePopEl.querySelector('[data-act="apply"]');
     if (applyBtn) applyBtn.disabled = true;
+  }
+
+  function mountSeatalkAgentRail() {
+    if (document.getElementById('spx-agent-rail')) return;
+    var SIDEBAR = document.querySelector('.sidebar-sidebar');
+    if (!SIDEBAR) return;
+
+    var rail = document.createElement('div');
+    rail.id = 'spx-agent-rail';
+    rail.className = 'spx-agent-rail';
+    rail.innerHTML =
+      '<div class="spx-agent-rail-top">' +
+        '<div class="cursor-sidebar-btn spx-agent-status-btn" title="连接状态（点击打开对话面板）" role="button" tabindex="0">' +
+          '<span class="cursor-status-dot none"></span>' +
+        '</div>' +
+        '<span class="cursor-status-text" style="display:none">...</span>' +
+      '</div>' +
+      '<div class="spx-agent-rail-footer">' +
+        '<div class="cursor-sidebar-btn spx-agent-ver-btn" title="当前版本">v...</div>' +
+        '<div class="spx-rail-settings-wrap">' +
+          '<div class="cursor-sidebar-btn spx-agent-gear-btn" title="Agent 设置与维护" role="button" tabindex="0"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="19" height="19"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></div>' +
+          '<div class="spx-rail-settings-dd">' +
+            '<div class="spx-rail-dd-item" data-action="reconnect_acp"><span class="dd-icon"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg></span>重连 ACP</div>' +
+            '<div class="spx-rail-dd-sep"></div>' +
+            '<div class="spx-rail-dd-item" data-action="restart_agent"><span class="dd-icon"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></span>重启 Agent</div>' +
+            '<div class="spx-rail-dd-item" data-action="check_update"><span class="dd-icon"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg></span>检查更新</div>' +
+            '<div class="spx-rail-dd-item" data-action="global_agent_settings"><span class="dd-icon"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"/><path d="M22 2L15 22l-4-9-9-4z"/></svg></span>Agent 会话设置</div>' +
+            '<div class="spx-rail-dd-sep"></div>' +
+            '<div class="spx-rail-dd-item" data-action="show_diagnostics"><span class="dd-icon"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg></span>诊断信息</div>' +
+            '<div class="spx-rail-dd-item" data-action="show_logs"><span class="dd-icon"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></span>查看日志</div>' +
+            '<div class="spx-rail-dd-sep"></div>' +
+            '<div class="spx-rail-dd-item" data-action="reinject_ui"><span class="dd-icon"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg></span>重新注入 UI</div>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+
+    var settingsIcon = SIDEBAR.querySelector('.sprite_toolbar_ic_settings');
+    if (settingsIcon && settingsIcon.parentNode) {
+      SIDEBAR.insertBefore(rail, settingsIcon.parentNode);
+    } else {
+      SIDEBAR.appendChild(rail);
+    }
+
+    statusDot = rail.querySelector('.cursor-status-dot');
+    statusText = rail.querySelector('.cursor-status-text');
+    verBadgeEl = rail.querySelector('.spx-agent-ver-btn');
+    settingsBtn = rail.querySelector('.spx-agent-gear-btn');
+    settingsDd = rail.querySelector('.spx-rail-settings-dd');
+    if (settingsDd && settingsDd.parentNode) {
+      document.body.appendChild(settingsDd);
+    }
+    if (!_railSettingsResizeHandler) {
+      _railSettingsResizeHandler = function () {
+        positionRailSettingsDd();
+      };
+      window.addEventListener('resize', _railSettingsResizeHandler);
+    }
+
+    globalAgentSettingsPopEl = document.createElement('div');
+    globalAgentSettingsPopEl.id = 'spx-agent-global-settings-pop';
+    globalAgentSettingsPopEl.className = 'spx-agent-global-settings-pop';
+    globalAgentSettingsPopEl.style.display = 'none';
+    globalAgentSettingsPopEl.innerHTML =
+      '<div class="spx-agent-settings-pop-hd">' +
+        '<span>Agent 会话设置</span>' +
+        '<button type="button" class="spx-agent-settings-pop-close" aria-label="关闭">&times;</button>' +
+      '</div>' +
+      '<div class="spx-agent-settings-pop-body">' +
+        '<div class="spx-agent-settings-pop-row">' +
+          '<span class="spx-agent-settings-pop-label">自动发送</span>' +
+          '<span class="cursor-grant-toggle visible" title="开启后 AI 可直接向 SeaTalk 发送消息，无需逐条确认">' +
+            '<span class="gt-track"><span class="gt-knob"></span></span><span class="gt-label">自动发送</span>' +
+          '</span>' +
+        '</div>' +
+        '<p class="spx-agent-settings-pop-hint">开启后 SeaTalk 中的 AI 回复可自动发送，无需在对话面板逐条确认。</p>' +
+      '</div>';
+    document.body.appendChild(globalAgentSettingsPopEl);
+    grantToggleEl = globalAgentSettingsPopEl.querySelector('.cursor-grant-toggle');
+    globalAgentSettingsPopEl.querySelector('.spx-agent-settings-pop-close').addEventListener('click', function (e) {
+      e.stopPropagation();
+      closeGlobalAgentSettingsPop();
+    });
+    bindGrantToggle();
+    updateGrantToggle();
+
+    statusDot.className = 'cursor-status-dot ' + (cachedStatus.connected ? 'on' : 'off');
+    statusText.textContent = cachedStatus.text;
+    updateVerBadge();
+
+    verBadgeEl.addEventListener('click', function (ev) {
+      ev.stopPropagation();
+      ev.preventDefault();
+      showRailUpdatePopover(verBadgeEl);
+    });
+
+    var statusBtnEl = rail.querySelector('.spx-agent-status-btn');
+    if (statusBtnEl) {
+      statusBtnEl.addEventListener(
+        'click',
+        function (e) {
+          e.preventDefault();
+          e.stopPropagation();
+          if (typeof window.__agentToggle === 'function') window.__agentToggle(true);
+        },
+        true
+      );
+      statusBtnEl.addEventListener('keydown', function (e) {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        e.stopPropagation();
+        if (typeof window.__agentToggle === 'function') window.__agentToggle(true);
+      });
+    }
+
+    function toggleRailSettingsDd() {
+      if (!settingsDd) return;
+      settingsDd.classList.toggle('show');
+      if (settingsDd.classList.contains('show')) {
+        positionRailSettingsDd();
+        requestAnimationFrame(function () {
+          positionRailSettingsDd();
+        });
+      }
+    }
+
+    settingsBtn.addEventListener(
+      'click',
+      function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        toggleRailSettingsDd();
+      },
+      true
+    );
+    settingsBtn.addEventListener('keydown', function (e) {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      e.preventDefault();
+      e.stopPropagation();
+      toggleRailSettingsDd();
+    });
+
+    document.addEventListener(
+      'click',
+      function (ev) {
+        if (!settingsDd || !settingsDd.classList.contains('show')) return;
+        if (ev.target.closest && ev.target.closest('#spx-agent-rail')) return;
+        if (ev.target.closest && ev.target.closest('.spx-rail-settings-dd')) return;
+        settingsDd.classList.remove('show');
+      },
+      _abortSignal
+    );
+
+    document.addEventListener(
+      'keydown',
+      function (ev) {
+        if (ev.key !== 'Escape') return;
+        if (!settingsDd || !settingsDd.classList.contains('show')) return;
+        var ae = document.activeElement;
+        if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT' ||
+          (ae.getAttribute && ae.getAttribute('contenteditable') === 'true'))) return;
+        settingsDd.classList.remove('show');
+      },
+      _abortSignal
+    );
+
+    settingsDd.addEventListener('click', function (e) {
+      var item = e.target.closest('.spx-rail-dd-item');
+      if (!item) return;
+      var action = item.dataset.action;
+      settingsDd.classList.remove('show');
+      if (action === 'restart_agent') {
+        showRestartProgress();
+        if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: action }));
+      } else if (action === 'reconnect_acp' || action === 'reinject_ui') {
+        if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: action }));
+      } else if (action === 'show_logs') {
+        if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: 'get_logs' }));
+      } else if (action === 'show_diagnostics') {
+        if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: 'get_diagnostics' }));
+      } else if (action === 'check_update') {
+        showRailUpdatePopover(settingsBtn || verBadgeEl);
+        if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: 'update_check' }));
+      } else if (action === 'global_agent_settings') {
+        showGlobalAgentSettingsPop(settingsBtn);
+      }
+    });
   }
 
   // ── Show panel ──
@@ -2747,7 +3217,7 @@
       height: 560,
       sizeKey: 'cursorPanelSize',
       closeOnOutsideClick: false,
-      dragExclude: '.hp-panel-close, .cursor-msgs, .cursor-input-wrap, .cursor-ws-bar, .cursor-ws-picker-search, .cursor-ws-picker-list, .cursor-model-badge, .cursor-model-dd, .cursor-status-bar, textarea, input, select, button',
+      dragExclude: '.hp-panel-close, .cursor-msgs, .cursor-input-wrap, .cursor-ws-bar, .cursor-acp-status-bar, .cursor-ws-picker-search, .cursor-ws-picker-list, .cursor-model-badge, .cursor-model-dd, .cursor-panel-usage-badge, #spx-agent-rail, textarea, input, select, button',
       content: '<div class="cursor-msgs"></div>',
       onMount: function (h) {
         messagesEl = h.body.querySelector('.cursor-msgs');
@@ -2756,8 +3226,7 @@
       },
       onClose: function () {
         panelHandle = null; messagesEl = null; modelBadgeEl = null; modelDropdown = null;
-        statusDot = null; statusText = null; statusModelEl = null;
-        verBadgeEl = null; updateOverlay = null;
+        usageBadgeEl = null;
         wsLabel = null; modeTabEls = [];
         try { localStorage.setItem('__cursorPanelOpen', '0'); } catch (_) {}
         var btn = document.getElementById('cursor-sidebar-btn');
@@ -2841,6 +3310,21 @@
     wsBar.innerHTML = '<span class="cursor-ws-icon">📁</span><span class="cursor-ws-name">' + escapeHtml(wsDisplayName(cachedWorkspace)) + '</span><span class="cursor-ws-arrow">▼</span>';
     wsLabel = wsBar.querySelector('.cursor-ws-name');
     panelHandle.el.insertBefore(wsBar, bodyEl);
+
+    var acpBar = document.createElement('div');
+    acpBar.className = 'cursor-acp-status-bar';
+    acpBar.innerHTML =
+      '<span class="cursor-acp-dot none"></span>' +
+      '<span class="cursor-acp-label">ACP</span>' +
+      '<span class="cursor-acp-text">Connecting...</span>' +
+      '<button type="button" class="cursor-acp-reconnect" title="重连 ACP 与 Agent">重连</button>';
+    panelHandle.el.insertBefore(acpBar, bodyEl);
+    acpBar.querySelector('.cursor-acp-reconnect').addEventListener('click', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: 'reconnect_acp' }));
+    });
+    updatePanelAcpStatus();
 
     // Workspace picker overlay
     var wsPicker = document.createElement('div');
@@ -2995,7 +3479,7 @@
     var inputArea = document.createElement('div');
     inputArea.className = 'cursor-input-area';
     inputArea.innerHTML =
-      '<div class="cursor-input-meta"><span class="cursor-model-badge"><span class="dot"></span>Model</span><div class="cursor-model-dd"></div><span class="cursor-grant-toggle" title="开启后 AI 可直接发送消息，无需逐条确认"><span class="gt-track"><span class="gt-knob"></span></span><span class="gt-label">自动发送</span></span></div>' +
+      '<div class="cursor-input-meta"><span class="cursor-model-badge"><span class="dot"></span>Model</span><div class="cursor-model-dd"></div><span class="cursor-panel-usage-badge" title="上下文 / 本回合用量"></span></div>' +
       '<div class="cursor-img-preview"></div>' +
       '<div class="cursor-input-wrap">' +
       '<textarea class="cursor-input" placeholder="Ask anything..." rows="1"></textarea>' +
@@ -3005,6 +3489,9 @@
       '<button class="cursor-stopbtn" style="display:none"><svg width="12" height="12" viewBox="0 0 24 24" fill="white"><rect x="6" y="6" width="12" height="12" rx="2"/></svg></button>' +
       '</div>';
     panelHandle.el.appendChild(inputArea);
+
+    usageBadgeEl = inputArea.querySelector('.cursor-panel-usage-badge');
+    refreshUsageBadge();
 
     // Context bar — sits inside input area, above the text field
     ctxBar = document.createElement('div');
@@ -3033,7 +3520,6 @@
 
     updateModelBadge();
     buildModelDropdown();
-    bindGrantToggle();
     updateGrantToggle();
 
     modelBadgeEl.addEventListener('click', function (e) {
@@ -3046,7 +3532,6 @@
       if (!item) return;
       cachedModels.currentModelId = item.dataset.mid;
       updateModelBadge();
-      updateStatusModel();
       modelDropdown.classList.remove('show');
       if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: 'set_model', modelId: cachedModels.currentModelId }));
     });
@@ -3116,80 +3601,10 @@
       }, 5000);
     });
 
-    // Status bar
-    var statusBar = document.createElement('div');
-    statusBar.className = 'cursor-status-bar';
-    statusBar.innerHTML =
-      '<span class="cursor-status-dot none"></span>' +
-      '<span class="cursor-status-text">...</span>' +
-      '<button class="cursor-status-reconnect">重连</button>' +
-      '<span class="cursor-ver-badge" title="当前版本">v...</span>' +
-      '<span class="cursor-usage-badge" title="Context usage" style="display:none"></span>' +
-      '<span class="cursor-status-model" style="flex:1;text-align:right"></span>' +
-      '<span class="cursor-settings-wrap">' +
-        '<button class="cursor-topbar-btn cursor-settings-btn" title="Settings"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>' +
-        '<div class="cursor-settings-dd">' +
-          '<div class="cursor-settings-dd-item" data-action="restart_agent"><span class="dd-icon"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></span>重启 Agent</div>' +
-          '<div class="cursor-settings-dd-item" data-action="check_update"><span class="dd-icon"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg></span>检查更新</div>' +
-          '<div class="cursor-settings-dd-sep"></div>' +
-          '<div class="cursor-settings-dd-item" data-action="show_diagnostics"><span class="dd-icon"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg></span>诊断信息</div>' +
-          '<div class="cursor-settings-dd-item" data-action="show_logs"><span class="dd-icon"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></span>查看日志</div>' +
-          '<div class="cursor-settings-dd-sep"></div>' +
-          '<div class="cursor-settings-dd-item" data-action="reinject_ui"><span class="dd-icon"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg></span>重新注入 UI</div>' +
-        '</div>' +
-      '</span>';
-    panelHandle.el.appendChild(statusBar);
-    statusDot = statusBar.querySelector('.cursor-status-dot');
-    statusText = statusBar.querySelector('.cursor-status-text');
-    statusModelEl = statusBar.querySelector('.cursor-status-model');
-    verBadgeEl = statusBar.querySelector('.cursor-ver-badge');
-    var reconnectBtn = statusBar.querySelector('.cursor-status-reconnect');
-    var settingsBtn = statusBar.querySelector('.cursor-settings-btn');
-    var settingsDd = statusBar.querySelector('.cursor-settings-dd');
-
-    statusDot.className = 'cursor-status-dot ' + (cachedStatus.connected ? 'on' : 'off');
-    statusText.textContent = cachedStatus.text;
-    if (!cachedStatus.connected) reconnectBtn.classList.add('show');
-    updateStatusModel();
+    mountSeatalkAgentRail();
+    if (statusDot) statusDot.className = 'cursor-status-dot ' + (cachedStatus.connected ? 'on' : 'off');
+    if (statusText) statusText.textContent = cachedStatus.text;
     updateVerBadge();
-
-    // Version badge click → open update overlay
-    verBadgeEl.addEventListener('click', function () {
-      showUpdateOverlay();
-    });
-
-    // Reconnect button click
-    reconnectBtn.addEventListener('click', function () {
-      reconnectBtn.textContent = '重连中...';
-      if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: 'reconnect_acp' }));
-    });
-
-    // Settings dropdown
-    settingsBtn.addEventListener('click', function (e) {
-      e.stopPropagation();
-      settingsDd.classList.toggle('show');
-    });
-    document.addEventListener('click', function () { if (settingsDd) settingsDd.classList.remove('show'); }, _abortSignal);
-
-    settingsDd.addEventListener('click', function (e) {
-      var item = e.target.closest('.cursor-settings-dd-item');
-      if (!item) return;
-      var action = item.dataset.action;
-      settingsDd.classList.remove('show');
-      if (action === 'restart_agent') {
-        showRestartProgress();
-        if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: action }));
-      } else if (action === 'reconnect_acp' || action === 'reinject_ui') {
-        if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: action }));
-      } else if (action === 'show_logs') {
-        if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: 'get_logs' }));
-      } else if (action === 'show_diagnostics') {
-        if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: 'get_diagnostics' }));
-      } else if (action === 'check_update') {
-        showUpdateOverlay();
-        if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: 'update_check' }));
-      }
-    });
 
     inputEl.focus();
     var btn = document.getElementById('cursor-sidebar-btn');
@@ -3206,6 +3621,8 @@
   };
 
   // ── Sidebar button ──
+  mountSeatalkAgentRail();
+
   var oldBtn = document.getElementById('cursor-sidebar-btn');
   if (oldBtn) oldBtn.remove();
   UI.createSidebarButton({
@@ -3300,6 +3717,24 @@
     }
     _observers.length = 0;
     if (panelHandle) { try { panelHandle.close(); } catch (_) {} }
+    var railEl = document.getElementById('spx-agent-rail');
+    if (railEl) railEl.remove();
+    if (_railSettingsResizeHandler) {
+      try {
+        window.removeEventListener('resize', _railSettingsResizeHandler);
+      } catch (_) {}
+      _railSettingsResizeHandler = null;
+    }
+    var railDd = document.querySelector('.spx-rail-settings-dd');
+    if (railDd) railDd.remove();
+    settingsDd = null;
+    settingsBtn = null;
+    closeGlobalAgentSettingsPop();
+    var gsp = document.getElementById('spx-agent-global-settings-pop');
+    if (gsp) gsp.remove();
+    globalAgentSettingsPopEl = null;
+    grantToggleEl = null;
+    closeRailUpdatePop();
     closeRemotePopover();
     closeAlarmPopover();
     var fab = document.querySelector('.cursor-sel-fab');

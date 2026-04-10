@@ -6,6 +6,75 @@
 
 ---
 
+## v3.5.14 -- 2026-04-10 -- `feat`: 相对远程 release（v3.5.13）的增量
+
+**提交者**: @tianyi.liang
+**Commit Type**: feat
+**修改模块**: Git Hooks、脚本、MCP（chrome-auth / flink-query / seatalk-reader）、SeaTalk Agent、Cursor 规则与 Skill、文档
+
+> 以下条目按 `git diff gitlab/release`（工作区相对当时远程 `release` 分支）归纳，便于核对「相对上一版实际多改了什么」。
+
+### 变更说明
+
+**版本号**
+
+- `chrome-extension/manifest.json`、`package.json`、`seatalk-agent/package.json`：`3.5.13` → `3.5.14`
+
+**发版推送与群通知**
+
+- `.githooks/pre-push`：删除末尾 `trap post_push EXIT`（不再在 hook 返回时同步其他 remote / 发通知）；改为打印说明，推荐使用 `npm run push:release`，若已手动 `git push gitlab release` 则成功后执行 `npm run finish:release-push`
+- 新增 `scripts/push-release.sh`、`scripts/finish-release-push.sh`；根目录 `package.json` 增加对应 `npm` 脚本
+- `scripts/notify-release.sh`：正文改为由 Python 从 `.release-notification` **文件路径**读入再 `json.dumps`（`ensure_ascii=False`），避免经 shell 变量传递多行/引号导致截断
+- `.cursorrules`、`.cursor/rules/git-workflow.mdc`、`README.md`、`.cursor/skills/release-publish/SKILL.md`：与上述推送/通知顺序一致
+
+**仓库内辅助脚本**
+
+- 新增 `scripts/probe-seatalk-cdp.js`、`scripts/cdp_seatalk_smoke.py`；`package.json` 增加 `probe:seatalk`；`scripts/README.md` 补充说明
+
+**MCP：chrome-auth**
+
+- `mcp-tools/chrome-auth/chrome_auth/cdp_provider.py`：CDP 静默刷新拆为单端口函数并在**所有可达 CDP 端口上依次尝试**；日志与行为细节调整（含 `CHROME_AUTH_BROWSER_APP` 等）
+- `mcp-tools/chrome-auth/README.md`：与实现同步
+
+**MCP：flink-query**
+
+- `mcp-tools/flink-query/flink_mcp_server.py`：血缘接口在 `data` 为 **list** 时解析为表列表，避免按 dict 解析报错；Grafana 相关请求在 **401 时以 `auth_failed` 触发 Cookie 刷新并重试**（对接既有 `get_auth`）
+- `mcp-tools/flink-query/README.md`：同步说明
+
+**MCP：seatalk-reader**
+
+- `mcp-tools/seatalk-reader/seatalk_reader_server.py`：文档与报错文案改为依赖 **本机 seatalk-agent 暴露的 CDP 代理（默认 19222）**，不再要求 SeaTalk `--remote-debugging-port`；`list_seatalk_chats` 在 `sessionList` 为空时回退 `messages.sessions`；`navigate_to_chat` 的会话列表点击逻辑增强（类型过滤、按 id/按名称、可见项匹配等）
+- `mcp-tools/seatalk-reader/README.md`：同步连接前提与故障说明
+
+**SeaTalk Agent**
+
+- `seatalk-agent/src/inject/sidebar-app.js`：左侧 rail **版本/更新入口**样式与更新浮层标题；消息悬停 **快捷操作条**上与 ✦ 共存的布局样式（flex/overflow），减轻「更多」被挤扁或下拉被裁切
+- `seatalk-agent/src/inject/seatalk-send.js`：React Fiber actions **按当前会话键缓存与失效**；`navigateToSession` / 虚拟列表场景下对 `sessionList` 与 `sessions` 的回退；脚本版本号递增至 9
+- `seatalk-agent/src/main.ts`：面板诊断信息增加 **`cdpProxyPort`**（来自 `CDP_PROXY_PORT` 环境变量或默认）
+
+**Cursor 与顶层文档**
+
+- 新增 `.cursor/rules/seatalk-cdp-debug.mdc`；`.cursor/skills/flink-alert-triage/` 下 `SKILL.md`、`alarm-bot-prompt.md` 等有实质修订
+- `docs/guides/MCP_TOOLS.md`、`SEATALK_AGENT.md`、`SKILL.md`、`INSTALL.md`、`MCP_RECOMMENDATIONS.md`：与上述 MCP / Agent 行为对齐
+
+### 测试情况
+
+| 测试项 | 结果 | 备注 |
+|--------|------|------|
+| `npm run verify:hooks` | [OK] | |
+| `npx tsc --noEmit`（seatalk-agent） | [OK] | |
+| `bash -n`（pre-push、push-release、finish-release-push） | [OK] | |
+| `node scripts/verify-cdp.js` | [NOTE] | 未启动 Agent/CDP 时跳过；发版前若改 Agent 建议本地起 Agent 后补跑 |
+| Chrome 扩展 | N/A | manifest 仅版本号 |
+| MCP 工具 | [NOTE] | 逻辑变更以代码审查与 README 为准；线上凭证环境未在此环境实测 |
+| SeaTalk Agent | [NOTE] | 需重启 Agent、重新注入 UI 后验证 rail 版本样式与快捷条 |
+
+### 特别注意
+- 习惯使用裸 `git push gitlab release` 的成员请在终端确认推送成功后执行 `npm run finish:release-push` 以同步 GitHub 并投递 `.release-notification`
+- 拉取本版本后请重启 SeaTalk Agent
+
+---
+
 ## v3.5.13 -- 2026-04-10 -- `fix`: pre-push hook 强制检查发版通知文件
 
 **提交者**: @yufei.wang

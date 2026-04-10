@@ -24,9 +24,12 @@ Skill（指令层）     →  定义"怎么做"     → .cursor/skills/<name>/SK
 | Skill | 用途 | 依赖 MCP |
 |-------|------|----------|
 | **spx-bug-trace** | Bug 排查流程（API 溯源 → 数据验证 → 报告生成 → Flink 诊断） | api-trace, ck-query, presto-query, flink-query, cursor-ide-browser, mcp-atlassian, google-sheets |
-| **flink-alert-triage** | Flink 告警自动分诊（三层递进：L1 快速简报 → L2 深度诊断 → L3 恢复操作），支持 Bot 自动响应和人工排查；Alarm Bot 发送前会统一加标题，模型回复仅需正文、勿重复外层标题与装饰分隔线 | flink-query, ck-query, seatalk-reader |
+| **flink-alert-triage** | Flink 告警自动分诊（L1/L2/L3）；**一眼版式**：首行 `【一眼】` 可执行句，再「怎么改资源/调参」；RUNNING 稳定用「可先自决」勿单独「需人工」；L1≤12 行 | flink-query, ck-query, seatalk-reader |
 | **seatalk-troubleshoot** | SeaTalk Agent 故障排查（10 阶段系统化排查：进程 → 多进程冲突 → CDP → 注入 → ACP → Remote → 功能 → UI → Agent 重启 → 日志） | 无外部依赖 |
-| **release-publish** | 发版流程规范（含 `npm run verify:hooks` → 版本号 → 日志 → 文档联动 → CDP 验证 → 群通知 → GitLab 推送 + GitHub 自动同步） | 无外部依赖 |
+| **release-publish** | 发版流程规范（含 `npm run verify:hooks` → 版本号 → 日志 → 文档联动 → CDP 验证 → 群通知 → `npm run push:release`：GitLab 成功后再同步 GitHub 并投递通知） | 无外部依赖 |
+
+**双副本同步**：`flink-alert-triage` 在仓库中为 `.cursor/skills/flink-alert-triage/SKILL.md`，与开发者本机主副本 `~/.cursor/skills/flink-alert-triage/SKILL.md` 内容应对齐；更新 skill 后请 `cp` 同步另一侧。  
+Alarm Bot 用的 **`alarm-bot-prompt.md`** 同目录存放，修改后也请同步到 `~/.cursor/skills/flink-alert-triage/alarm-bot-prompt.md`，便于本机与仓库一致。
 
 ---
 

@@ -377,18 +377,8 @@ def get_header(
     return None
 
 
-def _try_cdp_refresh(
-    url: str,
-    cdp_port: Optional[int] = None,
-    timeout: float = 15,
-) -> bool:
-    """Try to refresh session via CDP Target.createTarget + Page.navigate."""
-    ports = _list_reachable_cdp_ports(cdp_port)
-    if not ports:
-        logger.debug("_try_cdp_refresh: no CDP port reachable")
-        return False
-
-    port = ports[0]
+def _try_cdp_refresh_on_port(url: str, port: int, timeout: float) -> bool:
+    """Single-port: Target.createTarget + Page.navigate (tab is closed afterward; no window focus steal)."""
     page = _pick_page_for_cookie_read(port, "")
     if not page:
         logger.debug("_try_cdp_refresh: no debuggable target on port %d", port)
@@ -406,7 +396,7 @@ def _try_cdp_refresh(
             logger.debug("_try_cdp_refresh: Target.createTarget returned no targetId")
             return False
     except Exception as e:
-        logger.debug("_try_cdp_refresh: failed to create tab: %s", e)
+        logger.debug("_try_cdp_refresh: failed to create tab on port %d: %s", port, e)
         return False
 
     try:
@@ -456,7 +446,12 @@ def _try_cdp_refresh(
                     logger.warning("refresh_session: landed on login page %s — SSO session fully expired", final_url)
                     return False
 
-            logger.info("refresh_session[cdp]: page loaded=%s, final_url=%s", loaded, final_url or "unknown")
+            logger.info(
+                "refresh_session[cdp port=%s]: page loaded=%s, final_url=%s",
+                port,
+                loaded,
+                final_url or "unknown",
+            )
             return loaded
         finally:
             ws.close()
@@ -466,15 +461,74 @@ def _try_cdp_refresh(
                 _cdp_call(control_ws_url, "Target.closeTarget", {"targetId": target_id})
             except Exception:
                 pass
+    return False
+
+
+def _try_cdp_refresh(
+    url: str,
+    cdp_port: Optional[int] = None,
+    timeout: float = 15,
+) -> bool:
+    """Try to refresh session via CDP on every reachable port (Chrome 9222 preferred over Electron 19222)."""
+    ports = _list_reachable_cdp_ports(cdp_port)
+    if not ports:
+        logger.debug("_try_cdp_refresh: no CDP port reachable")
+        return False
+
+    for port in ports:
+        try:
+            if _try_cdp_refresh_on_port(url, port, timeout):
+                return True
+        except Exception as e:
+            logger.debug("_try_cdp_refresh: port %d failed: %s", port, e)
+            continue
+    return False
+
+
+def _chrome_app_name() -> str:
+    """Application name passed to `open -a` (override with CHROME_AUTH_BROWSER_APP)."""
+    return os.environ.get("CHROME_AUTH_BROWSER_APP", "Google Chrome").strip() or "Google Chrome"
+
+
+def _refresh_via_open_background_macos(url: str, wait_seconds: int = 8) -> bool:
+    """macOS: open URL in Chrome without bringing the app to the foreground (`open -g`).
+
+    Avoids the intrusive AppleScript path that creates a visible focused tab and blocks.
+    May leave an extra background tab; user can close manually.
+    """
+    if sys.platform != "darwin":
+        return False
+    if os.environ.get("CHROME_AUTH_DISABLE_OPEN_G", "").strip():
+        return False
+
+    app = _chrome_app_name()
+    try:
+        r = subprocess.run(
+            ["open", "-g", "-a", app, url],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if r.returncode != 0:
+            logger.warning("refresh_session[open -g]: open failed: %s", (r.stderr or "").strip())
+            return False
+        time.sleep(max(3, wait_seconds))
+        time.sleep(1)  # let Chrome flush cookies to SQLite
+        logger.info("refresh_session[open -g]: completed for %s (app=%s)", url, app)
+        return True
+    except Exception as e:
+        logger.warning("refresh_session[open -g]: %s", e)
+        return False
 
 
 def _refresh_via_applescript(url: str, wait_seconds: int = 8) -> bool:
-    """macOS fallback: use AppleScript to open *url* in Chrome, wait for SSO redirect, then close the tab.
+    """macOS last resort: AppleScript opens visible tab, waits, then closes.
 
-    Does NOT require --remote-debugging-port. Works with any running Chrome instance.
-    The tab is visible for ~wait_seconds then auto-closes.
+    Disruptive; prefer CDP or `open -g`. Set CHROME_AUTH_DISABLE_APPLESCRIPT=1 to skip.
     """
     if sys.platform != "darwin":
+        return False
+    if os.environ.get("CHROME_AUTH_DISABLE_APPLESCRIPT", "").strip():
         return False
 
     script = (
@@ -515,12 +569,16 @@ def refresh_session(
     cdp_port: Optional[int] = None,
     timeout: float = 15,
 ) -> bool:
-    """Trigger silent SSO renewal by navigating Chrome to *url*.
+    """Trigger SSO renewal by navigating Chrome to *url*.
 
-    Strategy chain:
-      1. CDP (requires --remote-debugging-port on Chrome)
-      2. AppleScript (macOS only, works with any running Chrome)
+    Strategy chain (best first):
+      1. CDP hidden tab on every reachable port (needs --remote-debugging-port; no focus steal)
+      2. macOS ``open -g`` — background Chrome open (no focus steal; may leave a tab)
+      3. AppleScript visible tab (last resort; set CHROME_AUTH_DISABLE_APPLESCRIPT=1 to skip)
     """
+    wait = max(8, int(timeout))
     if _try_cdp_refresh(url, cdp_port, timeout):
         return True
-    return _refresh_via_applescript(url, wait_seconds=max(8, int(timeout)))
+    if _refresh_via_open_background_macos(url, wait_seconds=wait):
+        return True
+    return _refresh_via_applescript(url, wait_seconds=wait)

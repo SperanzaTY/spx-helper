@@ -14,11 +14,12 @@
 | `mcp-tools.mdc` | `mcp-tools/**` | MCP 工具开发规范、各工具使用说明 |
 | `seatalk-agent.mdc` | `seatalk-agent/**` | SeaTalk Agent 开发规则、架构说明 |
 | `seatalk-agent-testing.mdc` | `seatalk-agent/src/inject/*.js` | 前端注入代码 CDP 测试规则 |
+| `seatalk-cdp-debug.mdc` | 全局 | 本机 SeaTalk CDP（19222）可达；读/评会话前先探测，避免误判无法连接 |
 
 ## 核心约束（始终生效）
 
 1. **禁止自动提交**：必须等用户说"可以提交"后才能 `git commit/push`
-2. **推送策略**：`git push gitlab release`（检查以 GitLab 为基准，推送成功后自动尝试同步 GitHub，失败不阻塞）
+2. **推送策略**：推荐 `npm run push:release` 或 `bash scripts/push-release.sh`（先 `git push gitlab release`，成功后再同步 GitHub 并发送 `.release-notification`）。若只用裸 `git push gitlab release`，须在推送成功后执行 `bash scripts/finish-release-push.sh`
 3. **版本唯一源**：`chrome-extension/manifest.json` 的 version
 4. **文档同步**：功能变更必须更新对应模块的 README
 5. **凭证安全**：禁止硬编码密码/token，使用环境变量

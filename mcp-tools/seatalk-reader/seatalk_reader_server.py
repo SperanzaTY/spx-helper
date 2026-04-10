@@ -6,8 +6,8 @@ SeaTalk Reader MCP Server - 直接通过 CDP 协议读取 SeaTalk 消息
 连接 SeaTalk Electron 客户端，读取 Redux store 中的消息数据。
 
 前提条件:
-  SeaTalk 桌面客户端以 CDP 调试模式启动:
-  /Applications/SeaTalk.app/Contents/MacOS/SeaTalk --remote-debugging-port=19222
+  SeaTalk 桌面客户端已打开，且本机 seatalk-agent 在运行并在 127.0.0.1:19222 暴露 CDP 代理
+  （SIGUSR1 / Inspector 方案，无需再给 SeaTalk 加 --remote-debugging-port）。
 
 配置方式（在 mcp.json 中）:
 {
@@ -169,10 +169,8 @@ async def _get_client() -> CdpClient:
             f"找不到 SeaTalk 主页面 ({MAIN_PAGE_URL})。\n"
             "请确认:\n"
             "1. SeaTalk 桌面客户端已打开\n"
-            "2. SeaTalk 以 CDP 调试模式启动:\n"
-            "   /Applications/SeaTalk.app/Contents/MacOS/SeaTalk "
-            f"--remote-debugging-port={CDP_PORT}\n"
-            "3. 如果 SeaTalk 已在运行但没开 CDP，需要先关闭再以上述命令重启"
+            f"2. seatalk-agent 已启动且 CDP 代理可访问: curl http://127.0.0.1:{CDP_PORT}/json\n"
+            "3. 若连接被拒绝，先执行 seatalk 或检查 CDP_PROXY_PORT 环境变量"
         )
 
     client = CdpClient(page["webSocketDebuggerUrl"], page)
@@ -197,10 +195,9 @@ def _check_cdp_available() -> str:
         return ""
     except requests.ConnectionError:
         return (
-            f"无法连接到 SeaTalk CDP 端口 (127.0.0.1:{CDP_PORT})。\n"
-            "请确认 SeaTalk 以调试模式启动:\n"
-            f"  /Applications/SeaTalk.app/Contents/MacOS/SeaTalk --remote-debugging-port={CDP_PORT}\n\n"
-            "提示: 如果 SeaTalk 已在运行但没开 CDP，需要先完全退出再重新启动。"
+            f"无法连接到 CDP 代理 (127.0.0.1:{CDP_PORT})。\n"
+            "请确认 seatalk-agent 已启动（终端执行 seatalk），SeaTalk 客户端已打开。\n"
+            "当前方案通过 Agent 在 19222 暴露 CDP，无需为 SeaTalk 配置 --remote-debugging-port。"
         )
     except Exception as e:
         return f"CDP 连接异常: {e}"
@@ -235,8 +232,10 @@ async def list_seatalk_chats(
 
     js_code = """(function(){
         var s = window.store.getState();
-        var sessions = s.messages && s.messages.sessionList;
-        if (!sessions || !Array.isArray(sessions)) return JSON.stringify({error: 'sessionList not found'});
+        var sl = s.messages && s.messages.sessionList;
+        var ss = s.messages && s.messages.sessions;
+        var sessions = (sl && Array.isArray(sl) && sl.length > 0) ? sl : ss;
+        if (!sessions || !Array.isArray(sessions)) return JSON.stringify({error: 'sessions not found'});
 
         var groupInfo = (s.contact && s.contact.groupInfo) || {};
         var userInfo = (s.contact && s.contact.userInfo) || {};
@@ -633,56 +632,120 @@ async def navigate_to_chat(
         return "请提供 session_name 或 session_id"
 
     try:
-        if session_id:
-            click_js = f"""(function(){{
-                var item = document.querySelector(
-                    '.messages-chat-session-list-item[data-id="{session_id}"]'
-                );
-                if (!item) return JSON.stringify({{error: 'not_in_list', id: {session_id}}});
-                item.click();
-                var nameEl = item.querySelector('[class*=text]');
-                return JSON.stringify({{
-                    clicked: true,
-                    dataId: '{session_id}',
-                    name: nameEl ? nameEl.textContent.substring(0, 80) : ''
-                }});
-            }})()"""
-        else:
-            safe_name = json.dumps(session_name)
-            click_js = f"""(function(){{
-                var keyword = {safe_name}.toLowerCase();
+        st_json = json.dumps(session_type or "group")
+        kw_json = json.dumps((session_name or "").lower()) if session_name and not session_id else '""'
+        tid_json = json.dumps(str(int(session_id))) if session_id else '""'
+
+        click_js = f"""(function(){{
+            var sessionType = {st_json};
+            var keyword = {kw_json};
+            var targetId = {tid_json};
+
+            function itemLabel(el) {{
+                var nameEl = el.querySelector('[class*=text]');
+                var t = (nameEl && nameEl.textContent)
+                    ? String(nameEl.textContent)
+                    : String(el.innerText || '');
+                return t.replace(/\\s+/g, ' ').trim();
+            }}
+
+            function typeOk(it) {{
+                if (!sessionType) return true;
+                var dt = it.getAttribute('data-type') || it.getAttribute('data-session-type') || '';
+                if (!dt) return true;
+                if (sessionType === 'group')
+                    return dt === 'group' || dt === 'g';
+                if (sessionType === 'buddy')
+                    return dt === 'buddy' || dt === 'b' || dt === 'user';
+                return true;
+            }}
+
+            function rowMatches(it) {{
+                if (!typeOk(it)) return false;
+                if (targetId && targetId !== '0' && it.getAttribute('data-id') === targetId)
+                    return true;
+                if (keyword && itemLabel(it).toLowerCase().indexOf(keyword) >= 0) return true;
+                return false;
+            }}
+
+            function tryClickVisible() {{
                 var items = document.querySelectorAll('.messages-chat-session-list-item');
-                var best = null;
-                var bestName = '';
                 for (var i = 0; i < items.length; i++) {{
-                    var nameEl = items[i].querySelector('[class*=text]');
-                    var name = nameEl ? nameEl.textContent : '';
-                    if (name.toLowerCase().indexOf(keyword) >= 0) {{
-                        best = items[i];
-                        bestName = name.substring(0, 80);
-                        break;
+                    if (rowMatches(items[i])) {{
+                        var it = items[i];
+                        it.click();
+                        return {{
+                            clicked: true,
+                            dataId: it.getAttribute('data-id'),
+                            name: itemLabel(it).substring(0, 120)
+                        }};
                     }}
                 }}
-                if (!best) return JSON.stringify({{error: 'no_match', keyword: keyword}});
-                best.click();
-                return JSON.stringify({{
-                    clicked: true,
-                    dataId: best.getAttribute('data-id'),
-                    name: bestName
-                }});
-            }})()"""
+                return null;
+            }}
+
+            function findScrollParent(el) {{
+                while (el && el !== document.body) {{
+                    if (el.scrollHeight > el.clientHeight + 8) return el;
+                    el = el.parentElement;
+                }}
+                return null;
+            }}
+
+            var hit = tryClickVisible();
+            if (hit) return JSON.stringify(hit);
+
+            var anchor = document.querySelector('.messages-chat-session-list-item');
+            if (!anchor)
+                return JSON.stringify({{error: 'no_list'}});
+
+            var sp = findScrollParent(anchor);
+            if (!sp) {{
+                if (targetId && targetId !== '0')
+                    return JSON.stringify({{error: 'not_in_list', id: targetId}});
+                return JSON.stringify({{error: 'no_match', keyword: keyword}});
+            }}
+
+            var startTop = sp.scrollTop;
+            sp.scrollTop = 0;
+            var i;
+            for (i = 0; i < 120; i++) {{
+                hit = tryClickVisible();
+                if (hit) {{ sp.scrollTop = startTop; return JSON.stringify(hit); }}
+                if (sp.scrollTop >= sp.scrollHeight - sp.clientHeight - 1) break;
+                sp.scrollTop = Math.min(sp.scrollHeight - sp.clientHeight, sp.scrollTop + 100);
+            }}
+            for (sp.scrollTop = Math.max(0, sp.scrollHeight - sp.clientHeight);
+                 sp.scrollTop >= 0;
+                 sp.scrollTop = Math.max(0, sp.scrollTop - 100)) {{
+                hit = tryClickVisible();
+                if (hit) {{ sp.scrollTop = startTop; return JSON.stringify(hit); }}
+            }}
+            sp.scrollTop = startTop;
+
+            if (targetId && targetId !== '0')
+                return JSON.stringify({{error: 'not_in_list', id: targetId}});
+            return JSON.stringify({{error: 'no_match', keyword: keyword}});
+        }})()"""
 
         raw = await _eval_js(click_js)
         result = json.loads(raw) if isinstance(raw, str) else raw
 
+        if result.get("error") == "no_list":
+            return (
+                "未找到左侧会话列表（DOM 中无 .messages-chat-session-list-item）。\n"
+                "请确认 SeaTalk 已登录并处于消息主界面。"
+            )
         if result.get("error") == "not_in_list":
             return (
-                f"会话 ID {session_id} 不在当前左侧列表中。\n"
-                "该会话可能未置顶或排名靠后，请尝试用 session_name 搜索，\n"
-                "或者先让用户在 SeaTalk 中手动打开该会话。"
+                f"会话 ID {session_id} 不在当前左侧列表可见区域（已尝试滚动列表）。\n"
+                "可在 SeaTalk 中先点开该会话，或使用 session_name 再试。"
             )
         if result.get("error") == "no_match":
-            return f"在左侧会话列表中未找到匹配 '{session_name}' 的会话。"
+            return (
+                f"在左侧会话列表中未找到匹配 '{session_name}' 的会话（已尝试滚动列表）。\n"
+                "请核对群名/显示名是否与列表一致。"
+            )
 
         # 等待消息加载
         import asyncio as _asyncio
@@ -2034,7 +2097,9 @@ async def get_send_targets() -> str:
             var result = {currentSession: null, sessions: []};
             var sel = s.messages.selectedSession;
             if (sel) result.currentSession = (sel.type === 'group' ? 'group' : 'buddy') + '-' + sel.id;
-            var sessions = s.messages.sessionList || [];
+            var sl = s.messages.sessionList;
+            var ss = s.messages.sessions || [];
+            var sessions = (sl && sl.length > 0) ? sl : ss;
             var info = s.contact.userInfo || {};
             var groups = s.contact.groupInfo || {};
             for (var i = 0; i < Math.min(sessions.length, 30); i++) {

@@ -1688,10 +1688,12 @@ async function main() {
       } else if (data.type === 'get_logs') {
         bridge.sendToPanel({ type: 'logs', lines: logBuffer.slice() }).catch(() => {});
       } else if (data.type === 'get_diagnostics') {
+        const cdpProxyPort = parseInt(process.env.CDP_PROXY_PORT || '19222', 10);
         bridge.sendToPanel({
           type: 'diagnostics',
           info: {
             connectionMode: 'inspector',
+            cdpProxyPort,
             cdpConnected: !reconnecting,
             acpConnected: !!agent,
             workspace: currentWorkspace,

@@ -4,8 +4,21 @@
 
 ## 前提条件
 
-- SeaTalk 桌面客户端以 CDP 模式运行（安装 SeaTalk Agent 后自动满足）
-- CDP 端口默认 `19222`
+- SeaTalk 桌面客户端已打开，**seatalk-agent** 已启动（本机 `127.0.0.1:19222` 为 Agent 提供的 **CDP 代理**，对应 SeaTalk 的 Inspector/SIGUSR1 方案，无需再给 SeaTalk 加 `--remote-debugging-port`）
+- 环境变量 `CDP_PORT` 可覆盖端口，默认 `19222`
+
+## CDP 烟测（不经 MCP）
+
+仓库根目录：
+
+```bash
+pip install websockets   # 若尚未安装
+python3 scripts/cdp_seatalk_smoke.py probe
+python3 scripts/cdp_seatalk_smoke.py resolve 消息测试   # 先查本机 Redux 里的 group id
+# 仅在测试群：python3 scripts/cdp_seatalk_smoke.py send group-<id> "正文"
+```
+
+`send` 子命令会真实发出消息（直连页面内 `__seatalkSend`，`confirmed=true`）。
 
 ## 认证
 
@@ -54,11 +67,13 @@
 | `keyword` | string | 是 | 搜索关键词 |
 
 ### `navigate_to_chat`
-在 SeaTalk 中导航到指定聊天。
+在 SeaTalk 中通过 CDP 模拟点击左侧会话列表切换聊天；对虚拟列表会 **上下滚动** 再匹配，名称优先从 `[class*=text]` 读取，否则回退到行 `innerText`。
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| `session_name` | string | 是 | 群名或联系人名 |
+| `session_name` | string | 否 | 群名或联系人名（模糊匹配，与 `session_id` 二选一） |
+| `session_id` | int | 否 | 精确 `data-id`，优先于 `session_name` |
+| `session_type` | string | 否 | `group` / `buddy`，若列表项带 `data-type` 时可辅助区分 |
 
 ### `read_current_chat`
 读取当前打开的聊天窗口的消息。

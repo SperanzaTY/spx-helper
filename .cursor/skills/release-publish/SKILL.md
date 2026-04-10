@@ -264,19 +264,29 @@ git commit -m "<type>: <description>"
 
 ## Step 9：推送到远程仓库
 
-推送到 GitLab，pre-push hook 会自动尝试同步 GitHub 并发送群通知：
+`pre-push` 在 Git **开始**向 GitLab 传输之前运行，hook 脚本退出时推送往往尚未完成，因此 **不能** 在 `pre-push` 的 `EXIT trap` 里做 GitHub 同步或发 SeaTalk（否则顺序错误，且 GitLab 失败时可能已误发通知）。
+
+推荐一条命令（先 push GitLab，成功后再同步 GitHub + 投递 `.release-notification`）：
 
 ```bash
-git push gitlab release
+npm run push:release
+# 或: bash scripts/push-release.sh
+```
+
+若已手动执行 `git push gitlab release`，请在终端确认 GitLab 推送成功后补跑：
+
+```bash
+npm run finish:release-push
+# 或: bash scripts/finish-release-push.sh
 ```
 
 | Remote | 地址 | 说明 |
 |--------|------|------|
 | gitlab | `https://git.garena.com/tianyi.liang/spx-helper.git` | 主仓库，检查基准 |
-| origin | `https://github.com/SperanzaTY/spx-helper.git` | 自动同步，失败不阻塞 |
+| origin | `https://github.com/SperanzaTY/spx-helper.git` | 由 `finish-release-push.sh` 同步，失败不阻塞 |
 
-- GitLab 推送失败 → 阻断发版，排查原因
-- GitHub 自动同步失败 → 不阻塞，owner 会后续同步
+- GitLab 推送失败 → 阻断发版，排查原因；此时 **不会** 执行 `finish-release-push.sh`
+- GitHub 同步失败 → 不阻塞，owner 会后续同步
 
 ## Step 10：推送后验证
 
@@ -307,9 +317,9 @@ Hook 检查项：
 6. **Agent 功能验证**（仅 `seatalk-agent/src/` 有变更时，自动运行 `scripts/verify-cdp.js`）
 7. 所有 commit 符合 Conventional Commit 格式
 
-推送成功后自动执行（EXIT trap）：
+GitLab 推送成功之后由 `finish-release-push.sh` 执行（经 `push-release.sh` 串联）：
 - 同步 GitHub（失败不阻塞）
-- 发送 SeaTalk 群通知（读取 `.release-notification`，失败不阻塞）
+- 发送 SeaTalk 群通知（读取 `.release-notification`，失败不阻塞，文件保留可重试）
 
 ---
 

@@ -3,8 +3,8 @@ name: flink-alert-triage
 description: SPX Flink 任务告警自动分诊与排查工作流。解析 SeaTalk 告警群消息 -> 结构化提取告警信息 -> 分级诊断 -> 输出标准化排查报告。支持 Bot 自动响应和人工深度排查两种模式。当收到 Flink 告警（Checkpoint 失败、Kafka Lag、任务重启、任务 FAILED 等）时使用。
 ---
 
-<!-- 本 Skill 位于 ~/.cursor/skills/flink-alert-triage/，全局可用。
-     项目副本维护在 SPX_Helper/.cursor/skills/flink-alert-triage/ 中。
+<!-- 主副本：~/.cursor/skills/flink-alert-triage/SKILL.md（全局）。
+     项目副本：SPX_Helper/.cursor/skills/flink-alert-triage/SKILL.md（与主副本保持同步）。
      依赖 MCP：flink-query、ck-query、seatalk-reader。-->
 
 # Flink Alert Triage -- 告警自动分诊与排查
@@ -24,6 +24,7 @@ description: SPX Flink 任务告警自动分诊与排查工作流。解析 SeaTa
 2. **严重度驱动响应深度** -- INFO/LOW 不调 API，MEDIUM 查关键指标，HIGH/CRITICAL 全链路诊断
 3. **跨任务关联** -- 同系列任务（同 task 前缀不同 market）首次告警时主动批量扫描
 4. **降级优雅** -- Cookie 过期时切换到"告警文本分析"模式，不输出空洞的 API 错误
+5. **Flink 深度诊断 MCP 优先** -- L2 用 `diagnose_flink_app`、`get_flink_vertices`、`get_flink_checkpoints`、`get_flink_taskmanagers` 等拉齐事实；**默认不向用户索要** DataSuite 截图（详见 Phase 2.0b、2.3）
 
 ---
 
@@ -95,19 +96,6 @@ SeaTalk 告警群中 `flink job alarm` 发送的消息遵循固定格式：
 
 ---
 
-## 输出与 SeaTalk 宿主（全局）
-
-发到群聊前，**SeaTalk Agent 会自动**在正文外包一层：`[Alarm Bot] Auto-Investigation` 标题、上下分隔线、结尾耗时与会话名。
-
-因此排查回复**不要**再输出：
-
-- `[Alarm Bot]`、`Auto-Investigation`、`**[Alarm Bot]**` 等标题行
-- 整行仅由 `━` `═` `-` 组成的装饰分隔线（Markdown 表格的 `| --- |` 除外）
-
-**正文从第一行任务摘要或标题开始即可**（例如 `Flink 告警 -- App 741496` 或 `第 2 次告警 - xxx (VN)`）。Agent 侧也会对重复外层格式做去重，但 prompt 与模板应以「仅正文」为准。
-
----
-
 ## Phase 1: 重复告警处理策略
 
 ### 1.1 告警计数与分级响应
@@ -124,7 +112,7 @@ SeaTalk 告警群中 `flink job alarm` 发送的消息遵循固定格式：
 ### 1.2 L1 趋势简报模板（第 2-3 次）
 
 ```
-第{N}次告警 - {task_name简称} ({market})
+[Alarm Bot] 第{N}次告警 - {task_name简称} ({market})
 
 状态: {与上次对比的趋势描述}
 关键变化: {最重要的1-2个指标变化}
@@ -140,7 +128,7 @@ Job: {job_url}
 ### 1.3 L1 升级告急模板（第 4+ 次）
 
 ```
-第{N}次告警 - {task_name简称} | 已持续{duration}无人响应
+[Alarm Bot] 第{N}次告警 - {task_name简称} | 已持续{duration}无人响应
 
 {一句话核心问题} | 延迟: {latency} | 状态: {status}
 
@@ -150,7 +138,7 @@ Job: {job_url}
 ### 1.4 L1 恢复确认模板
 
 ```
-已恢复 - {task_name简称} ({market})
+[Alarm Bot] 已恢复 - {task_name简称} ({market})
 
 {恢复原因一句话} | 残留风险: {有/无}
 {如有残留风险，一行说明}
@@ -173,8 +161,23 @@ Job: {job_url}
 ```
 尝试调用 get_flink_app_detail(app_id)
   成功 → 正常诊断流程
-  失败(401) → Cookie 过期，切换到"降级模式"（Phase 2.9）
+  失败(401) → Cookie 过期，切换到"降级模式"（Phase 2.8）
 ```
+
+### 2.0b MCP 优先原则（不向用户索要平台截图）
+
+**默认行为**：
+1. **先用 MCP 拉齐事实**，再下结论；**不要**让用户粘贴 DataSuite 资源配置、Checkpoint 表单、并行度截图，除非 MCP **持续失败**或需要 **SQL 正文**等 API 不返回的内容。
+2. **深度诊断推荐组合**（可与 2.1 第一批**并行**）：
+   - `diagnose_flink_app(app_id)`：聚合延迟、Kafka Lag、背压、Heap、异常摘要、Logify 链接（适合 L2 首拉）。
+   - `get_flink_vertices(app_id)`：**必查**各 **Source / GlobalGroupAggregate / KeyedProcess / Sink / kafkaTable Writer** 的 **name 与 parallelism**（见 Phase 2.3）。
+   - `get_flink_checkpoints(app_id)`：失败原因、`latestCompleted` 时间、**内置 `config`（interval/timeout/state_backend）**。
+   - `get_flink_taskmanagers(app_id)`：TM 个数、每 TM slot、单 slot heap/managed、是否 **freeSlots=0**。
+   - `get_flink_job_config(app_id)`：作业级 **executionConfig.parallelism**（`otherConfigs` 可能为空，不表示平台未配置）。
+3. **工具降级**：
+   - `get_flink_lineage` 若报错，**不阻塞**；血缘以 **`get_flink_vertices` 中 Source/Sink 名称** 为准，Kafka 分区数以运维/控制台为准。
+   - `query_flink_logs` 若返回空，**不阻塞**；附上 `get_flink_log_url` / diagnose 中的 **Logify** 链接与时间段，由人工在浏览器查看。
+4. `get_flink_graph_metrics` 若 500，**改用** `get_flink_vertices` + Grafana 链接 + `get_flink_metrics(..., "backpressure")` 继续。
 
 ### 2.1 并行数据拉取
 
@@ -186,23 +189,24 @@ get_flink_app_detail(app_id)           -- 基本信息
 get_flink_instance(app_id)             -- 实例状态
 get_flink_exceptions(app_id)           -- 异常列表
 get_flink_metrics(app_id, "overview")  -- 概览指标
+diagnose_flink_app(app_id)             -- 一键聚合（L2 强烈建议，可与上列并行）
 ```
 
 **第二批（按告警类型选择性拉取）**：
 
 | 告警类型 | 额外拉取 |
 |----------|----------|
-| `kafka_lag` | `get_flink_metrics(app_id, "kafka")`, `get_flink_metrics(app_id, "backpressure")` |
+| `kafka_lag` | `get_flink_metrics(app_id, "kafka")`, `get_flink_metrics(app_id, "backpressure")`, **`get_flink_vertices(app_id)`** |
 | `checkpoint_failed` | `get_flink_checkpoints(app_id)`, `get_flink_metrics(app_id, "checkpoint")` |
-| `job_restart` | `get_flink_runtime_exceptions(app_id)`, `get_flink_operation_log(app_id)` |
+| `job_restart` | `get_flink_runtime_exceptions(app_id)`, `get_flink_operation_log(app_id)`, **`get_flink_checkpoints(app_id)`**, **`get_flink_vertices(app_id)`** |
 | `task_failed` | `get_flink_runtime_exceptions(app_id)`, `get_flink_operation_log(app_id)`, `get_flink_alarm_log(app_id)` |
-| `backpressure` | `get_flink_graph_metrics(app_id)`, `get_flink_vertices(app_id)` |
+| `backpressure` | `get_flink_graph_metrics(app_id)`（失败则跳过）, **`get_flink_vertices(app_id)`** |
 
 **第三批（可选深入）**：
 ```
 get_flink_metrics(app_id, "cpu_memory")     -- 资源使用
 get_flink_metrics(app_id, "gc")             -- GC 压力
-get_flink_resource_estimation(app_id)        -- 资源调优建议
+get_flink_resource_estimation(app_id)        -- 资源调优建议（若 API 要求 project 等参数失败则跳过）
 get_flink_taskmanagers(app_id)               -- TM 列表
 get_flink_job_config(app_id)                 -- 运行时配置
 ```
@@ -263,7 +267,63 @@ Task FAILED
 └── 检查同系列其他市场 → 是否批量故障
 ```
 
-### 2.3 同系列任务关联扫描
+### 2.3 吞吐对齐、Checkpoint 解读与资源调参（Kafka Lag / 背压 / CP failed / job_restart）
+
+本节对应线上高频场景：**背压顶格 + Lag 高 + CP `expired` + Heap 高**，Agent 应结合 **`get_flink_vertices` + `get_flink_checkpoints` + `get_flink_taskmanagers`** 输出可执行建议，而非仅列指标。
+
+#### 2.3.1 并行度错配（宽进窄出）
+
+**识别**：`get_flink_vertices` 中部分 **Source** 的 `parallelism` **大于** 作业 **默认并行度**（`get_flink_job_config` → `executionConfig.parallelism`）或大于下游 **GlobalGroupAggregate / KeyedProcess / Join / kafkaTable Writer** 的并行度。
+
+**含义**：上游子任务数多于下游处理能力，**重分区 + 缓冲积压**，与 **Kafka Lag、背压、端到端延迟** 一致。
+
+**处置（二选一，需 Kafka 分区 ≥ 目标并行度）**：
+
+| 方案 | 做法 | 适用 |
+|------|------|------|
+| **A（改动面小）** | 将 **偏高的 Source** 并行度 **降到与全局默认一致** | 先求稳、快速消除结构性错配 |
+| **B（追吞吐）** | 将 **默认并行度 + 瓶颈算子链** 提到与 Source 同档，并 **加 TM/slot** | 业务要求更高吞吐且分区与配额足够 |
+
+**方案 A 之后**：检查 **同一作业内是否还有其他 Source 仍高于默认并行度**；**不必**默认同步加 TM/内存，**先观察 30～60 分钟**（Lag、背压、是否出现 **新成功 CP**）。若仍差，再进入 **方案 B** 或 **调内存**（见 2.3.3）。
+
+#### 2.3.2 Checkpoint `expired` 与 timeout 的关系
+
+**从 `get_flink_checkpoints` 读取** `config.timeout`、`config.interval`、`state_backend` 等。
+
+**若失败记录的 `duration` 与 `timeout` 接近（例如均约 1800s）**：
+
+- **含义**：CP 在时限内**未完成**，多为 **反压大 / 状态大 / 对齐慢**，不是「未配置 timeout」。
+- **主路径**：**先降反压**（对齐并行度、加吞吐、或优化 SQL），**不要**只把 timeout 拉长当主手段。
+- **辅路径**：反压缓解后若仍偶发超时，再与 Owner 评估 **适度增大 timeout** 或 **增量 CP / RocksDB 参数**（视 Flink 版本与平台）。
+
+#### 2.3.3 资源两层：DataSuite 配额 vs Flink TM
+
+**说明给用户时**分清：
+
+| 层级 | 典型含义 |
+|------|----------|
+| **应用配额** | DataSuite 实例的 **CPU / 总 Memory（GB）** 上限 |
+| **Flink** | **TM 个数**、**每 TM slot**、**`taskmanager.memory.process.size`（单 TM 进程内存）** |
+
+**调参名（Flink）**：
+
+- 加 **单 TM 内存**：**`taskmanager.memory.process.size`**（Managed 多随比例给 RocksDB）。
+- 加 **slot 容量**：**增加 TM 个数** 或 **`taskmanager.numberOfTaskSlots`**（**加 slot 会稀释每 slot 内存**，Heap 已高时慎用 **只加 slot 不加内存**）。
+- **加应用 Memory 配额**：否则 TM Pod **可能 OOM 或调度失败**。
+
+**建议量级（供 L2 文字建议，非绝对）**：
+
+- **TM 个数**：例如 **+4～+6 个 TM**（在配额内），或优先 **加 TM** 而非仅加每 TM slot。
+- **单 TM 内存**：**单次约 +20%～40%** 一档，避免翻倍。
+- **slot 全满（`freeSlots=0`）且要提高并行度**：必须先 **加 TM 或 slot 容量**。
+
+#### 2.3.4 稳定性：TaskManager heartbeat
+
+**`diagnose_flink_app` / `get_flink_exceptions`** 若出现 **同一 TM id 反复 heartbeat timeout**：提示 **节点/平台** 与 Owner（见任务 description），**不单**加并行度。
+
+---
+
+### 2.4 同系列任务关联扫描
 
 当首次触发告警时，识别 `task_series`（去掉 market 后缀的公共前缀），主动扫描同系列其他市场：
 
@@ -284,7 +344,7 @@ search_flink_apps(keyword="{task_series 的核心关键词}", project_name="{pro
 
 **限制**：关联扫描仅在首次 L2 诊断中执行，后续 L1 简报不重复。
 
-### 2.4 严重度精判（基于诊断数据）
+### 2.5 严重度精判（基于诊断数据）
 
 在 Phase 0.4 初判基础上，结合实际指标调整：
 
@@ -303,9 +363,12 @@ search_flink_apps(keyword="{task_series 的核心关键词}", project_name="{pro
 | resolved + 延迟 < 1 分钟 | 任何 → INFO |
 | Kafka Lag 已回落到阈值 50% 以下 | LOW → INFO |
 
-### 2.5 L2 诊断报告模板
+### 2.6 L2 诊断报告模板
 
 ```
+[Alarm Bot] Auto-Investigation
+━━━━━━━━━━━━━━
+
 Flink 告警排查 -- App {app_id} ({market})
 
 任务: {task_name_short}
@@ -340,9 +403,11 @@ Flink 告警排查 -- App {app_id} ({market})
 2. {次要建议}
 
 链接: Job: {url} | Grafana: {url}
+
+━━━━━━━━━━━━━━
 ```
 
-### 2.6 输出约束
+### 2.7 输出约束
 
 - L2 报告总长度**不超过 60 行**（SeaTalk 消息过长影响阅读）
 - 指标表格只列**异常项**（全部正常则写一句"各项指标正常"）
@@ -350,7 +415,7 @@ Flink 告警排查 -- App {app_id} ({market})
 - 不输出 API 原始返回（仅提取有用数据）
 - Grafana 链接始终附上，即使当前无法访问
 
-### 2.7 Cookie 过期降级模式
+### 2.8 Cookie 过期降级模式
 
 当 Flink MCP 工具返回 401 或连接失败时，切换到降级模式：
 
@@ -362,12 +427,15 @@ Flink 告警排查 -- App {app_id} ({market})
 
 **降级模式报告模板**：
 ```
-Flink 告警 [降级模式] -- App {app_id}
+[Alarm Bot] Auto-Investigation [降级模式]
+━━━━━━━━━━━━━━
 
 {基于告警文本的分析，参照 Phase 2.2 决策树}
 
 [NOTE] Flink MCP 工具不可用（Cookie 过期），诊断基于告警文本。
 如需深入排查：Chrome 登录 DataSuite 后执行 refresh_cookies_from_browser()。
+
+━━━━━━━━━━━━━━
 ```
 
 ---
@@ -472,7 +540,8 @@ ORDER BY row_cnt ASC
 
 **汇总报告模板**：
 ```
-系列任务批量告警 - {task_series}
+[Alarm Bot] 系列任务批量告警 - {task_series}
+━━━━━━━━━━━━━━
 
 {task_series} 系列多个市场同时告警:
 
@@ -486,6 +555,8 @@ ORDER BY row_cnt ASC
 建议:
 1. 优先处理 {最严重的市场}
 2. {统一建议}
+
+━━━━━━━━━━━━━━
 ```
 
 ### 4.2 告警风暴抑制
@@ -529,7 +600,7 @@ ORDER BY row_cnt ASC
 | `search_flink_table_lineage` | 从表名反查 Flink 任务 | 同系列扫描 |
 | `query_flink_logs` | 查询 Logify 日志（注意独立认证） | L3 按需 |
 | `get_flink_log_url` | 生成 Logify 日志链接 | L2/L3 |
-| `diagnose_flink_app` | 一键全栈诊断 | L3（耗时较长，不适合 Bot 自动） |
+| `diagnose_flink_app` | 一键全栈诊断（延迟/Lag/背压/Heap/异常/链接） | **L2 推荐首拉**；Bot 若需控耗时可仅用 `get_flink_metrics` + `get_flink_vertices` |
 | `query_ck` | 查询 ClickHouse 下游数据 | L3 恢复验证 |
 | `query_messages_sqlite` | 搜索 SeaTalk 历史消息 | 降级模式 / 历史关联 |
 | `refresh_cookies_from_browser` | 刷新 DataSuite Cookie | Cookie 过期时 |
@@ -549,6 +620,8 @@ ORDER BY row_cnt ASC
 | 任务 FAILED + KAFKA_OFFSET_OUT_OF_RANGE | 消费位点过期 | 无状态重启，评估数据缺口 |
 | Heap > 95% + GC 时间占比 > 15% | 内存压力导致 GC 风暴 | 增加 TM 内存 |
 | 同系列多市场同时告警 | 公共依赖故障或资源池问题 | 先检查公共上游和 K8s 集群 |
+| Kafka Lag 高 + 背压高 + Source 并行度 > 默认/下游 | **并行度错配（宽进窄出）** | **方案 A**：源降到与全局一致；**方案 B**：下游与分区、TM 同步抬升（见 Phase 2.3） |
+| CP 失败 `expired` + duration ≈ `config.timeout` | 反压或状态导致 CP 无法在时限内完成 | **先消反压**；勿只拉长 timeout |
 
 ---
 
@@ -585,10 +658,19 @@ ORDER BY row_cnt ASC
 
 同一 `task_series` 不同市场的资源配置可能差异很大（如 ID: 145 CPU vs VN: 97 CPU），相同问题在不同市场表现不同。不能假设一个市场的修复方案直接适用于另一个。
 
+### 7.7 `[resolved]` + `job_restart` 仍可能高风险
+
+`job_restart` 的 **resolved** 仅表示 **滑窗内重启次数** 回落，不代表 **背压消除、Lag 消化、CP 已成功**。L2 必须拉 **`get_flink_checkpoints`**（最近成功时间、`expired` 模式）与 **`get_flink_vertices`**（并行度是否错配），避免误判为「已恢复」。
+
+### 7.8 `get_flink_job_config` 的 `otherConfigs` 为空
+
+API 可能不返回 DataStudio 高级参数全文。**不代表**未配置 Checkpoint/SQL hint。以 **`get_flink_checkpoints.config`** 与 **拓扑 `get_flink_vertices`** 为准。
+
 ---
 
 ## Skill 更新记录
 
 | 日期 | 版本 | 变更 |
 |------|------|------|
+| 2026-04-10 | v1.1 | MCP 优先（2.0b）、L2 批次纳入 `diagnose_flink_app` 与 `get_flink_vertices`；新增 Phase 2.3（吞吐对齐方案 A/B、CP expired 与 timeout、分层调参、heartbeat）；原 2.3 起顺延编号，Cookie 降级为 2.8；速查表与坑 7.7/7.8 |
 | 2026-04-09 | v1.0 | 初始版本：三层响应模型、告警解析、根因决策树、重复告警策略、输出模板 |

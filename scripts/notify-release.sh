@@ -3,7 +3,7 @@
 #
 # 工作方式:
 #   1. AI Agent 在提交时生成 .release-notification 文件（自然语言描述）
-#   2. pre-push hook 在推送成功后调用本脚本
+#   2. scripts/finish-release-push.sh 在 git push gitlab 成功之后调用本脚本
 #   3. 本脚本读取文件内容，POST 到 SeaTalk webhook，然后删除文件
 #
 # 手动使用:
@@ -22,17 +22,26 @@ if [ ! -f "$NOTIFICATION_FILE" ]; then
   exit 0
 fi
 
-CONTENT="$(cat "$NOTIFICATION_FILE")"
-if [ -z "$CONTENT" ]; then
+if [ ! -s "$NOTIFICATION_FILE" ]; then
   rm -f "$NOTIFICATION_FILE"
   exit 0
 fi
 
+# 直接从文件读入并 JSON 转义，避免经 shell 变量传递多行/引号导致截断或异常
 PAYLOAD=$(python3 -c "
 import json, sys
-content = sys.stdin.read()
-print(json.dumps({'tag': 'text', 'text': {'content': content}}))
-" <<< "$CONTENT")
+path = sys.argv[1]
+with open(path, encoding='utf-8') as f:
+    content = f.read()
+if not content.strip():
+    sys.exit(0)
+print(json.dumps({'tag': 'text', 'text': {'content': content}}, ensure_ascii=False))
+" "$NOTIFICATION_FILE") || exit 1
+
+if [ -z "$PAYLOAD" ]; then
+  rm -f "$NOTIFICATION_FILE"
+  exit 0
+fi
 
 HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
   -X POST \

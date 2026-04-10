@@ -2,7 +2,7 @@
 
 > **Shopee 大数据开发助手** — Chrome 扩展 + MCP 工具套件 + SeaTalk AI Agent
 
-[![Version](https://img.shields.io/badge/version-3.5.13-blue.svg)](https://github.com/SperanzaTY/spx-helper/releases)
+[![Version](https://img.shields.io/badge/version-3.5.14-blue.svg)](https://github.com/SperanzaTY/spx-helper/releases)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 SPX Helper 是一套为 Shopee 大数据开发工程师打造的效率工具集，包含四个核心模块：
@@ -114,8 +114,11 @@ spx-helper/
 GitLab（主仓库）：https://git.garena.com/tianyi.liang/spx-helper
 GitHub（备份）  ：https://github.com/SperanzaTY/spx-helper
 
-推送策略：推送 GitLab 后自动尝试同步 GitHub（失败不阻塞）
-git push gitlab release
+推送策略：以 GitLab 为基准；**GitHub 同步与 SeaTalk 发版通知在 GitLab 推送成功之后**执行（`pre-push` 无法在传输完成后挂钩，勿依赖已移除的 EXIT trap）。
+
+推荐一条命令：`npm run push:release` 或 `bash scripts/push-release.sh`。
+
+若已使用 `git push gitlab release`，请在终端看到推送成功后执行：`npm run finish:release-push` 或 `bash scripts/finish-release-push.sh`。
 ```
 
 ---

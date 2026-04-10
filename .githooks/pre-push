@@ -311,25 +311,7 @@ fi
 
 echo "✅ 所有检查通过，正在推送..."
 echo ""
-
-# 推送成功后，自动尝试同步到其他 remote + 发送群通知（失败不阻塞）
-post_push() {
-  for r in $(git remote); do
-    [ "$r" = "$PUSH_REMOTE" ] && continue
-    echo "  Syncing to ${r}..."
-    if git push "$r" release 2>/dev/null; then
-      echo "  [OK] ${r} sync successful"
-    else
-      echo "  [WARNING] ${r} sync failed (owner will sync later)"
-    fi
-  done
-
-  # 发送 SeaTalk 群通知
-  REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-  NOTIFY_SCRIPT="$REPO_ROOT/scripts/notify-release.sh"
-  if [ -f "$NOTIFY_SCRIPT" ] && [ -f "$REPO_ROOT/.release-notification" ]; then
-    echo "  Sending release notification to SeaTalk group..."
-    bash "$NOTIFY_SCRIPT" || true
-  fi
-}
-trap post_push EXIT
+echo "[release] pre-push 返回时 Git 尚未完成向 GitLab 的传输；GitHub 同步与 SeaTalk 通知应在推送成功之后执行。"
+echo "          推荐: npm run push:release"
+echo "          若已执行 git push gitlab release: 推送成功后请 npm run finish:release-push"
+echo ""

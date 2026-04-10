@@ -1175,6 +1175,50 @@ def get_flink_lineage(app_id: int) -> str:
         if not data:
             return _result({"error": f"应用 {app_id} 无血缘数据"})
 
+        # 部分环境 API 的 data 为 list（表对象列表），不是 { tables, consume, ... }；原先假定 dict 会触发
+        # 'list' object has no attribute 'get'
+        if isinstance(data, list):
+            tables_map: Dict[str, Dict] = {}
+            for t in data:
+                if isinstance(t, dict):
+                    name = t.get("tableName") or t.get("name") or ""
+                    if not name:
+                        continue
+                    tables_map[name] = {
+                        "name": name,
+                        "type": t.get("tableType"),
+                        "tag": t.get("tag"),
+                        "tagDescription": t.get("tagDescription"),
+                        "properties": t.get("properties"),
+                        "hudiRedirectUrl": t.get("hudiRedirectUrl"),
+                    }
+                elif isinstance(t, str) and t.strip():
+                    tables_map[t.strip()] = {
+                        "name": t.strip(),
+                        "type": None,
+                        "tag": None,
+                        "tagDescription": None,
+                        "properties": None,
+                        "hudiRedirectUrl": None,
+                    }
+            return _result({
+                "appId": app_id,
+                "consumeCount": 0,
+                "produceCount": 0,
+                "lookupCount": 0,
+                "consume": [],
+                "produce": [],
+                "lookup": [],
+                "tables": list(tables_map.values()),
+                "note": "血缘接口 data 为数组格式：已解析表列表；边关系（consume/produce/lookup）本响应未提供，可能为空",
+            })
+
+        if not isinstance(data, dict):
+            return _result({
+                "error": f"血缘接口返回类型异常: {type(data).__name__}，无法解析",
+                "appId": app_id,
+            })
+
         tables_map: Dict[str, Dict] = {}
         for t in data.get("tables", []):
             tables_map[t.get("tableName", "")] = {
@@ -1389,6 +1433,7 @@ GRAFANA_DS_NAME = "vm-prod-flink"
 
 _instance_cache: Dict[int, dict] = {}
 _grafana_ds_uid: Optional[str] = None
+_last_grafana_auth: Optional[AuthResult] = None
 
 
 def _get_instance_info(app_id: int) -> dict:
@@ -1461,8 +1506,26 @@ def _resolve_flink_jid(app_id: int) -> str:
 
 # ──── Grafana helpers ────
 
-def _load_grafana_cookies() -> Dict[str, str]:
-    return get_auth(GRAFANA_DOMAIN).cookies
+def _grafana_get_headers(extra: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+    h = {**HEADERS, "referer": f"{GRAFANA_BASE}/"}
+    if extra:
+        h.update(extra)
+    return h
+
+
+def _load_grafana_cookies(force: bool = False, auth_failed: bool = False) -> Dict[str, str]:
+    """读取 Grafana 域 Cookie；与 DataSuite 一致，支持 401 后 force + auth_failed 触发 chrome-auth 刷新。"""
+    global _last_grafana_auth
+    result = get_auth(GRAFANA_DOMAIN, force=force, auth_failed=auth_failed)
+    _last_grafana_auth = result
+    if result.ok:
+        logger.info("[Auth] Grafana cookies via %s (%s cookies)", result.source, len(result.cookies))
+    return result.cookies
+
+
+def _grafana_diag(cookies: Dict[str, str]) -> str:
+    expires_at = _last_grafana_auth.expires_at if _last_grafana_auth else None
+    return _cookie_diagnostic(cookies, expires_at=expires_at)
 
 
 def _resolve_grafana_ds_uid() -> str:
@@ -1470,23 +1533,39 @@ def _resolve_grafana_ds_uid() -> str:
     if _grafana_ds_uid:
         return _grafana_ds_uid
 
-    cookies = _load_grafana_cookies()
-    r = http_requests.get(
-        f"{GRAFANA_BASE}/api/frontend/settings",
-        cookies=cookies,
-        headers=HEADERS,
-        timeout=15,
-    )
-    r.raise_for_status()
-    ds_map = r.json().get("datasources", {})
-    ds = ds_map.get(GRAFANA_DS_NAME, {})
-    _grafana_ds_uid = ds.get("uid")
-    if not _grafana_ds_uid:
-        raise RuntimeError(
-            f"Grafana 数据源 '{GRAFANA_DS_NAME}' 未找到。"
-            f"可用数据源({len(ds_map)}): {', '.join(list(ds_map.keys())[:10])}..."
+    cookies: Dict[str, str] = {}
+    for attempt in range(MAX_RETRIES + 1):
+        force = attempt > 0
+        auth_failed = attempt > 0
+        cookies = _load_grafana_cookies(force=force, auth_failed=auth_failed)
+        r = http_requests.get(
+            f"{GRAFANA_BASE}/api/frontend/settings",
+            cookies=cookies,
+            headers=_grafana_get_headers(),
+            timeout=15,
         )
-    return _grafana_ds_uid
+        if r.status_code in (401, 403):
+            if attempt < MAX_RETRIES:
+                logger.warning(
+                    "Grafana /api/frontend/settings 返回 %s，刷新 Cookie 后重试...",
+                    r.status_code,
+                )
+                continue
+            raise RuntimeError(
+                f"Grafana 鉴权失败: HTTP {r.status_code}（/api/frontend/settings）\n"
+                f"请在 Chrome 中打开 {GRAFANA_BASE}/ 登录；并确认 MCP 与 Cursor 使用同一 Chrome CDP（CHROME_CDP_PORT）。\n"
+                f"Cookie 诊断:\n{_grafana_diag(cookies)}"
+            )
+        r.raise_for_status()
+        ds_map = r.json().get("datasources", {})
+        ds = ds_map.get(GRAFANA_DS_NAME, {})
+        _grafana_ds_uid = ds.get("uid")
+        if not _grafana_ds_uid:
+            raise RuntimeError(
+                f"Grafana 数据源 '{GRAFANA_DS_NAME}' 未找到。"
+                f"可用数据源({len(ds_map)}): {', '.join(list(ds_map.keys())[:10])}..."
+            )
+        return _grafana_ds_uid
 
 
 def _grafana_query_batch(
@@ -1495,17 +1574,11 @@ def _grafana_query_batch(
     instant: bool = False,
 ) -> Dict[str, Any]:
     """批量查询 Grafana 指标，返回 {refId: {current, avg, max, min, points}} 格式。"""
-    ds_uid = _resolve_grafana_ds_uid()
-    cookies = _load_grafana_cookies()
     now = int(time.time())
 
-    queries = []
+    queries: List[Dict[str, Any]] = []
     for ref_id, expr in exprs.items():
-        q: Dict[str, Any] = {
-            "refId": ref_id,
-            "expr": expr,
-            "datasource": {"type": "prometheus", "uid": ds_uid},
-        }
+        q: Dict[str, Any] = {"refId": ref_id, "expr": expr}
         if instant:
             q["instant"] = True
             q["range"] = False
@@ -1521,16 +1594,42 @@ def _grafana_query_batch(
         "from": str((now - range_seconds) * 1000),
         "to": str(now * 1000),
     }
-    headers = {**HEADERS, "content-type": "application/json"}
-    r = http_requests.post(
-        f"{GRAFANA_BASE}/api/ds/query",
-        cookies=cookies,
-        headers=headers,
-        json=payload,
-        timeout=30,
-    )
-    r.raise_for_status()
-    raw = r.json()
+
+    raw: Optional[Dict[str, Any]] = None
+    cookies: Dict[str, str] = {}
+    for attempt in range(MAX_RETRIES + 1):
+        force = attempt > 0
+        auth_failed = attempt > 0
+        cookies = _load_grafana_cookies(force=force, auth_failed=auth_failed)
+        ds_uid = _resolve_grafana_ds_uid()
+        for q in queries:
+            q["datasource"] = {"type": "prometheus", "uid": ds_uid}
+        r = http_requests.post(
+            f"{GRAFANA_BASE}/api/ds/query",
+            cookies=cookies,
+            headers=_grafana_get_headers({"content-type": "application/json"}),
+            json=payload,
+            timeout=30,
+        )
+        if r.status_code in (401, 403):
+            if attempt < MAX_RETRIES:
+                logger.warning(
+                    "Grafana /api/ds/query 返回 %s，刷新 Cookie 后重试...",
+                    r.status_code,
+                )
+                continue
+            raise RuntimeError(
+                f"Grafana 查询鉴权失败: HTTP {r.status_code}\n"
+                f"Cookie 诊断:\n{_grafana_diag(cookies)}"
+            )
+        r.raise_for_status()
+        raw = r.json()
+        break
+
+    if raw is None:
+        raise RuntimeError(
+            f"Grafana 查询超过最大重试次数\nCookie 诊断:\n{_grafana_diag(cookies)}"
+        )
 
     parsed: Dict[str, Any] = {}
     for ref_id, result in raw.get("results", {}).items():

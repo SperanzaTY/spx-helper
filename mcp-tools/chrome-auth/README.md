@@ -126,7 +126,13 @@ class AuthResult:
 1. Cookie 即将过期（剩余 < 5 分钟）— 主动刷新
 2. 调用方传入 `auth_failed=True`（收到 401/403）— 无条件刷新
 
-刷新链路：先尝试 CDP 导航，失败则降级为 AppleScript 控制 Chrome 打开 DataSuite 页面触发 SSO。刷新成功后重新读取 Cookie，对调用方透明。每个域名有 60 秒冷却期防止频繁刷新。
+刷新链路（按安静程度优先）：
+
+1. **CDP**：对每个可达调试端口依次尝试在**隐藏标签**内 `Page.navigate`（成功后会关闭该标签），**不抢前台**。请尽量用 **Chrome** 带 `--remote-debugging-port=9222` 启动，并设置 `CHROME_CDP_PORT=9222`，避免只连到 SeaTalk 等 Electron 端口时与 Chrome Cookie 罐不一致。
+2. **macOS `open -g`**：无 CDP 时，用系统 `open -g -a "Google Chrome" <url>` 在**后台**打开页面，**不将 Chrome 置前**，通常无明显弹窗感（可能多一个后台标签页）。可用环境变量 `CHROME_AUTH_BROWSER_APP` 指定浏览器名（如 `Chromium`）。
+3. **AppleScript（最后手段）**：会新建可见标签并等待，较打扰。若完全不要此步，可设置 `CHROME_AUTH_DISABLE_APPLESCRIPT=1`；若需禁用 `open -g` 试验，可设 `CHROME_AUTH_DISABLE_OPEN_G=1`。
+
+刷新成功后重新读取 Cookie，对调用方透明。每个域名有 60 秒冷却期防止频繁刷新。
 
 ### `invalidate_domain(domain)`
 
