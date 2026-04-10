@@ -837,6 +837,28 @@ async function main() {
     }
   }
 
+  /**
+   * Model 常按 prompt 模板输出与宿主相同的外层标题/分隔线；宿主已在 send 前包一层。
+   * 去掉重复前缀/后缀，避免双层「[Alarm Bot]」与装饰线。
+   */
+  function stripAlarmDuplicateOuterFormat(text: string): string {
+    let t = text.trim();
+    for (let pass = 0; pass < 6; pass++) {
+      const before = t;
+      t = t.replace(/^\*\*\[Alarm Bot\]\*\*\s*Auto-Investigation\s*\n?/i, '');
+      t = t.replace(/^\[Alarm Bot\]\s*Auto-Investigation\s*(\[[^\]]*\])?\s*\n?/i, '');
+      t = t.replace(/^\[Alarm Bot\][^\n]*\n?/i, '');
+      t = t.replace(/^[━═\-]{4,}\s*\n+/m, '');
+      if (t === before) break;
+    }
+    for (let pass = 0; pass < 3; pass++) {
+      const before = t;
+      t = t.replace(/\n[━═\-]{4,}\s*$/m, '');
+      if (t === before) break;
+    }
+    return t.trim();
+  }
+
   async function investigateAlarm(alarm: PendingAlarm): Promise<string> {
     log(`[alarm] investigating: ${alarm.sessionName} — sender: ${alarm.sender}(${alarm.senderId}) — "${alarm.text.substring(0, 80)}"`);
     bridge.sendToPanel({ type: 'alarm_investigating', mid: alarm.mid, session: alarm.session, sessionName: alarm.sessionName }).catch(() => {});
@@ -858,6 +880,8 @@ async function main() {
       log('[alarm] agent returned empty reply, skipping send');
       return '';
     }
+
+    replyText = stripAlarmDuplicateOuterFormat(replyText);
 
     const durationStr = elapsed < 60_000
       ? `${(elapsed / 1000).toFixed(1)}s`

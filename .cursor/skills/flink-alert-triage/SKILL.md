@@ -95,6 +95,19 @@ SeaTalk 告警群中 `flink job alarm` 发送的消息遵循固定格式：
 
 ---
 
+## 输出与 SeaTalk 宿主（全局）
+
+发到群聊前，**SeaTalk Agent 会自动**在正文外包一层：`[Alarm Bot] Auto-Investigation` 标题、上下分隔线、结尾耗时与会话名。
+
+因此排查回复**不要**再输出：
+
+- `[Alarm Bot]`、`Auto-Investigation`、`**[Alarm Bot]**` 等标题行
+- 整行仅由 `━` `═` `-` 组成的装饰分隔线（Markdown 表格的 `| --- |` 除外）
+
+**正文从第一行任务摘要或标题开始即可**（例如 `Flink 告警 -- App 741496` 或 `第 2 次告警 - xxx (VN)`）。Agent 侧也会对重复外层格式做去重，但 prompt 与模板应以「仅正文」为准。
+
+---
+
 ## Phase 1: 重复告警处理策略
 
 ### 1.1 告警计数与分级响应
@@ -111,7 +124,7 @@ SeaTalk 告警群中 `flink job alarm` 发送的消息遵循固定格式：
 ### 1.2 L1 趋势简报模板（第 2-3 次）
 
 ```
-[Alarm Bot] 第{N}次告警 - {task_name简称} ({market})
+第{N}次告警 - {task_name简称} ({market})
 
 状态: {与上次对比的趋势描述}
 关键变化: {最重要的1-2个指标变化}
@@ -127,7 +140,7 @@ Job: {job_url}
 ### 1.3 L1 升级告急模板（第 4+ 次）
 
 ```
-[Alarm Bot] 第{N}次告警 - {task_name简称} | 已持续{duration}无人响应
+第{N}次告警 - {task_name简称} | 已持续{duration}无人响应
 
 {一句话核心问题} | 延迟: {latency} | 状态: {status}
 
@@ -137,7 +150,7 @@ Job: {job_url}
 ### 1.4 L1 恢复确认模板
 
 ```
-[Alarm Bot] 已恢复 - {task_name简称} ({market})
+已恢复 - {task_name简称} ({market})
 
 {恢复原因一句话} | 残留风险: {有/无}
 {如有残留风险，一行说明}
@@ -293,9 +306,6 @@ search_flink_apps(keyword="{task_series 的核心关键词}", project_name="{pro
 ### 2.5 L2 诊断报告模板
 
 ```
-[Alarm Bot] Auto-Investigation
-━━━━━━━━━━━━━━
-
 Flink 告警排查 -- App {app_id} ({market})
 
 任务: {task_name_short}
@@ -330,8 +340,6 @@ Flink 告警排查 -- App {app_id} ({market})
 2. {次要建议}
 
 链接: Job: {url} | Grafana: {url}
-
-━━━━━━━━━━━━━━
 ```
 
 ### 2.6 输出约束
@@ -354,15 +362,12 @@ Flink 告警排查 -- App {app_id} ({market})
 
 **降级模式报告模板**：
 ```
-[Alarm Bot] Auto-Investigation [降级模式]
-━━━━━━━━━━━━━━
+Flink 告警 [降级模式] -- App {app_id}
 
 {基于告警文本的分析，参照 Phase 2.2 决策树}
 
 [NOTE] Flink MCP 工具不可用（Cookie 过期），诊断基于告警文本。
 如需深入排查：Chrome 登录 DataSuite 后执行 refresh_cookies_from_browser()。
-
-━━━━━━━━━━━━━━
 ```
 
 ---
@@ -467,8 +472,7 @@ ORDER BY row_cnt ASC
 
 **汇总报告模板**：
 ```
-[Alarm Bot] 系列任务批量告警 - {task_series}
-━━━━━━━━━━━━━━
+系列任务批量告警 - {task_series}
 
 {task_series} 系列多个市场同时告警:
 
@@ -482,8 +486,6 @@ ORDER BY row_cnt ASC
 建议:
 1. 优先处理 {最严重的市场}
 2. {统一建议}
-
-━━━━━━━━━━━━━━
 ```
 
 ### 4.2 告警风暴抑制

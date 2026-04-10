@@ -674,9 +674,44 @@ window.<span class="fn">__agentSend</span>(JSON.<span class="fn">stringify</span
   </div>
 </div>
 
-<!-- Slide 10: Remote Control -->
+<!-- Slide 10: Alarm Bot -->
 <div class="slide" data-idx="10">
-  <div class="section-num">10 — REMOTE CONTROL</div>
+  <div class="section-num">10 — ALARM BOT</div>
+  <div class="section-title">群内告警自动排查</div>
+  <div class="section-subtitle">匹配规则后拉起 AI 排查，结果以线程回复发回群聊</div>
+  <div class="two-col">
+    <div class="stack">
+      <div class="card">
+        <div class="card-title">流程</div>
+        <div class="card-desc">
+          侧栏腕表入口配置监控群与匹配规则（正则，支持与/或）、处理延迟、工作区与追加 prompt。群内出现告警且满足条件时，后端 <code>investigateAlarm</code> 创建 ACP 会话执行排查（可搭配 Flink MCP、<code>flink-alert-triage</code> Skill），完成后对告警消息做<strong>线程回复</strong>。
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">消息外层与 prompt 约定</div>
+        <div class="card-desc">
+          发送前 Agent 会<strong>统一加上</strong>标题 <code>[Alarm Bot] Auto-Investigation</code> 与上下分隔线。因此追加 prompt 与 Skill 模板应要求模型<strong>只输出正文</strong>（任务名、严重度、结论、链接等），不要重复写外层标题或整行装饰分隔线，避免双层排版。发送前亦可对模型输出做去重剥离（与规范二选一或叠加）。
+        </div>
+      </div>
+    </div>
+    <div class="stack">
+      <div class="card" style="border-color: rgba(244, 114, 182, 0.25);">
+        <div class="card-title">配置与安全</div>
+        <div class="card-desc" style="font-size: 12px; line-height: 1.75;">
+          配置持久化：<code>~/.cursor/seatalk-alarm-config.json</code><br><br>
+          支持授权发送者白名单、仅 @ 我、人工回复取消自动排查等开关，降低误触发与 prompt 注入面。
+        </div>
+      </div>
+      <div class="note" style="font-size: 12px; color: var(--text-muted); line-height: 1.6;">
+        详细说明见仓库 <code>docs/guides/SEATALK_AGENT.md</code> 中「Alarm Bot」章节与 <code>.cursor/skills/flink-alert-triage/</code>。
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Slide 11: Remote Control -->
+<div class="slide" data-idx="11">
+  <div class="section-num">11 — REMOTE CONTROL</div>
   <div class="section-title">Remote 远程控制</div>
   <div class="section-subtitle">用手机给 AI 下指令——通过 SeaTalk Saved Messages 远程操控 Cursor Agent</div>
   <div class="two-col">
@@ -741,9 +776,9 @@ window.<span class="fn">__agentSend</span>(JSON.<span class="fn">stringify</span
   </div>
 </div>
 
-<!-- Slide 11: AI-Driven Development -->
-<div class="slide" data-idx="11">
-  <div class="section-num">11 — AI-DRIVEN DEV</div>
+<!-- Slide 12: AI-Driven Development -->
+<div class="slide" data-idx="12">
+  <div class="section-num">12 — AI-DRIVEN DEV</div>
   <div class="section-title">所见即所得的 AI 开发模式</div>
   <div class="section-subtitle">用自然语言描述需求，AI 写代码、你验证效果、迭代优化——整个过程就是开发</div>
   <div class="two-col">
@@ -791,9 +826,9 @@ window.<span class="fn">__agentSend</span>(JSON.<span class="fn">stringify</span
   </div>
 </div>
 
-<!-- Slide 12: Skill Development -->
-<div class="slide" data-idx="12">
-  <div class="section-num">12 — SKILL</div>
+<!-- Slide 13: Skill Development -->
+<div class="slide" data-idx="13">
+  <div class="section-num">13 — SKILL</div>
   <div class="section-title">Skill 开发</div>
   <div class="section-subtitle">把重复的工作流沉淀为标准化指令，AI 一键执行完整流程</div>
   <div class="two-col">
@@ -838,9 +873,9 @@ window.<span class="fn">__agentSend</span>(JSON.<span class="fn">stringify</span
   </div>
 </div>
 
-<!-- Slide 13: MCP Tool Development -->
-<div class="slide" data-idx="13">
-  <div class="section-num">13 — MCP DEV</div>
+<!-- Slide 14: MCP Tool Development -->
+<div class="slide" data-idx="14">
+  <div class="section-num">14 — MCP DEV</div>
   <div class="section-title">MCP 工具开发</div>
   <div class="section-subtitle">给 AI 装上新的"手"——一个 Python 函数就是一个 AI 工具</div>
   <div class="two-col">
@@ -890,9 +925,9 @@ window.<span class="fn">__agentSend</span>(JSON.<span class="fn">stringify</span
   </div>
 </div>
 
-<!-- Slide 14: Plugin Extension -->
-<div class="slide" data-idx="14">
-  <div class="section-num">14 — EXTENSION DEV</div>
+<!-- Slide 15: Plugin Extension -->
+<div class="slide" data-idx="15">
+  <div class="section-num">15 — EXTENSION DEV</div>
   <div class="section-title">注入插件功能拓展</div>
   <div class="section-subtitle">新增 SeaTalk 交互能力的完整过程——以"自动发消息"为例</div>
   <div class="flow" style="margin-bottom: 24px;">
@@ -957,8 +992,8 @@ window.<span class="fn">__agentSend</span>(JSON.<span class="fn">stringify</span
   </div>
 </div>
 
-<!-- Slide 15: Summary -->
-<div class="slide title-slide" data-idx="15">
+<!-- Slide 16: Summary -->
+<div class="slide title-slide" data-idx="16">
   <div class="title-badge">KEY TAKEAWAYS</div>
   <div class="section-title" style="font-size: 48px; margin-bottom: 32px;">核心技巧总结</div>
   <div style="text-align: left; max-width: 720px; margin: 0 auto;">
@@ -967,6 +1002,7 @@ window.<span class="fn">__agentSend</span>(JSON.<span class="fn">stringify</span
       <li><strong>addBinding + evaluate = 零成本双向 RPC</strong> — 不需要 WebSocket server 或 HTTP 接口</li>
       <li><strong>React Fiber 逆向可以调用内部 API</strong> — 不修改源码也能实现发消息、加好友</li>
       <li><strong>Cursor ACP 复用 AI 能力</strong> — 不用自建模型服务，直接站在巨人肩膀上</li>
+      <li><strong>Alarm Bot 告警排查</strong> — 规则匹配 + ACP 自动排查 + 线程回复；prompt 只写正文，与宿主外层标题对齐</li>
       <li><strong>Remote 远程控制</strong> — Redux 监听 + 独立 Agent 进程，手机也能给 AI 下指令</li>
       <li><strong>所见即所得的 AI 开发</strong> — 描述意图 → AI 实现 → 验证效果 → 对话式迭代</li>
       <li><strong>Skill 沉淀工作流</strong> — 写一份 Markdown，团队所有人都能一键复用</li>

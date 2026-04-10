@@ -6,6 +6,35 @@
 
 ---
 
+## v3.5.11 -- 2026-04-10 -- `fix`: Alarm Bot 线程回复外层去重与 Flink 告警 prompt 对齐
+
+**提交者**: @tianyi.liang
+**Commit Type**: fix
+**修改模块**: SeaTalk Agent、Cursor Skill（flink-alert-triage）、文档与 HTML 分享页
+
+### 变更说明
+- [Agent] `investigateAlarm` 发送线程回复前增加 `stripAlarmDuplicateOuterFormat`，去除模型重复输出的 `[Alarm Bot]` 标题与装饰分隔行，避免与宿主外层包装叠成双层排版
+- [Skill] `flink-alert-triage`：`alarm-bot-prompt.md` 与 `SKILL.md` 模板改为只输出正文，并说明 SeaTalk 宿主已自动加标题与分隔线
+- [文档] `docs/guides/SEATALK_AGENT.md`、`docs/guides/SKILL.md`：Alarm Bot 与 Skill 说明同步
+- [文档] `docs/seatalk-agent-tech-sharing.html`：新增「Alarm Bot」幻灯片，顺延后续章节编号与总结要点
+- [文档] `docs/guides/CHROME_EXTENSION.md`：版本号与 manifest 同步（本次扩展侧无功能代码变更）
+- [根] `README.md` 版本徽章与三处 `version` 已为 3.5.11
+
+### 测试情况
+
+| 测试项 | 结果 | 备注 |
+|--------|------|------|
+| `npm run verify:hooks` | [OK] | |
+| `npx tsc --noEmit`（seatalk-agent） | [OK] | 发版前执行 |
+| Chrome 扩展加载 | N/A | 本次未改扩展逻辑 |
+| MCP 工具 | N/A | 本次未改 MCP |
+| SeaTalk Agent 需重启 | [NOTE] | 拉取后重启 Agent 以加载 `main.ts` 变更 |
+
+### 特别注意
+- 排查 prompt 建议只写正文；旧模板仍可能由代码侧去重兜底
+
+---
+
 ## v3.5.10 -- 2026-04-10 -- `feat`: SeaTalk Remote 模型切换与 Git hooks 提交前校验
 
 **提交者**: @tianyi.liang
