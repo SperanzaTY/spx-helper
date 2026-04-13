@@ -28,6 +28,8 @@ Skill（指令层）     →  定义"怎么做"     → .cursor/skills/<name>/SK
 | **seatalk-troubleshoot** | SeaTalk Agent 故障排查（10 阶段系统化排查：进程 → 多进程冲突 → CDP → 注入 → ACP → Remote → 功能 → UI → Agent 重启 → 日志） | 无外部依赖 |
 | **release-publish** | 发版流程规范（含 `npm run verify:hooks` → 版本号 → 日志 → 文档联动 → CDP 验证 → 群通知 → `npm run push:release`：GitLab 成功后再同步 GitHub 并投递通知） | 无外部依赖 |
 
+排查 ClickHouse 时若 Cursor Agent 调 `query_ck` 参数为空，可改用 MCP 工具 **`query_ck_bundle`**（单参 JSON 字符串），详见 `mcp-tools/ck-query/README.md` 与 `spx-bug-trace` 的 `tools-reference.md`。
+
 **双副本同步**：`flink-alert-triage` 在仓库中为 `.cursor/skills/flink-alert-triage/SKILL.md`，与开发者本机主副本 `~/.cursor/skills/flink-alert-triage/SKILL.md` 内容应对齐；更新 skill 后请 `cp` 同步另一侧。  
 Alarm Bot 用的 **`alarm-bot-prompt.md`** 同目录存放，修改后也请同步到 `~/.cursor/skills/flink-alert-triage/alarm-bot-prompt.md`，便于本机与仓库一致。
 

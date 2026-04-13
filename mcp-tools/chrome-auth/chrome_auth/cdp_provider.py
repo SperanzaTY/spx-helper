@@ -27,7 +27,9 @@ _SSO_REFRESH_DOMAINS = (
 )
 _SSO_REFRESH_URLS = {
     "datasuite.shopee.io": "https://datasuite.shopee.io/flink/",
-    "data-infra.shopee.io": "https://data-infra.shopee.io/",
+    # Keyhole 入口；勿用 https://data-infra.shopee.io/ 根路径（多为网关/重定向，不像可用产品页）
+    "keyhole.data-infra.shopee.io": "https://keyhole.data-infra.shopee.io/",
+    "data-infra.shopee.io": "https://keyhole.data-infra.shopee.io/",
     "grafana.idata.shopeemobile.com": "https://grafana.idata.shopeemobile.com/",
 }
 

@@ -340,6 +340,12 @@ MCP 配置在 `~/.cursor/mcp.json`，新增或修改后需在 Cursor 设置中**
 
 ## 更新日志
 
+### v3.5.15
+
+- **chrome-auth**：Keyhole SSO 静默续期改为打开 **`https://keyhole.data-infra.shopee.io/`**，不再使用 `https://data-infra.shopee.io/` 根路径
+- **flink-query**：`diagnose_flink_app` 聚合 **Graph Monitor**；`get_flink_app_detail` / `search_flink_apps` 的 **`url`** 与 **`/flink/operation/application?...`** 一致；Keyhole REST 前缀与 `/jobs/{jid}/...` 诊断对齐等（见模块 README）
+- **ck-query**：`query_ck` 必填 `sql`/`env`；新增 **`query_ck_bundle`**（单参 JSON 字符串兜底）
+
 ### v3.5.14
 
 - **chrome-auth**：CDP 静默刷新在多个可达端口上依次尝试；README 与行为对齐

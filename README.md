@@ -2,7 +2,7 @@
 
 > **Shopee 大数据开发助手** — Chrome 扩展 + MCP 工具套件 + SeaTalk AI Agent
 
-[![Version](https://img.shields.io/badge/version-3.5.14-blue.svg)](https://github.com/SperanzaTY/spx-helper/releases)
+[![Version](https://img.shields.io/badge/version-3.5.15-blue.svg)](https://github.com/SperanzaTY/spx-helper/releases)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 SPX Helper 是一套为 Shopee 大数据开发工程师打造的效率工具集，包含四个核心模块：
@@ -124,6 +124,8 @@ GitHub（备份）  ：https://github.com/SperanzaTY/spx-helper
 ---
 
 ## 更新日志
+
+- **v3.5.15**：Flink 一键诊断 Graph Monitor、DataSuite 运营页 `url` 修正、CK `query_ck`/`query_ck_bundle`、chrome-auth Keyhole SSO 续期 URL、SeaTalk rail 精简与文档/Skill 同步（详见 [docs/RELEASE_LOG.md](docs/RELEASE_LOG.md)）。
 
 查看 [docs/RELEASE_LOG.md](docs/RELEASE_LOG.md) 了解完整发版记录。
 

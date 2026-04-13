@@ -40,7 +40,7 @@ SeaTalk 告警群中 `flink job alarm` 发送的消息遵循固定格式：
     Alarm Sent Time: {timestamp}
     Message:
     {alert_type}> {threshold_detail}
-    Job Link:https://datasuite.shopee.io/flink/operation/stream/{app_id}
+    Job Link:https://datasuite.shopee.io/flink/operation/application?operationType=stream&appId={app_id}&project_code=...
     PrometheusUrl:{prometheus_url}
 ```
 
@@ -50,7 +50,7 @@ SeaTalk 告警群中 `flink job alarm` 发送的消息遵循固定格式：
     Recover Time:{timestamp}
     Message:
     {alert_type}> {threshold_detail}
-    Job Link:https://datasuite.shopee.io/flink/operation/stream/{app_id}
+    Job Link:https://datasuite.shopee.io/flink/operation/application?operationType=stream&appId={app_id}&project_code=...
     PrometheusUrl:{prometheus_url}
 ```
 
@@ -469,7 +469,7 @@ Flink 告警排查 -- App {app_id} ({market})
 **什么是无状态重启**：跳过 Checkpoint/Savepoint 状态，从 Kafka 最新 offset 开始消费。代价是丢失窗口状态和精确一次语义保证，可能产生数据缺口。
 
 **操作步骤**：
-1. 打开 DataSuite Job 页面：`https://datasuite.shopee.io/flink/operation/stream/{app_id}`
+1. 打开 DataSuite Job 页面：`https://datasuite.shopee.io/flink/operation/application?operationType=stream&appId={app_id}&project_code=...`（若告警里仍是旧链接 `.../operation/stream/{app_id}` 也可打开，同一 appId）
 2. 点击 "Start" 按钮（非 "Restart"）
 3. 在启动选项中选择 "Start without state"
 4. 确认启动

@@ -31,6 +31,14 @@ query_ck(
 )
 ```
 
+若 Agent 调 `query_ck` 时参数被桥接成空对象 `{}`，改用 **`query_ck_bundle`**，只传一个参数 `bundle`（整段 JSON 字符串），例如：
+
+```python
+query_ck_bundle(
+    bundle='{"sql":"SELECT 1","env":"live","cluster":"ck2"}'
+)
+```
+
 **连接方式**：DBeaver 直连（HTTP + Basic Auth），无 internal_search API
 
 **env=live（线上）** cluster 可选：

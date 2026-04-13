@@ -14,7 +14,7 @@ import logging
 import time
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import parse_qs, urlencode, urlparse, urljoin
 
 import requests as http_requests
 from chrome_auth import get_auth, AuthResult
@@ -117,6 +117,28 @@ def _get_data(resp: dict) -> Any:
         msg = resp.get("message") or resp.get("msg", "Unknown error")
         raise RuntimeError(f"API 返回错误: code={code}, message={msg}")
     return resp.get("data")
+
+
+def _flink_app_operation_url(
+    app_id: int,
+    job_type: str = "",
+    project_name: str = "",
+) -> str:
+    """DataSuite 任务运营页（与前端一致：application + query，非旧版 /operation/stream/{id}）。"""
+    jt = (job_type or "").strip()
+    low = jt.lower()
+    if "batch" in low or jt.upper() == "BATCH":
+        op_type = "batch"
+    else:
+        op_type = "stream"
+    q: Dict[str, str] = {
+        "operationType": op_type,
+        "appId": str(int(app_id)),
+    }
+    pn = (project_name or "").strip()
+    if pn:
+        q["project_code"] = pn
+    return f"{BASE_URL}/flink/operation/application?{urlencode(q)}"
 
 
 def _build_logify_url(app_id: int, instance_id: int) -> str:
@@ -262,6 +284,132 @@ def _format_ts(ts) -> str:
         return str(ts)
 
 
+def _extract_vertex_names_from_graph_config(graph_config: Any) -> List[str]:
+    """从 graph-config 响应中尽力提取算子/节点名称（用于诊断摘要）。"""
+    found: List[str] = []
+    seen: set[str] = set()
+
+    def walk(o: Any, depth: int) -> None:
+        if depth > 14:
+            return
+        if isinstance(o, dict):
+            for k in ("name", "vertexName", "taskName", "nodeName", "label"):
+                v = o.get(k)
+                if isinstance(v, str) and v.strip() and v not in seen:
+                    seen.add(v)
+                    found.append(v.strip()[:160])
+            for v in o.values():
+                walk(v, depth + 1)
+        elif isinstance(o, list):
+            for v in o:
+                walk(v, depth + 1)
+
+    walk(graph_config, 0)
+    return found[:80]
+
+
+def _find_metrics_task_list(metrics_data: Any) -> Optional[List[Dict]]:
+    """在 task-metrics 响应中找出最像「按算子一行指标」的 list[dict]。"""
+
+    def score(lst: Any) -> int:
+        if not isinstance(lst, list) or not lst or not isinstance(lst[0], dict):
+            return 0
+        d0 = lst[0]
+        s = 0
+        if any(k in d0 for k in ("name", "vertexName", "taskName", "nodeName")):
+            s += 5
+        if "metrics" in d0:
+            s += 3
+        if len(d0) >= 2:
+            s += 1
+        return s
+
+    best: Optional[List[Dict]] = None
+    best_sc = 0
+
+    def walk(o: Any, depth: int) -> None:
+        nonlocal best, best_sc
+        if depth > 12:
+            return
+        if isinstance(o, list):
+            sc = score(o)
+            if sc > best_sc:
+                best_sc = sc
+                best = o
+            for x in o:
+                walk(x, depth + 1)
+        elif isinstance(o, dict):
+            for v in o.values():
+                walk(v, depth + 1)
+
+    walk(metrics_data, 0)
+    return best
+
+
+def _summarize_graph_monitor(graph_config: Any, metrics_data: Any) -> Dict[str, Any]:
+    """将 Graph Monitor 的 config + task-metrics 压成诊断用短结构。"""
+    summary: Dict[str, Any] = {}
+    names = _extract_vertex_names_from_graph_config(graph_config)
+    if names:
+        summary["vertexNamesFromConfig"] = names[:35]
+        summary["vertexNameCount"] = len(names)
+
+    tasks = _find_metrics_task_list(metrics_data)
+    rows_out: List[Dict[str, Any]] = []
+    if tasks:
+        for t in tasks[:45]:
+            if not isinstance(t, dict):
+                continue
+            nm = (
+                t.get("name")
+                or t.get("vertexName")
+                or t.get("taskName")
+                or t.get("nodeName")
+                or ""
+            )
+            row: Dict[str, Any] = {"name": (str(nm)[:120] if nm else "(unnamed)")}
+            merged: Dict[str, Any] = dict(t)
+            inner = t.get("metrics")
+            if isinstance(inner, dict):
+                for k, v in inner.items():
+                    if k not in merged:
+                        merged[k] = v
+            for mk, mv in merged.items():
+                if mk in ("name", "vertexName", "taskName", "nodeName", "metrics", "id"):
+                    continue
+                lk = str(mk).lower()
+                if not any(
+                    x in lk
+                    for x in (
+                        "back",
+                        "press",
+                        "busy",
+                        "idle",
+                        "lag",
+                        "through",
+                        "record",
+                        "water",
+                        "checkpoint",
+                    )
+                ):
+                    continue
+                if isinstance(mv, (int, float)):
+                    row[mk] = mv
+                elif isinstance(mv, dict) and mv.get("value") is not None:
+                    row[mk] = mv["value"]
+            rows_out.append(row)
+        summary["taskMetricRows"] = rows_out
+        summary["taskMetricTotal"] = len(tasks)
+    else:
+        summary["metricsPayloadType"] = type(metrics_data).__name__
+        if isinstance(metrics_data, dict):
+            summary["metricsTopKeys"] = list(metrics_data.keys())[:30]
+        elif isinstance(metrics_data, list):
+            summary["metricsListLen"] = len(metrics_data)
+
+    return summary
+
+
 def _result(data: Any) -> str:
     """将 Python 对象序列化为 JSON 字符串返回。"""
     return json.dumps(data, ensure_ascii=False, indent=2, default=str)
@@ -335,7 +483,11 @@ def search_flink_apps(
                 "alarmCount": app.get("alarmCount"),
                 "importance": app.get("importanceLevel"),
                 "tags": app.get("tagNames"),
-                "url": f"{BASE_URL}/flink/operation/{app_type}/{app.get('id')}",
+                "url": _flink_app_operation_url(
+                    int(app.get("id")),
+                    app.get("appType") or app.get("jobType") or app_type,
+                    app.get("projectName") or project_name or "",
+                ),
             })
 
         return _result({
@@ -394,7 +546,11 @@ def get_flink_app_detail(app_id: int) -> str:
             "drStatus": app.get("taskDrStatusCodes"),
             "createTime": _format_ts(app.get("createTime")),
             "updateTime": _format_ts(app.get("updateTime")),
-            "url": f"{BASE_URL}/flink/operation/stream/{app_id}",
+            "url": _flink_app_operation_url(
+                app_id,
+                str(app.get("jobType") or app.get("type") or ""),
+                str(app.get("projectName") or ""),
+            ),
         }
         return _result(result)
     except Exception as e:
@@ -761,8 +917,8 @@ def diagnose_flink_app(
 ) -> str:
     """一键诊断 Flink 应用：聚合 DataSuite + Keyhole + Grafana 全栈数据，输出问题与优化建议。
 
-    适用于收到告警后快速排查问题根因。自动调用 9 个数据源并综合分析：
-    - DataSuite: 应用详情、实例状态、延迟趋势、异常列表、告警记录、资源估算
+    适用于收到告警后快速排查问题根因。自动聚合多数据源并综合分析：
+    - DataSuite: 应用详情、实例状态、延迟趋势、异常列表、告警记录、资源估算、**Graph Monitor 算子级摘要**
     - Keyhole: Checkpoint 健康、Runtime 异常堆栈（best-effort）
     - Grafana: 背压、Kafka Lag、CPU/内存指标（best-effort）
 
@@ -772,7 +928,7 @@ def diagnose_flink_app(
 
     Returns:
         综合诊断报告：应用概况、延迟分析、异常摘要、告警记录、资源状况、
-        Checkpoint 健康、Grafana 指标、优化建议
+        Graph Monitor 摘要、Checkpoint 健康、Grafana 指标、优化建议
     """
     try:
         diagnosis: Dict[str, Any] = {"appId": app_id, "timeRange": f"最近 {minutes} 分钟"}
@@ -916,11 +1072,64 @@ def diagnose_flink_app(
         except Exception:
             pass
 
+        # 6.5 Graph Monitor（DataSuite，算子级；不依赖 Keyhole，Keyhole 302 时的主要替代）
+        try:
+            gm_inst_resp = _request("GET", f"/instances/graph-monitor/instanceList/{app_id}")
+            gm_inst_list = _get_data(gm_inst_resp) or []
+            if not gm_inst_list:
+                diagnosis["graph_monitor"] = {
+                    "message": "无 Graph Monitor 实例（未开图监控或当前无可用实例）",
+                }
+            else:
+                head = gm_inst_list[0]
+                gm_iid = head.get("id") if isinstance(head, dict) else head
+                config_resp = _request("GET", f"/instances/{gm_iid}/graph-config")
+                graph_config = _get_data(config_resp)
+                now_ms = int(time.time() * 1000)
+                session_id = f"app{app_id}instance{gm_iid}"
+                metrics_resp = _request(
+                    "POST",
+                    f"/instances/graph-monitor/task-metrics/{session_id}",
+                    params={"time": now_ms},
+                )
+                metrics_data = _get_data(metrics_resp)
+                summ = _summarize_graph_monitor(graph_config, metrics_data)
+                diagnosis["graph_monitor"] = {
+                    "instanceId": gm_iid,
+                    "summary": summ,
+                    "fullMetricsHint": "完整算子指标请调用 get_flink_graph_metrics",
+                }
+                high_bp: List[str] = []
+                for row in summ.get("taskMetricRows") or []:
+                    if not isinstance(row, dict):
+                        continue
+                    nm = row.get("name") or ""
+                    for k, v in row.items():
+                        if k == "name" or not isinstance(v, (int, float)):
+                            continue
+                        lk = str(k).lower()
+                        if ("back" in lk or "press" in lk) and v > 600:
+                            high_bp.append(f"{nm}:{k}={v:.0f}")
+                            break
+                if high_bp:
+                    issues.append(
+                        "Graph Monitor 高背压: " + "; ".join(high_bp[:5])
+                        + (" ..." if len(high_bp) > 5 else "")
+                    )
+                    if not any("背压" in s for s in suggestions):
+                        suggestions.append(
+                            "背压来自 Graph Monitor，可用 get_flink_graph_metrics 看全量字段；"
+                            "同时对照 Grafana 与 Keyhole 算子拓扑"
+                        )
+        except Exception as e:
+            diagnosis["graph_monitor"] = {"error": str(e)}
+
         # ── 以下为 Keyhole / Grafana 增强诊断（best-effort，失败不影响核心诊断）──
 
-        # 7. Checkpoint 健康（Keyhole）
+        # 7–8. Keyhole：Checkpoint + Runtime Exceptions（与 Phase 4 相同 Flink REST 路径）
         try:
-            ck_data = _keyhole_get("/checkpoints", app_id)
+            _kjid_diag = _resolve_flink_jid(app_id)
+            ck_data = _keyhole_get(f"/jobs/{_kjid_diag}/checkpoints", app_id)
             counts = ck_data.get("counts", {})
             failed = counts.get("failed", 0)
             completed = counts.get("completed", 0)
@@ -941,12 +1150,8 @@ def diagnose_flink_app(
             if latest.get("duration") and latest["duration"] > 120000:
                 issues.append(f"最近 Checkpoint 耗时 {latest['duration']/1000:.1f}s，超过 2 分钟")
                 suggestions.append("Checkpoint 耗时过长，考虑启用增量 Checkpoint 或减小状态大小")
-        except Exception:
-            pass
 
-        # 8. Runtime Exceptions（Keyhole — 比 DataSuite 更底层）
-        try:
-            exc_keyhole = _keyhole_get("/exceptions", app_id)
+            exc_keyhole = _keyhole_get(f"/jobs/{_kjid_diag}/exceptions", app_id)
             root_exc = exc_keyhole.get("root-exception", "")
             truncated = root_exc[:500] + "..." if len(root_exc) > 500 else root_exc
             if root_exc:
@@ -1457,10 +1662,10 @@ def _get_instance_info(app_id: int) -> dict:
 
 # ──── Keyhole helpers ────
 
-def _load_keyhole_cookies() -> Dict[str, str]:
+def _load_keyhole_cookies(force: bool = False, auth_failed: bool = False) -> Dict[str, str]:
     merged: Dict[str, str] = {}
     for domain in KEYHOLE_DOMAINS:
-        result = get_auth(domain)
+        result = get_auth(domain, force=force, auth_failed=auth_failed)
         merged.update(result.cookies)
     return merged
 
@@ -1471,6 +1676,22 @@ def _parse_keyhole_params(keyhole_url: str) -> Dict[str, str]:
     return {k: v[0] for k, v in qs.items()}
 
 
+def _keyhole_rest_base(keyhole_url: str) -> str:
+    """Flink REST 在 Keyhole 下的根路径。
+
+    实例 `webKeyholeTrackUrl` 常带一段 path 作为代理前缀；原先固定拼在 KEYHOLE_HOST 根上会导致 302 链或 SSO 死循环。
+    若 path 过短（多为 UI 路由），仍回退到 KEYHOLE_BASE。
+    """
+    parsed = urlparse(keyhole_url)
+    slug = (parsed.path or "").strip("/")
+    if not slug:
+        return KEYHOLE_BASE.rstrip("/")
+    # 多段 path 或较长单段：视为代理前缀，与 Flink 相对路径拼接
+    if slug.count("/") >= 1 or len(slug) >= 20:
+        return f"{parsed.scheme}://{parsed.netloc}/{slug}".rstrip("/")
+    return KEYHOLE_BASE.rstrip("/")
+
+
 def _keyhole_get(path: str, app_id: int) -> Any:
     """通过 Keyhole 代理调用 Flink REST API。"""
     info = _get_instance_info(app_id)
@@ -1479,18 +1700,54 @@ def _keyhole_get(path: str, app_id: int) -> Any:
         raise RuntimeError(f"应用 {app_id} 无 Keyhole URL（无运行实例或非 YARN 部署）")
 
     params = _parse_keyhole_params(kurl)
-    cookies = _load_keyhole_cookies()
+    base = _keyhole_rest_base(kurl)
+    root = base + "/"
+    rel = path.lstrip("/")
+    url = urljoin(root, rel)
     headers = {**HEADERS, "referer": kurl}
 
-    resp = http_requests.get(
-        KEYHOLE_BASE + path,
-        params=params,
-        cookies=cookies,
-        headers=headers,
-        timeout=30,
-    )
-    resp.raise_for_status()
-    return resp.json()
+    for attempt in range(MAX_RETRIES + 1):
+        force = attempt > 0
+        auth_failed = attempt > 0
+        cookies = _load_keyhole_cookies(force=force, auth_failed=auth_failed)
+        try:
+            resp = http_requests.get(
+                url,
+                params=params,
+                cookies=cookies,
+                headers=headers,
+                timeout=30,
+            )
+            resp.raise_for_status()
+            return resp.json()
+        except http_requests.RequestException as e:
+            msg = str(e)
+            r = getattr(e, "response", None)
+            sc = r.status_code if isinstance(r, http_requests.Response) else None
+            hist = getattr(r, "history", None) or []
+            redirect_loop = (
+                "Exceeded 30 redirects" in msg
+                or "TooManyRedirects" in type(e).__name__
+                or (isinstance(r, http_requests.Response) and len(hist) >= 5)
+            )
+            if attempt < MAX_RETRIES and (sc in (401, 403) or redirect_loop):
+                logger.warning(
+                    "[Keyhole] %s 失败 (attempt %s): status=%s redirect_loop=%s，刷新 Cookie 后重试",
+                    url,
+                    attempt + 1,
+                    sc,
+                    redirect_loop,
+                )
+                continue
+            if attempt < MAX_RETRIES:
+                logger.warning("[Keyhole] %s 异常，重试: %s", url, msg[:240])
+                continue
+            raise RuntimeError(
+                f"Keyhole 请求失败: {msg}\n"
+                f"URL: {url}\n"
+                f"若出现 Exceeded 30 redirects：请在 Chrome 登录 data-infra / Keyhole 后重试；"
+                f"仍失败请把 DataSuite 返回的 webKeyholeTrackUrl（可脱敏 path）发给维护者核对路径拼接。"
+            ) from e
 
 
 def _resolve_flink_jid(app_id: int) -> str:

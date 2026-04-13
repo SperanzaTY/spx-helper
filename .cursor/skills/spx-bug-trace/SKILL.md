@@ -36,7 +36,7 @@ git pull origin release
 | `cursor-ide-browser` MCP | 操控浏览器：导航、截图、点击、抓网络请求 |
 | `get_api_lineage` (api-trace MCP) | 快速查 API 血缘：biz_sql、源表、Dynamic WHERE |
 | `api_trace` (api-trace MCP) | 完整溯源 + 直查源表，可传 `custom_where` 和 `api_response_sample` |
-| `query_ck` (ck-query MCP) | 查 ClickHouse：`env=live`(ck2/ck6) 或 `env=test` |
+| `query_ck` / `query_ck_bundle` (ck-query MCP) | 查 ClickHouse：`env=live`(ck2/ck6) 或 `env=test`；若 Agent 调 `query_ck` 参数变 `{}`，改用 **`query_ck_bundle(bundle='{"sql":"...","env":"live","cluster":"ck2"}')`** |
 | `query_presto` (presto-query MCP) | 查 Presto：离线宽表、维表、源表验证；**Flink 平台 connector 血缘**见下文 **Hive：`ods_flink_platform_connector_metadata_df`** |
 | `search_flink_apps` (flink-query MCP) | 搜索 Flink 流/批任务，按关键词 + project_name 模糊匹配 |
 | `diagnose_flink_app` (flink-query MCP) | 一键诊断 Flink 应用：聚合 DataSuite + Keyhole + Grafana 全栈数据 |
@@ -189,7 +189,7 @@ search_flink_apps(keyword="<snake_case 核心表名片段>", project_name="spx_m
 query_messages_sqlite(keyword="<表名或任务名片段>", hours=720, limit=20)
 ```
 
-告警消息中包含完整的任务名和 appId（如 `Job Link:https://datasuite.shopee.io/flink/operation/stream/708245`），可直接提取 appId。同时可从告警时间线判断任务是否在持续运行或已停止。
+告警消息中常含 DataSuite 链接与 appId。链接可能是旧式 `.../flink/operation/stream/{appId}`，或新式 `.../flink/operation/application?operationType=stream&appId={appId}&project_code=...`；均可从路径末段或 `appId` 查询参数提取 appId。同时可从告警时间线判断任务是否在持续运行或已停止。
 
 **Step 3：一键诊断或逐项检查**
 
@@ -559,7 +559,7 @@ WHERE <分区条件>
 
 **CK 表**（`spx_mart_manage_app`、含 `{region}` 占位符）：
 ```
-query_ck(env=live, cluster=<ck2 或 ck6>, sql="SELECT ...")
+query_ck(sql="SELECT ...", env="live", cluster="<ck2 或 ck6>")；若工具参数被序列化为空，用 query_ck_bundle(bundle='{"sql":"SELECT ...","env":"live","cluster":"ck2"}')
 ```
 > 接口查到的是读集群，我们直查写集群；cluster 由 ds_id 映射决定（107/110/112/119→ck2，114/115/122→ck6），`api_trace`/`get_api_lineage` 会自动建议；`spx_mart_pub` 为 TEST，用 env=test 直连
 

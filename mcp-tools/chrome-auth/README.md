@@ -128,7 +128,7 @@ class AuthResult:
 
 刷新链路（按安静程度优先）：
 
-1. **CDP**：对每个可达调试端口依次尝试在**隐藏标签**内 `Page.navigate`（成功后会关闭该标签），**不抢前台**。请尽量用 **Chrome** 带 `--remote-debugging-port=9222` 启动，并设置 `CHROME_CDP_PORT=9222`，避免只连到 SeaTalk 等 Electron 端口时与 Chrome Cookie 罐不一致。
+1. **CDP**：对每个可达调试端口依次尝试在**隐藏标签**内 `Page.navigate`（成功后会关闭该标签），**不抢前台**。请尽量用 **Chrome** 带 `--remote-debugging-port=9222` 启动，并设置 `CHROME_CDP_PORT=9222`，避免只连到 SeaTalk 等 Electron 端口时与 Chrome Cookie 罐不一致。`data-infra` / Keyhole 相关域的续期导航指向 **Keyhole 站点根**（`https://keyhole.data-infra.shopee.io/`），不会再去打开 `https://data-infra.shopee.io/` 根路径（该地址通常不是你要看的 Flink 页）。
 2. **macOS `open -g`**：无 CDP 时，用系统 `open -g -a "Google Chrome" <url>` 在**后台**打开页面，**不将 Chrome 置前**，通常无明显弹窗感（可能多一个后台标签页）。可用环境变量 `CHROME_AUTH_BROWSER_APP` 指定浏览器名（如 `Chromium`）。
 3. **AppleScript（最后手段）**：会新建可见标签并等待，较打扰。若完全不要此步，可设置 `CHROME_AUTH_DISABLE_APPLESCRIPT=1`；若需禁用 `open -g` 试验，可设 `CHROME_AUTH_DISABLE_OPEN_G=1`。
 

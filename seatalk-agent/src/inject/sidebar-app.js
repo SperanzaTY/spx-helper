@@ -82,7 +82,6 @@
   var cachedModels = { models: [], currentModelId: '' };
   var cachedWorkspace = '', cachedWorkspaceList = [];
   var panelHandle = null, messagesEl = null, inputEl = null, sendBtn = null, stopBtn = null;
-  var statusDot = null, statusText = null;
   /** Last context-window stats from ACP usage_update; turn total from prompt result (fallback when size is 0). */
   var _usageCtxSize = 0, _usageCtxUsed = 0, _usageTurnTotal = 0;
   var modeSelect = null, modelSelect = null, ctxBar = null, ctxLabel = null;
@@ -377,10 +376,6 @@
     // Agent rail: same control pattern as createSidebarButton — div.cursor-sidebar-btn (see cursor-ui.js)
     '#spx-agent-rail.spx-agent-rail { position:relative; z-index:10050; pointer-events:auto; -webkit-app-region:no-drag; flex:1 1 auto; display:flex; flex-direction:column; align-items:center; min-height:0; width:100%; box-sizing:border-box; overflow:visible; }' +
     '#spx-agent-rail .cursor-sidebar-btn { margin:4px 0; flex-shrink:0; }' +
-    '.spx-agent-rail-top { flex:0 0 auto; display:flex; flex-direction:column; align-items:center; padding-top:4px; }' +
-    '.spx-agent-rail .cursor-status-text { display:none !important; }' +
-    '#spx-agent-rail .cursor-sidebar-btn.spx-agent-status-btn { display:flex; align-items:center; justify-content:center; }' +
-    '.spx-agent-rail .cursor-sidebar-btn.spx-agent-status-btn .cursor-status-dot { margin:0; }' +
     '.spx-agent-rail-footer { flex:0 0 auto; margin-top:auto; display:flex; flex-direction:column; align-items:center; gap:4px; width:100%; padding:6px 0 4px; }' +
     '#spx-agent-rail .cursor-sidebar-btn.spx-agent-ver-btn { width:auto; min-width:32px; max-width:56px; min-height:28px; height:auto; padding:3px 4px; font-size:9px; line-height:1.2; font-weight:500; justify-content:center; text-align:center; color:rgba(255,255,255,0.72); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; border-radius:6px; transition:background .15s,border-color .15s,box-shadow .2s,color .15s; }' +
     '#spx-agent-rail .cursor-sidebar-btn.spx-agent-ver-btn:hover { color:#fff; background:rgba(255,255,255,0.06); }' +
@@ -1169,8 +1164,6 @@
       } else if (d.type === 'status') {
         var wasDisconnected = !cachedStatus.connected;
         cachedStatus = { connected: !!d.connected, text: d.text || (d.connected ? 'Connected' : 'Disconnected') };
-        if (statusDot) statusDot.className = 'cursor-status-dot ' + (cachedStatus.connected ? 'on' : 'off');
-        if (statusText) statusText.textContent = cachedStatus.text;
         updatePanelAcpStatus();
         updateSidebarBtnStatus();
         if (wasDisconnected && cachedStatus.connected && _restartTimer) {
@@ -1472,8 +1465,6 @@
 
   window.__agentSetStatus = function (connected, text) {
     cachedStatus = { connected: connected, text: text || (connected ? 'Connected' : 'Disconnected') };
-    if (statusDot) statusDot.className = 'cursor-status-dot ' + (connected ? 'on' : 'off');
-    if (statusText) statusText.textContent = cachedStatus.text;
     updatePanelAcpStatus();
     updateSidebarBtnStatus();
   };
@@ -3028,12 +3019,6 @@
     rail.id = 'spx-agent-rail';
     rail.className = 'spx-agent-rail';
     rail.innerHTML =
-      '<div class="spx-agent-rail-top">' +
-        '<div class="cursor-sidebar-btn spx-agent-status-btn" title="连接状态（点击打开对话面板）" role="button" tabindex="0">' +
-          '<span class="cursor-status-dot none"></span>' +
-        '</div>' +
-        '<span class="cursor-status-text" style="display:none">...</span>' +
-      '</div>' +
       '<div class="spx-agent-rail-footer">' +
         '<div class="cursor-sidebar-btn spx-agent-ver-btn" title="当前版本">v...</div>' +
         '<div class="spx-rail-settings-wrap">' +
@@ -3060,8 +3045,6 @@
       SIDEBAR.appendChild(rail);
     }
 
-    statusDot = rail.querySelector('.cursor-status-dot');
-    statusText = rail.querySelector('.cursor-status-text');
     verBadgeEl = rail.querySelector('.spx-agent-ver-btn');
     settingsBtn = rail.querySelector('.spx-agent-gear-btn');
     settingsDd = rail.querySelector('.spx-rail-settings-dd');
@@ -3102,8 +3085,6 @@
     bindGrantToggle();
     updateGrantToggle();
 
-    statusDot.className = 'cursor-status-dot ' + (cachedStatus.connected ? 'on' : 'off');
-    statusText.textContent = cachedStatus.text;
     updateVerBadge();
 
     verBadgeEl.addEventListener('click', function (ev) {
@@ -3111,25 +3092,6 @@
       ev.preventDefault();
       showRailUpdatePopover(verBadgeEl);
     });
-
-    var statusBtnEl = rail.querySelector('.spx-agent-status-btn');
-    if (statusBtnEl) {
-      statusBtnEl.addEventListener(
-        'click',
-        function (e) {
-          e.preventDefault();
-          e.stopPropagation();
-          if (typeof window.__agentToggle === 'function') window.__agentToggle(true);
-        },
-        true
-      );
-      statusBtnEl.addEventListener('keydown', function (e) {
-        if (e.key !== 'Enter' && e.key !== ' ') return;
-        e.preventDefault();
-        e.stopPropagation();
-        if (typeof window.__agentToggle === 'function') window.__agentToggle(true);
-      });
-    }
 
     function toggleRailSettingsDd() {
       if (!settingsDd) return;
@@ -3602,8 +3564,6 @@
     });
 
     mountSeatalkAgentRail();
-    if (statusDot) statusDot.className = 'cursor-status-dot ' + (cachedStatus.connected ? 'on' : 'off');
-    if (statusText) statusText.textContent = cachedStatus.text;
     updateVerBadge();
 
     inputEl.focus();

@@ -6,6 +6,57 @@
 
 ---
 
+## v3.5.15 -- 2026-04-13 -- `feat`: Flink 诊断与运营页链接、CK 单参查询、chrome-auth SSO
+
+**提交者**: @tianyi.liang
+**Commit Type**: feat
+**修改模块**: MCP（chrome-auth、flink-query、ck-query）、SeaTalk Agent 注入、Cursor Skill、文档
+
+### 变更说明
+
+**版本号**
+
+- `chrome-extension/manifest.json`、`package.json`、`seatalk-agent/package.json`：`3.5.14` → `3.5.15`
+
+**MCP：chrome-auth**
+
+- `cdp_provider.py`：`data-infra` / Keyhole 域 SSO 静默续期改为打开 `https://keyhole.data-infra.shopee.io/`，不再使用 `https://data-infra.shopee.io/` 根路径；`keyhole.data-infra.shopee.io` 单独配置并置于匹配顺序前
+- `README.md`：自动刷新说明与上述行为一致
+
+**MCP：flink-query**
+
+- `diagnose_flink_app`：聚合 DataSuite Graph Monitor（graph-config + task-metrics）摘要；高背压写入 issues/suggestions；内部 `_summarize_graph_monitor` 等
+- `_flink_app_operation_url`：`get_flink_app_detail`、`search_flink_apps` 的 `url` 与运营页 `/flink/operation/application?operationType=...&appId=...&project_code=...` 一致
+- Keyhole：`webKeyholeTrackUrl` REST 路径前缀推断；`diagnose_flink_app` 中 Keyhole 与 Phase 4 对齐为 `/jobs/{jid}/...`；README 排障与 Changelog
+
+**MCP：ck-query**
+
+- `query_ck`：`sql`/`env` 无默认值必填（Schema required）；`query_ck_bundle(bundle)` 单 JSON 字符串参数兜底；README 说明
+
+**SeaTalk Agent**
+
+- `sidebar-app.js`：精简左侧 rail 顶部连接状态入口（移除状态点、文案及相关样式与事件）
+
+**Cursor Skill 与顶层文档**
+
+- `spx-bug-trace`、`flink-alert-triage`：DataSuite 链接与 `query_ck_bundle` 说明
+- `docs/guides/MCP_TOOLS.md`、`SKILL.md`、`SEATALK_AGENT.md`、`INSTALL.md`、`CHROME_EXTENSION.md`（扩展指南版本号与 v3.5.15 说明）
+
+### 测试情况
+
+| 测试项 | 结果 | 备注 |
+|--------|------|------|
+| `python3 -m py_compile`（`ck_mcp_server.py`、`flink_mcp_server.py`） | [OK] | |
+| `query_ck` / `query_ck_bundle`（live、ck2） | [OK] | 本机 MCP 下 `SELECT 1` / `SELECT 2` |
+| SeaTalk Agent | [NOTE] | 需重启 Agent 后验证 rail |
+
+### 特别注意
+
+- 使用 `flink-query`、`ck-query` 请在 Cursor MCP 中刷新子进程
+- SeaTalk Agent 用户请重启 `seatalk` 或面板更新
+
+---
+
 ## v3.5.14 -- 2026-04-10 -- `feat`: 相对远程 release（v3.5.13）的增量
 
 **提交者**: @tianyi.liang

@@ -37,7 +37,21 @@
 | `database` | string | 否 | 数据库名，默认取集群配置 |
 | `max_rows` | int | 否 | 最大返回行数，默认 200 |
 
-> 当 `sql` 或 `env` 未传入时，工具会返回自我纠正提示（含示例），引导模型重试。
+> `sql`、`env` 为无默认值的必填参数（Schema 含 `required`）。若 **Cursor Agent 仍把多参数调用序列化成空对象**（`input_value={}`），请改用下面的 **`query_ck_bundle`**：只需一个字符串参数，把整份 JSON 放进 `bundle`。
+
+### `query_ck_bundle`
+
+与 `query_ck` 等价，但**只接收一个参数** `bundle`（JSON 对象字符串），用于规避部分环境下 Agent 多参数工具调用丢失字段的问题。
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `bundle` | string | 是 | 例如 `{"sql":"SELECT 1","env":"live","cluster":"ck2"}`，可选键：`database`、`max_rows` |
+
+示例 `bundle` 内容：
+
+```json
+{"sql":"SELECT station_id, count() FROM db.t FINAL WHERE station_id=26252 GROUP BY station_id","env":"live","cluster":"ck2","max_rows":200}
+```
 
 ## 可用集群
 

@@ -24,6 +24,7 @@ cluster 可选值：
 
 import asyncio
 import base64
+import json
 from typing import Optional
 
 import requests
@@ -247,35 +248,22 @@ def format_result_as_table(columns: list, rows: list) -> str:
     return "\n".join(lines)
 
 
-@mcp.tool()
-async def query_ck(
-    sql: str = "",
-    env: str = "",
-    cluster: Optional[str] = None,
-    database: Optional[str] = None,
-    max_rows: int = 200
+async def _run_query_ck_impl(
+    sql: str,
+    env: str,
+    cluster: Optional[str],
+    database: Optional[str],
+    max_rows: int,
 ) -> str:
-    """Query ClickHouse via HTTP + Basic Auth.
-
-    IMPORTANT: sql and env are REQUIRED. You MUST provide them in every call.
-
-    Args:
-        sql: SQL statement (REQUIRED)
-        env: "live" or "test" (REQUIRED)
-        cluster: cluster name (REQUIRED when env=live): ddc, ck2, ck5, ck6, ck7, online_2/4/5/6/7
-        database: override default database (optional)
-        max_rows: max rows to return (default 200)
-
-    Cluster info: test=spx_mart_pub, ck2/ck6=write clusters (most tables), ck5/ck7=read clusters (subset).
-    If ck5/ck7 returns UNKNOWN_TABLE, use ck2/ck6 instead.
-    """
-    if not sql or not env:
+    if not str(sql).strip() or not str(env).strip():
         return (
-            "ERROR: sql and env parameters are REQUIRED but were not provided.\n"
-            "You MUST call this tool with both parameters.\n\n"
-            "Example:\n"
+            "ERROR: sql and env are REQUIRED but were empty.\n"
+            "If Cursor Agent keeps sending empty arguments to query_ck, use tool **query_ck_bundle** "
+            "with a single JSON string in `bundle` instead.\n\n"
+            "Example for query_ck:\n"
             '  {"sql": "SELECT count() FROM spx_mart_manage_app.your_table", "env": "live", "cluster": "ck2"}\n\n'
-            "Please retry with the correct parameters."
+            "Example for query_ck_bundle: pass one argument `bundle` whose value is the JSON text:\n"
+            '  {"sql":"SELECT 1","env":"live","cluster":"ck2"}\n'
         )
 
     if env == "test":
@@ -305,6 +293,79 @@ async def query_ck(
         output += f"⚠️ 已截断（前 {max_rows} 行）\n"
     output += f"\n{table}"
     return output
+
+
+@mcp.tool()
+async def query_ck(
+    sql: str,
+    env: str,
+    cluster: Optional[str] = None,
+    database: Optional[str] = None,
+    max_rows: int = 200,
+) -> str:
+    """Query ClickHouse via HTTP + Basic Auth.
+
+    IMPORTANT: sql and env are REQUIRED. You MUST provide them in every call.
+
+    Args:
+        sql: SQL statement (REQUIRED)
+        env: "live" or "test" (REQUIRED)
+        cluster: cluster name (REQUIRED when env=live): ddc, ck2, ck5, ck6, ck7, online_2/4/5/6/7
+        database: override default database (optional)
+        max_rows: max rows to return (default 200)
+
+    Cluster info: test=spx_mart_pub, ck2/ck6=write clusters (most tables), ck5/ck7=read clusters (subset).
+    If ck5/ck7 returns UNKNOWN_TABLE, use ck2/ck6 instead.
+
+    If Cursor Agent passes empty arguments (e.g. input_value={}), use **query_ck_bundle** instead.
+    """
+    return await _run_query_ck_impl(sql, env, cluster, database, max_rows)
+
+
+@mcp.tool()
+async def query_ck_bundle(bundle: str) -> str:
+    """Same as query_ck, but all arguments in ONE JSON string (workaround for Agent sending empty braces to query_ck).
+
+    Pass bundle as a single JSON object string with keys: sql (required), env (required),
+    cluster (required when env=live), database (optional), max_rows (optional, default 200).
+
+    Example bundle string: {"sql":"SELECT 1","env":"live","cluster":"ck2"}
+    """
+    raw = (bundle or "").strip()
+    if not raw:
+        return (
+            "ERROR: bundle is empty.\n"
+            "Pass one JSON object string, e.g. "
+            '\'{"sql":"SELECT 1","env":"live","cluster":"ck2"}\''
+        )
+    try:
+        obj = json.loads(raw)
+    except json.JSONDecodeError as e:
+        return (
+            f"ERROR: bundle is not valid JSON: {e}\n"
+            f"First 400 chars of bundle:\n{raw[:400]}"
+        )
+    if not isinstance(obj, dict):
+        return "ERROR: bundle JSON must be an object, e.g. {\"sql\":\"...\",\"env\":\"live\"}"
+
+    sql = str(obj.get("sql", "")).strip()
+    env = str(obj.get("env", "")).strip()
+    cluster = obj.get("cluster")
+    if cluster is not None and cluster != "":
+        cluster = str(cluster)
+    else:
+        cluster = None
+    database = obj.get("database")
+    if database is not None and database != "":
+        database = str(database)
+    else:
+        database = None
+    try:
+        max_rows = int(obj.get("max_rows", 200))
+    except (TypeError, ValueError):
+        max_rows = 200
+
+    return await _run_query_ck_impl(sql, env, cluster, database, max_rows)
 
 
 def main():
