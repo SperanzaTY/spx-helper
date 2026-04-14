@@ -128,13 +128,13 @@ class AuthResult:
 
 刷新链路（按安静程度优先）：
 
-1. **CDP**：对每个可达调试端口依次尝试在**隐藏标签**内 `Page.navigate`（成功后会关闭该标签），**不抢前台**。请尽量用 **Chrome** 带 `--remote-debugging-port=9222` 启动，并设置 `CHROME_CDP_PORT=9222`，避免只连到 SeaTalk 等 Electron 端口时与 Chrome Cookie 罐不一致。`data-infra` / Keyhole 相关域的续期导航指向 **Keyhole 站点根**（`https://keyhole.data-infra.shopee.io/`），不会再去打开 `https://data-infra.shopee.io/` 根路径（该地址通常不是你要看的 Flink 页）。
+1. **CDP**：对每个可达调试端口依次创建 **CDP `hidden` 目标**（不出现在标签栏，避免 Chrome 抢前台），再 `Page.navigate` 到续期 URL，成功后 `Target.closeTarget`。若当前 Chrome 版本不支持 `hidden`，会降级为普通新标签（可能短暂激活窗口）。请尽量用 **Chrome** 带 `--remote-debugging-port=9222` 启动，并设置 `CHROME_CDP_PORT=9222`，避免只连到 SeaTalk 等 Electron 端口时与 Chrome Cookie 罐不一致。`data-infra` / Keyhole 相关域的续期导航指向 **Keyhole 站点根**（`https://keyhole.data-infra.shopee.io/`），不会再去打开 `https://data-infra.shopee.io/` 根路径（该地址通常不是你要看的 Flink 页）。
 2. **macOS `open -g`**：无 CDP 时，用系统 `open -g -a "Google Chrome" <url>` 在**后台**打开页面，**不将 Chrome 置前**，通常无明显弹窗感（可能多一个后台标签页）。可用环境变量 `CHROME_AUTH_BROWSER_APP` 指定浏览器名（如 `Chromium`）。
 3. **AppleScript（最后手段）**：会新建可见标签并等待，较打扰。若完全不要此步，可设置 `CHROME_AUTH_DISABLE_APPLESCRIPT=1`；若需禁用 `open -g` 试验，可设 `CHROME_AUTH_DISABLE_OPEN_G=1`。
 
 刷新成功后重新读取 Cookie，对调用方透明。每个域名有 **60 秒冷却期**防止频繁刷新；**但若调用方传入 `auth_failed=True`（例如 HTTP 401/403 后重试），会跳过冷却**，保证每次鉴权失败都能再触发一轮静默导航。
 
-**DataSuite 域名**（`datasuite.shopee.io`）会按顺序尝试多个落地页：`/flink/` → `/scheduler/` → `/`，避免单一入口在部分网络下无法完成续期。
+**DataSuite 域名**（`datasuite.shopee.io`）会按顺序尝试多个落地页：`/scheduler/` → `/` → `/flink/`，避免单一入口在部分网络下无法完成续期。
 
 401 时 MCP 会通过 **`format_auth_troubleshoot`** 输出结构化说明（`CHROME_CDP_PORT`、可达 CDP 端口、本次静默刷新是否成功、关键 Cookie 是否齐全），便于区分「未连上 CDP」与「会话已彻底失效需人工登录」。
 

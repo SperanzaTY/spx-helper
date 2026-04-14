@@ -15,7 +15,7 @@ dependencies = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["."]
-only-include = ["scheduler_mcp_server.py"]
+only-include = ["scheduler_mcp_server.py", "scheduler_task_code.py"]
 
 [project.scripts]
 scheduler-mcp = "scheduler_mcp_server:main"

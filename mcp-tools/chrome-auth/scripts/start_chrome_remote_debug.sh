@@ -29,7 +29,8 @@ fi
 open -a "Google Chrome" --args --remote-debugging-port=9222
 
 echo "[INFO] 已启动 Chrome（远程调试 9222）。请在 Chrome 中打开并登录："
-echo "       https://datasuite.shopee.io/flink/"
+echo "       https://datasuite.shopee.io/scheduler/ （推荐，Scheduler API 与 MCP 一致）"
+echo "       或 https://datasuite.shopee.io/ 根站"
 echo ""
 
 for i in $(seq 1 60); do

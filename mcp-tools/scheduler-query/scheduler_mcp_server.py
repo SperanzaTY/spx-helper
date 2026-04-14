@@ -19,6 +19,8 @@ from chrome_auth import get_auth, AuthResult
 from chrome_auth.diagnostic import format_auth_troubleshoot
 from mcp.server.fastmcp import FastMCP
 
+from scheduler_task_code import extract_task_code as _extract_task_code
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -821,25 +823,6 @@ def _spark_history_get(app_id: str, endpoint: str = "", timeout: int = 30) -> di
     return resp.json()
 
 
-def _extract_task_code(task_instance_code: str) -> str:
-    """从实例编码中提取任务编码。
-    例: 'twbi_spx_ops.studio_6786158_202604012010_MINUTE_1' -> 'twbi_spx_ops.studio_6786158'
-    """
-    parts = task_instance_code.split(".")
-    if len(parts) < 2:
-        return task_instance_code
-    project = parts[0]
-    rest = ".".join(parts[1:])
-    tokens = rest.split("_")
-    # studio_{数字} 后面的都是实例标识
-    for i, tok in enumerate(tokens):
-        if i > 0 and tok.isdigit():
-            # 检查下一个 token 是否像时间戳（纯数字且 >= 8 位）
-            if i + 1 < len(tokens) and len(tokens[i + 1]) >= 8 and tokens[i + 1].isdigit():
-                return f"{project}.{'_'.join(tokens[:i+1])}"
-    return task_instance_code
-
-
 def _get_instance_yarn_id(task_instance_code: str, env: str = "prod") -> Optional[str]:
     """从 Scheduler 实例详情 API 获取 yarnApplicationId (即 Presto Query ID)。"""
     task_code = _extract_task_code(task_instance_code)
@@ -847,7 +830,11 @@ def _get_instance_yarn_id(task_instance_code: str, env: str = "prod") -> Optiona
         "taskCode": task_code,
         "taskInstanceCode": task_instance_code,
     }, env=env)
-    inst = data.get("data", {})
+    if not isinstance(data, dict):
+        return None
+    inst = data.get("data")
+    if not isinstance(inst, dict):
+        return None
     return inst.get("yarnApplicationId")
 
 
@@ -876,7 +863,23 @@ def get_instance_detail(task_instance_code: str, env: str = "prod") -> str:
             "taskCode": task_code,
             "taskInstanceCode": task_instance_code,
         }, env=env)
-        inst = data.get("data", {})
+        if not isinstance(data, dict):
+            return json.dumps(
+                {"error": f"Scheduler 返回非对象: {type(data).__name__}", "task_code_used": task_code},
+                ensure_ascii=False,
+            )
+        raw = data.get("data")
+        if raw is None:
+            return json.dumps(
+                {
+                    "error": "Scheduler 返回 data 为空（常见为 taskCode 与实例不匹配）",
+                    "task_code_used": task_code,
+                    "task_instance_code": task_instance_code,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        inst = raw if isinstance(raw, dict) else {}
 
         status_code = inst.get("instanceStatus", 0)
         yarn_id = inst.get("yarnApplicationId")

@@ -6,6 +6,37 @@
 
 ---
 
+## v3.5.18 -- 2026-04-14 -- `fix` + `feat`: chrome-auth CDP hidden 续期；scheduler 实例编码解析
+
+**提交者**: @tianyi.liang  
+**Commit Type**: fix（chrome-auth）+ feat（scheduler-query）；相对已发布 **v3.5.17** 仅升一次 PATCH 至 **v3.5.18**（未推送前不叠版本号）
+
+### 变更说明
+
+**chrome-auth（fix）**
+
+- **根因**：`Target.createTarget({url: about:blank})` 会打开**可见新标签**，Chrome 在 macOS 上常**激活该标签并抬高窗口**，与「静默续期」预期不符。
+- **修复**：`cdp_provider._create_refresh_target` 优先 **`hidden: true` + `background: true`**，失败降级为 `background: true`、再降级旧参数。
+- **`start_chrome_remote_debug.sh`**：登录提示优先 **Scheduler** 与根站（与 MCP 场景一致）。
+- **文档**：`chrome-auth` README、`MCP_TOOLS.md`、`flink-query` README。
+
+**scheduler-query（feat）**
+
+- 新增 **`scheduler_task_code.py`**：`extract_task_code` 优先匹配 `...studio_<数字>_` 后缀（覆盖 DAY/HOUR/MINUTE/MONTH/WEEK/YEAR 等）、再匹配 `...etl_batch.<数字>_`，否则回退旧逻辑。
+- **`scheduler_mcp_server.py`**：改为引用该模块。
+- **`pyproject.toml`**：`only-include` 含 `scheduler_task_code.py`。
+- **`README.md`**：实例编码与 taskCode 说明表；本地测试命令。
+- **`tests/test_extract_task_code.py`**：9 条用例。
+
+**版本号**：`3.5.17` → `3.5.18`（manifest、根 package.json、seatalk-agent/package.json；扩展无功能代码变更）
+
+### 测试项
+
+- `python3 -m py_compile mcp-tools/chrome-auth/chrome_auth/cdp_provider.py`
+- `cd mcp-tools/scheduler-query && python3 tests/test_extract_task_code.py`
+
+---
+
 ## v3.5.17 -- 2026-04-14 -- `feat`: chrome-auth 401 体验（诊断 + DataSuite 多 URL 刷新 + 跳过冷却）
 
 **提交者**: @tianyi.liang  

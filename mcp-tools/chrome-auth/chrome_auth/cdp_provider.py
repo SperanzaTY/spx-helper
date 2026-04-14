@@ -28,9 +28,9 @@ _SSO_REFRESH_DOMAINS = (
 # 多 URL：401 时依次尝试，避免单一落地页在部分网络下无法完成 SSO
 _SSO_REFRESH_URL_CHAINS: Dict[str, List[str]] = {
     "datasuite.shopee.io": [
-        "https://datasuite.shopee.io/flink/",
         "https://datasuite.shopee.io/scheduler/",
         "https://datasuite.shopee.io/",
+        "https://datasuite.shopee.io/flink/",
     ],
 }
 
@@ -436,8 +436,35 @@ def get_header(
     return None
 
 
+def _create_refresh_target(control_ws_url: str) -> Optional[str]:
+    """Create a page target for SSO refresh. Prefer CDP *hidden* target (no tab in strip, no focus steal).
+
+    Plain ``Target.createTarget({url: about:blank})`` opens a **visible** new tab; Chrome on macOS
+    typically **activates that tab and raises the window** — users perceive this as "every MCP call
+    pops Chrome". Protocol allows ``hidden: true`` (not shown in tab UI); it must not be combined
+    with ``background: false`` (see Target.createTarget). We try hidden first, then degrade.
+    """
+    attempts: List[Dict[str, Any]] = [
+        {"url": "about:blank", "hidden": True, "background": True},
+        {"url": "about:blank", "background": True},
+        {"url": "about:blank"},
+    ]
+    for params in attempts:
+        try:
+            result = _cdp_call(control_ws_url, "Target.createTarget", params, timeout=15)
+            tid = (result or {}).get("targetId")
+            if tid:
+                if params.get("hidden"):
+                    logger.info("Target.createTarget: using hidden target for SSO refresh")
+                return str(tid)
+        except Exception as e:
+            logger.debug("Target.createTarget failed params=%s: %s", params, e)
+            continue
+    return None
+
+
 def _try_cdp_refresh_on_port(url: str, port: int, timeout: float) -> bool:
-    """Single-port: Target.createTarget + Page.navigate (tab is closed afterward; no window focus steal)."""
+    """Single-port: hidden Target (preferred) + Page.navigate; tab/target closed afterward."""
     page = _pick_page_for_cookie_read(port, "")
     if not page:
         logger.debug("_try_cdp_refresh: no debuggable target on port %d", port)
@@ -447,15 +474,9 @@ def _try_cdp_refresh_on_port(url: str, port: int, timeout: float) -> bool:
     if not control_ws_url:
         return False
 
-    target_id = None
-    try:
-        result = _cdp_call(control_ws_url, "Target.createTarget", {"url": "about:blank"})
-        target_id = result.get("targetId")
-        if not target_id:
-            logger.debug("_try_cdp_refresh: Target.createTarget returned no targetId")
-            return False
-    except Exception as e:
-        logger.debug("_try_cdp_refresh: failed to create tab on port %d: %s", port, e)
+    target_id = _create_refresh_target(control_ws_url)
+    if not target_id:
+        logger.debug("_try_cdp_refresh: could not create refresh target on port %d", port)
         return False
 
     try:

@@ -45,6 +45,32 @@
 
 > 替换 `/你的路径/spx-helper` 为实际的项目路径。使用方式二前需先 `pip install -e chrome-auth`。
 
+## 实例编码（taskInstanceCode）与 taskCode
+
+`get_instance_detail`、`get_presto_query_sql`（传 `task_instance_code`）等会先根据实例编码解析 **taskCode**，再请求 Scheduler 的 `/taskInstance/get`。解析规则与调度周期（天/小时/分钟/月等）无关，只要满足「固定任务前缀 + 下划线后缀」即可。
+
+### Studio 任务（`{project}.studio_{数字}_...`）
+
+| 周期 | 实例编码示例 | 解析得到的 taskCode |
+|------|----------------|---------------------|
+| 天 | `spx_mart.studio_10429983_20260401_DAY_1` | `spx_mart.studio_10429983` |
+| 小时 | `regops_spx.studio_10628558_2026041417_HOUR_1` | `regops_spx.studio_10628558` |
+| 分钟 | `twbi_spx_ops.studio_6786158_202604012010_MINUTE_1` | `twbi_spx_ops.studio_6786158` |
+| 月 | `idecbi_sc.studio_8044569_202604_MONTH_1` | `idecbi_sc.studio_8044569` |
+| 周/年等 | `proj.studio_1_2026_WEEK_3_1`、`proj.studio_1_2026_YEAR_1` | `proj.studio_1` |
+
+业务时间字段可能是 `YYYYMMDD`、`YYYYMMDDHH`、`YYYYMMDDHHMM`、`YYYYMM` 等纯数字，**不能**仅靠「下一段是否为 8 位数字」推断 taskCode；实现上优先匹配 `...studio_<数字>_` 后的整段后缀。
+
+### DataHub 批任务（`...etl_batch.{数字}_...`）
+
+| 实例编码示例 | taskCode |
+|--------------|----------|
+| `spx_mart.datahub.etl_batch.281196_20260101_DAY_1` | `spx_mart.datahub.etl_batch.281196` |
+
+其它命名形态若无法匹配上述规则，会回退到旧逻辑（兼容部分非标准 studio 实例）；仍无法解析时 **taskCode 与实例编码相同**，可能导致接口返回 `data: null`，需对照 Scheduler 页面上的任务编码核对。
+
+本地校验解析规则（无需 MCP 依赖）：在 `mcp-tools/scheduler-query` 目录执行 `python3 tests/test_extract_task_code.py`。
+
 ## 工具列表
 
 ### Scheduler 任务管理

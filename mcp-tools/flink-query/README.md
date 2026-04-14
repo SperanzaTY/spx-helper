@@ -110,7 +110,7 @@ flink-mcp
 
 ## 认证
 
-复用 chrome-auth 库，自动从 Chrome 浏览器读取以下域的 Cookie。v3.5.9 起，遇到 401/403 时会自动尝试 SSO 静默刷新（通过 `auth_failed=True` 触发，且跳过 60s 冷却）；v3.5.17 起 DataSuite 静默导航按 **/flink/ → /scheduler/ → /** 依次尝试，401 报错附带 **CDP 可达性 + 本次刷新结果**（`format_auth_troubleshoot`），大多数情况下无需手动干预。
+复用 chrome-auth 库，自动从 Chrome 浏览器读取以下域的 Cookie。v3.5.9 起，遇到 401/403 时会自动尝试 SSO 静默刷新（通过 `auth_failed=True` 触发，且跳过 60s 冷却）；v3.5.17 起 DataSuite 静默导航按 **/scheduler/ → / → /flink/** 依次尝试；401 报错附带 **CDP 可达性 + 本次刷新结果**（`format_auth_troubleshoot`）。v3.5.18 起 chrome-auth CDP 续期优先使用 **Target.createTarget(hidden)**，避免每次续期弹出可见新标签、Chrome 被顶到最前（不支持时仍可能降级为普通标签）。大多数情况下无需手动干预。
 
 Grafana 侧（`/api/frontend/settings` 解析数据源、`/api/ds/query` 拉指标）已与 DataSuite 请求对齐：401/403 时会 `force` 重读 Cookie 并带 `auth_failed=True` 走同一套刷新逻辑；此前仅 DataSuite 走该路径，容易导致「浏览器里 Grafana 正常、MCP 仍 Unauthorized」。
 
