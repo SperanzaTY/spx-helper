@@ -6,6 +6,42 @@
 
 ---
 
+## v3.5.16 -- 2026-04-14 -- `feat`: Flink/Bug 排查 Skill、`PrestoQueryTool`、文档同步
+
+**提交者**: @tianyi.liang
+**Commit Type**: feat
+**修改模块**: Cursor Skill、MCP（presto-query 辅助类）、顶层与指南文档
+
+### 变更说明
+
+**版本号**
+
+- `chrome-extension/manifest.json`、`package.json`、`seatalk-agent/package.json`：`3.5.15` → `3.5.16`
+
+**Cursor Skill**
+
+- `flink-alert-triage`：Phase 2.0c（L2 输出红线、先拉数再写结论）、DataSuite Job 链接与运营路径说明、DataSuite 可调项与 MCP 对照表、资源右缩与积压治理、`query_ck_bundle`、换实例后指标混窗与 Keyhole 异常说明、报告模板「复核链接」表述等
+- `spx-bug-trace`：Flink appId 与告警链接说明、`query_ck` / `query_ck_bundle`、CK 读/写集群与 `UNKNOWN_TABLE`、FM 表与 `risky_tag` 口径、过程文档路径与示例、常见坑表修正与 MCP 空参回退等
+
+**MCP：presto-query**
+
+- 新增 `presto_query_tool.py`：`PrestoQueryTool` 类，供平台 Agent 等非 MCP 场景以 Python 调用 DataSuite Personal SQL API（凭证由调用方注入）
+
+**文档**
+
+- `README.md`、`docs/guides/SKILL.md`、`docs/guides/MCP_TOOLS.md`、`docs/guides/CHROME_EXTENSION.md`（版本号与 manifest 同步说明）、`mcp-tools/presto-query/README.md`：与上述变更同步
+
+**仓库卫生（误提交排查）**
+
+- `seatalk-agent/` 下已跟踪文件仅为安装脚本、`src/`、`package.json`、`tsconfig.json` 等常规模块；此前误入库的 `lh_trip_*_columns.json` 已在 GitLab `release` 上删除，本地已与 `gitlab/release` 对齐，无其它异常大 JSON 或凭证文件纳入本提交
+
+### 测试项
+
+- `npm run verify:hooks` 通过
+- `python3 -m py_compile mcp-tools/presto-query/presto_query_tool.py` 语法检查
+
+---
+
 ## v3.5.15 -- 2026-04-13 -- `feat`: Flink 诊断与运营页链接、CK 单参查询、chrome-auth SSO
 
 **提交者**: @tianyi.liang

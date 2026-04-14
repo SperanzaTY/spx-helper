@@ -25,6 +25,7 @@ description: SPX Flink 任务告警自动分诊与排查工作流。解析 SeaTa
 3. **跨任务关联** -- 同系列任务（同 task 前缀不同 market）首次告警时主动批量扫描
 4. **降级优雅** -- Cookie 过期时切换到"告警文本分析"模式，不输出空洞的 API 错误
 5. **Flink 深度诊断 MCP 优先** -- L2 用 `diagnose_flink_app`、`get_flink_vertices`、`get_flink_checkpoints`、`get_flink_taskmanagers` 等拉齐事实；**默认不向用户索要** DataSuite 截图（详见 Phase 2.0b、2.3）
+6. **结论闭环在用户侧对话内完成** -- Agent **自己**用 MCP 拉齐可量化事实并下结论；**禁止**把「请你打开 Grafana / Prometheus / Logify 自己看」写进 L2 正文当作主要建议（详见 Phase **2.0c**、2.7）
 
 ---
 
@@ -40,7 +41,7 @@ SeaTalk 告警群中 `flink job alarm` 发送的消息遵循固定格式：
     Alarm Sent Time: {timestamp}
     Message:
     {alert_type}> {threshold_detail}
-    Job Link:https://datasuite.shopee.io/flink/operation/application?operationType=stream&appId={app_id}&project_code=...
+    Job Link:https://datasuite.shopee.io/flink/operation/stream/{app_id}
     PrometheusUrl:{prometheus_url}
 ```
 
@@ -50,7 +51,7 @@ SeaTalk 告警群中 `flink job alarm` 发送的消息遵循固定格式：
     Recover Time:{timestamp}
     Message:
     {alert_type}> {threshold_detail}
-    Job Link:https://datasuite.shopee.io/flink/operation/application?operationType=stream&appId={app_id}&project_code=...
+    Job Link:https://datasuite.shopee.io/flink/operation/stream/{app_id}
     PrometheusUrl:{prometheus_url}
 ```
 
@@ -178,6 +179,25 @@ Job: {job_url}
    - `get_flink_lineage` 若报错，**不阻塞**；血缘以 **`get_flink_vertices` 中 Source/Sink 名称** 为准，Kafka 分区数以运维/控制台为准。
    - `query_flink_logs` 若返回空，**不阻塞**；附上 `get_flink_log_url` / diagnose 中的 **Logify** 链接与时间段，由人工在浏览器查看。
 4. `get_flink_graph_metrics` 若 500，**改用** `get_flink_vertices` + Grafana 链接 + `get_flink_metrics(..., "backpressure")` 继续。
+
+### 2.0c 用户输出红线：Agent 闭环，禁止「你自己去看面板」
+
+**目标**：告警分诊回复的**结论与可执行建议**必须在当前对话内写全；用户**不应**被要求自行去 Grafana / Prometheus / Logify / DataSuite 拓扑里「再确认一遍」才能读懂。
+
+**禁止（L2 正文主体）**：
+
+- 以「请自行打开 Grafana / Prometheus / Logify / DataSuite 查看」作为**主要处理建议**、**唯一后续步骤**或**结论的前提**（例如「建议打开 Grafana 看背压」而正文未给出已拉取的背压数值与判读）。
+- 因 `get_flink_graph_metrics` 500 就**终止**为「无法定位瓶颈」而不再用 `get_flink_vertices` + `get_flink_metrics(..., "backpressure")` + `diagnose_flink_app` 继续。
+
+**必须（MCP 可用时，L2 首次诊断）**：
+
+1. **先拉、再写**：在输出报告前，至少完成 **2.0b** 所列组合的**可用子集**，并把**数字/枚举**写进正文，例如：`get_flink_checkpoints` 的 `latestFailed.failure_message`、`duration` 与 `config.timeout` 是否打满；`diagnose_flink_app` 的 Kafka Lag、背压、Heap、异常摘要；`get_flink_vertices` + `get_flink_job_config` 的**全局并行度与各 Source/Sink 算子并行度**对比；`get_flink_taskmanagers` 的 TM/slot 是否吃满。
+2. **根因句必须有 MCP 锚点**：例如「`Checkpoint expired before completing` 且 duration 约等于 timeout 1800s」+「当前 max_bp / Lag 量级」+「是否存在 TM heartbeat timeout 模式」——**不得**只有泛泛的「可能反压建议加资源」而无上述锚点之一。
+3. **链接降级为附录**：Grafana / Logify / Job URL **仅可**放在报告**末尾**「复核链接」小节，并附**一句**说明：「以上结论已基于 MCP 拉数；链接供 Owner 复核，**非**阅读前提。」
+
+**唯一例外**：
+
+- **Phase 2.8 Cookie 降级** 或 Flink MCP **连续不可用**（401/500 且无替代路径）：允许明确写出「当前 Agent 无法自动拉数」、列出**已失败**的工具名，并给出「刷新 Cookie / 值班上 DataSuite」的**最小**人工步骤；仍应先 `query_messages_sqlite` 补历史告警与复发模式。
 
 ### 2.1 并行数据拉取
 
@@ -321,6 +341,31 @@ Task FAILED
 
 **`diagnose_flink_app` / `get_flink_exceptions`** 若出现 **同一 TM id 反复 heartbeat timeout**：提示 **节点/平台** 与 Owner（见任务 description），**不单**加并行度。
 
+#### 2.3.5 DataSuite「Owner 可控项」与 L2 调参输出格式（与 MCP 对齐）
+
+许多值班同学**只能**在 DataSuite 上改：**Resource Profile**（Default Parallelism、Slots per TM、CPU per TM、Memory per TM、JVM Heap Ratio、JM Memory）以及 **Flink 高级参数**（`execution.checkpointing.*`、`pipeline.*`、`table.*` 等）；**不能**改 K8s 节点或 Kafka 分区。Agent 给建议时必须**默认落在这几类可操作上**，并尽量用 **MCP 拉到的当前值** 对齐「从多少调到多少」。
+
+**MCP 与页面字段的对应关系（优先拉数，截图可选）**：
+
+| DataSuite 常见字段 | MCP 对齐来源 | 说明 |
+|--------------------|--------------|------|
+| **Default Parallelism** | `get_flink_job_config` → `executionConfig.parallelism` | 与线上默认并行度一致 |
+| **Slots per TM** | `get_flink_taskmanagers` → 每条 TM 的 `slotsNumber` | 各 TM 应一致；`freeSlots=0` 表示 slot 吃满 |
+| **CPU / Memory per TM**（页面 vCore、GB） | `get_flink_taskmanagers` → `totalResource.cpuCores`、`hardware.physicalMemory_MB` / Flink 内存细分（`taskHeapMemory`、`managedMemory` 等，单位 MB） | 页面 **Memory per TM** 与 REST 的 process 切分可能需换算；**以页面为准时用户可贴图，Agent 仍须写 MCP 数字作交叉** |
+| **Checkpoint interval / timeout** | `get_flink_checkpoints` → `config.interval`、`config.timeout`（ms） | 辅手段调优时给出 **从 X ms 到 Y ms** |
+| **单算子并行度** | `get_flink_vertices` → 各 vertex `name` + `parallelism` + `metrics` | **不等于** Resource 页；需 **SQL hint / OPTIONS / 发版** 或平台「按算子并行度」能力 |
+
+**L2 调参建议的输出硬性格式**（在 MCP 可用、非降级模式时）：
+
+1. **小节标题**：`DataSuite 可调项（从 X → Y）`  
+2. **表格**（至少三列）：`| 可调项 | 当前值（MCP/用户截图） | 建议值 | 先决条件/风险 |`  
+   - **当前值**：优先写 **`get_flink_job_config` + `get_flink_taskmanagers` + `get_flink_checkpoints`** 的数字；用户已提供截图时可并列「页面=… / MCP=…」。  
+   - **建议值**：必须写 **明确区间或档位**（如 Memory **16→20 GB**、Parallelism **12→16**），**禁止**只写「适当增加内存」。  
+3. **单算子**：若建议针对某 vertex，须写 **`vertex 全名`** + **并行度从 A→B** + **实现路径**（「在 DataStudio SQL 增加 `OPTIONS(...)` / `SET`」或「仅全局并行度可改则说明无法单算子」）+ **Kafka 分区 ≥ B** 等约束。  
+4. **额外 Flink 参数**：用 **代码块**逐行列 `key=value`（含单位），并注明是否需 **Savepoint 后重启** 才生效。
+
+**禁止**：在 MCP 已返回 `taskmanagers` / `job_config` / `checkpoints` 时，仍只写「去 DataSuite 看当前资源配置」而不给出表格。
+
 ---
 
 ### 2.4 同系列任务关联扫描
@@ -402,7 +447,7 @@ Flink 告警排查 -- App {app_id} ({market})
 1. {最重要的建议}
 2. {次要建议}
 
-链接: Job: {url} | Grafana: {url}
+复核链接（非阅读前提，结论已基于 MCP）: Job: {url} | Grafana: {url} | Logify: {logify_url}
 
 ━━━━━━━━━━━━━━
 ```
@@ -413,7 +458,8 @@ Flink 告警排查 -- App {app_id} ({market})
 - 指标表格只列**异常项**（全部正常则写一句"各项指标正常"）
 - 不输出完整异常堆栈（仅提取关键类名和一句话描述）
 - 不输出 API 原始返回（仅提取有用数据）
-- Grafana 链接始终附上，即使当前无法访问
+- **遵守 Phase 2.0c**：正文主体**不得**用「请自行看 Grafana/Prometheus/Logify」替代 MCP 已应拉取的事实；Grafana 等链接放在文末**复核区**即可（见 2.0c）。
+- Grafana 链接**可**附上作为复核入口，但**不得**作为用户理解结论的唯一依赖
 
 ### 2.8 Cookie 过期降级模式
 
@@ -469,7 +515,7 @@ Flink 告警排查 -- App {app_id} ({market})
 **什么是无状态重启**：跳过 Checkpoint/Savepoint 状态，从 Kafka 最新 offset 开始消费。代价是丢失窗口状态和精确一次语义保证，可能产生数据缺口。
 
 **操作步骤**：
-1. 打开 DataSuite Job 页面：`https://datasuite.shopee.io/flink/operation/application?operationType=stream&appId={app_id}&project_code=...`（若告警里仍是旧链接 `.../operation/stream/{app_id}` 也可打开，同一 appId）
+1. 打开 DataSuite Job 页面：`https://datasuite.shopee.io/flink/operation/stream/{app_id}`
 2. 点击 "Start" 按钮（非 "Restart"）
 3. 在启动选项中选择 "Start without state"
 4. 确认启动
@@ -484,7 +530,7 @@ Flink 告警排查 -- App {app_id} ({market})
 | Kafka Lag | `get_flink_metrics(app_id, "kafka")` | 持续下降 |
 | 背压 | `get_flink_metrics(app_id, "backpressure")` | 低于 500ms/s |
 | Checkpoint | `get_flink_checkpoints(app_id)` | 至少 1 次成功 |
-| 下游数据 | `query_ck(sql, env="live", cluster="ck2")` | 有新数据写入 |
+| 下游数据 | `query_ck` 或 **`query_ck_bundle`**（见 **7.11**） | 有新数据写入 |
 | CPU/Heap | `get_flink_metrics(app_id, "cpu_memory")` | CPU < 80%, Heap < 85% |
 
 **注意**：任务状态 `RUNNING` 不代表数据已恢复！必须检查下游表有新数据写入才算真正恢复。
@@ -525,6 +571,20 @@ SELECT 'br', count(), toDateTime(max(process_time))
 FROM spx_mart_manage_app.{table_name}_br_all
 ORDER BY row_cnt ASC
 ```
+
+### 3.5 积压追平后的资源右缩（降本，人工执行）
+
+**前置**：Kafka Lag **持续低位**、背压/Heap/Checkpoint 在 **新实例时间窗** 内健康（见 **7.9**），业务确认积压已消化。
+
+**原则**：每次只改一类参数；**小步**调整；观察 **24～48 小时** 再下一刀。大改并行度或 Slot 拓扑前 **Savepoint**。
+
+**推荐顺序**：
+1. **Memory per TM**：在 Heap 峰值余量充足时，每次减 **2～4 GiB**（平台步进为准）；异常回滚。
+2. **CPU per TM**：TM CPU 利用率长期不高时，再每次减 **0.5～1 vCore**。
+3. **Slot per TM**：曾为稳定性改为 **1 slot/TM** 的，**勿为省钱第一时间改回 2**，除非 Grafana 证明长期宽松且接受单 JVM 双 Slot 风险。
+4. **并行度**：非必要不减；减并行度前先确认 Source 分区与瓶颈算子。
+
+**代码侧可选（与 Owner / 发版流程对齐）**：`AdsSpxMgmtFmHubPupOrderVolume10mTab` 等任务在积压期依赖 **大 mini-batch**；常态下可评估略降 `table.exec.mini-batch.*` 换延迟，**禁止**在未观察窗口内与资源降配同时大改。
 
 ---
 
@@ -601,7 +661,7 @@ ORDER BY row_cnt ASC
 | `query_flink_logs` | 查询 Logify 日志（注意独立认证） | L3 按需 |
 | `get_flink_log_url` | 生成 Logify 日志链接 | L2/L3 |
 | `diagnose_flink_app` | 一键全栈诊断（延迟/Lag/背压/Heap/异常/链接） | **L2 推荐首拉**；Bot 若需控耗时可仅用 `get_flink_metrics` + `get_flink_vertices` |
-| `query_ck` | 查询 ClickHouse 下游数据 | L3 恢复验证 |
+| `query_ck` / **`query_ck_bundle`** | 查询 ClickHouse 下游数据；**Agent 丢参时用 bundle 单 JSON** | L3 恢复验证 |
 | `query_messages_sqlite` | 搜索 SeaTalk 历史消息 | 降级模式 / 历史关联 |
 | `refresh_cookies_from_browser` | 刷新 DataSuite Cookie | Cookie 过期时 |
 
@@ -666,11 +726,39 @@ ORDER BY row_cnt ASC
 
 API 可能不返回 DataStudio 高级参数全文。**不代表**未配置 Checkpoint/SQL hint。以 **`get_flink_checkpoints.config`** 与 **拓扑 `get_flink_vertices`** 为准。
 
+### 7.9 换实例后 Grafana / Prometheus 指标「混窗」
+
+**现象**：`diagnose_flink_app` 或 `get_flink_metrics` 里的 `sessionId`、`application_id` 与 `get_flink_instance`（current）返回的 **最新** `sessionId` 不一致；或 **Kafka Lag / max_busy / 延迟平均值** 仍极差，但 DataSuite 上当前延迟已很低。
+
+**原因**：查询时间窗跨越了 **旧实例**（大积压、重启前）与 **新实例**，**avg/max** 被历史拉坏；部分 MCP 路径固定了旧 `application_id`。
+
+**处置（写入 L2 报告时必做）**：
+1. 以 **`get_flink_instance(instance_type=current)`** 的 `instanceId`、`sessionId`、`createTime` 为 **当前事实**。
+2. Grafana 链接使用 **当前** `var-application_id=app{app_id}instance{instance_id}`，并提示人工将时间范围 **缩到换实例之后** 再判 busy/heap/lag。
+3. 诊断文案中 **「平均延迟 xxxs」** 可能出现 **单位误标**（大整数实为 ms 等）；**勿**直接按「秒」向业务解读，以 **面板定义 + 单调趋势** 为准。
+
+### 7.10 Keyhole 500 / Exceeded 30 redirects
+
+**现象**：`get_flink_job_config`、`get_flink_checkpoints`、`get_flink_taskmanagers` 等返回 Keyhole **500** 或 **30 redirects**。
+
+**常见原因**：请求仍携带 **已下线实例** 的 `originHost`（旧 JM 地址），与当前实例不一致。
+
+**处置**：L2 **不阻塞**：继续依赖 `get_flink_instance`、`diagnose_flink_app`（Grafana 聚合）、`get_flink_runtime_exceptions`、`query_flink_logs`。需 TM 明细或 CP 配置全文时：在浏览器打开 DataSuite 当前实例页的 **webKeyholeUrl**，或联系平台维护核对 Keyhole 路由。重试 MCP 前确认 Cookie / 登录态。
+
+### 7.11 ClickHouse：`query_ck` 空参改用 `query_ck_bundle`
+
+Agent 调用 `query_ck` 时若 **`sql`/`env` 未传入或 `{}`**，改用 **`query_ck_bundle`**：单一参数 `bundle` 为 JSON 字符串，至少含 `sql`、`env`；`env=live` 时必含 **`cluster`**（如 ck2、ck5、ck6，按工具说明与 `UNKNOWN_TABLE` 回退规则）。
+
+**L3 下游验证**与业务溯源对齐：**写 ck2/ck6、读 ck5/ck7**；`UNKNOWN_TABLE` 时换写集群再查。
+
 ---
 
 ## Skill 更新记录
 
 | 日期 | 版本 | 变更 |
 |------|------|------|
+| 2026-04-13 | v1.4 | **Phase 2.3.5**：DataSuite Owner 可控项与 MCP 字段对齐表；L2 调参输出**硬性表格**「当前值→建议值」、单算子写法、额外参数 `key=value`；禁止在已有 MCP 数据时仍让用户自查资源配置 |
+| 2026-04-13 | v1.3 | 核心原则新增第 6 条；**Phase 2.0c**「用户输出红线」：L2 必须由 Agent 用 MCP 闭环结论，**禁止**以「用户自己去看 Grafana/Prometheus/Logify」作为正文主体；链接仅作文末复核；**Phase 2.7** 与 **2.6 模板**对齐 |
+| 2026-04-13 | v1.2 | 新增坑 7.9（换实例混窗与延迟单位）、7.10（Keyhole 500/redirect）、7.11（`query_ck_bundle`）；Phase 3.5 积压追平后资源右缩指引 |
 | 2026-04-10 | v1.1 | MCP 优先（2.0b）、L2 批次纳入 `diagnose_flink_app` 与 `get_flink_vertices`；新增 Phase 2.3（吞吐对齐方案 A/B、CP expired 与 timeout、分层调参、heartbeat）；原 2.3 起顺延编号，Cookie 降级为 2.8；速查表与坑 7.7/7.8 |
 | 2026-04-09 | v1.0 | 初始版本：三层响应模型、告警解析、根因决策树、重复告警策略、输出模板 |

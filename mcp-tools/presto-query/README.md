@@ -10,6 +10,7 @@
 
 **核心文件:**
 - `presto_mcp_server.py` - MCP服务器
+- `presto_query_tool.py` - `PrestoQueryTool` 类（平台 Agent / 非 MCP Python 集成，直连 Personal API）
 - `install_mcp.sh` - 自动安装脚本
 - `mcp_config_template.json` - 配置模板
 
@@ -76,6 +77,14 @@ python3 query_presto.py --help
 
 **文件:**
 - `example_use_in_code.py` - 集成示例
+
+### 5. PrestoQueryTool 类（平台 Agent）
+
+面向需在 **非 Cursor MCP** 环境（自建 Agent、批跑脚本等）复用同一 DataSuite Personal SQL 流程的场景。
+
+**文件:** `presto_query_tool.py`
+
+**用法概要:** 构造 `PrestoQueryTool(personal_token=..., username=...)` 后调用 `execute(sql, queue=..., region=..., ...)`；返回字典含 `success`、`columns`、`rows`、`error` 等。Token 与用户名由调用方从环境变量或密钥系统读取，**勿写入仓库**。
 
 ## 🚀 快速开始
 
@@ -211,6 +220,10 @@ pip3 install mcp
 - 若你本地仍用旧版 `presto_mcp_server.py`，请 `git pull` 后重启 Cursor。
 
 ## 📝 更新日志
+
+### v1.2 (2026-04-14)
+
+- 新增 `presto_query_tool.py`：`PrestoQueryTool` 类，供平台 Agent 等 Python 集成。
 
 ### v1.1 (2026-03-05)
 - MCP：取消固定 50 字单元格截断；默认 `cell_max_len=0`；新增 `write_full_result_to` 落盘完整 JSON。

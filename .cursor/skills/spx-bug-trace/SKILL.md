@@ -36,7 +36,8 @@ git pull origin release
 | `cursor-ide-browser` MCP | 操控浏览器：导航、截图、点击、抓网络请求 |
 | `get_api_lineage` (api-trace MCP) | 快速查 API 血缘：biz_sql、源表、Dynamic WHERE |
 | `api_trace` (api-trace MCP) | 完整溯源 + 直查源表，可传 `custom_where` 和 `api_response_sample` |
-| `query_ck` / `query_ck_bundle` (ck-query MCP) | 查 ClickHouse：`env=live`(ck2/ck6) 或 `env=test`；若 Agent 调 `query_ck` 参数变 `{}`，改用 **`query_ck_bundle(bundle='{"sql":"...","env":"live","cluster":"ck2"}')`** |
+| `query_ck` (ck-query MCP) | 查 ClickHouse：`env=live`(ck2/ck6) 或 `env=test` |
+| **`query_ck_bundle`** (ck-query MCP) | **单参数 JSON 字符串**调用 CK；当 `query_ck` 因 Agent 丢参出现 **`sql`/`env` 缺失或 `{}`** 时必须使用；`env=live` 时 JSON 内须含 **`cluster`** |
 | `query_presto` (presto-query MCP) | 查 Presto：离线宽表、维表、源表验证；**Flink 平台 connector 血缘**见下文 **Hive：`ods_flink_platform_connector_metadata_df`** |
 | `search_flink_apps` (flink-query MCP) | 搜索 Flink 流/批任务，按关键词 + project_name 模糊匹配 |
 | `diagnose_flink_app` (flink-query MCP) | 一键诊断 Flink 应用：聚合 DataSuite + Keyhole + Grafana 全栈数据 |
@@ -189,7 +190,7 @@ search_flink_apps(keyword="<snake_case 核心表名片段>", project_name="spx_m
 query_messages_sqlite(keyword="<表名或任务名片段>", hours=720, limit=20)
 ```
 
-告警消息中常含 DataSuite 链接与 appId。链接可能是旧式 `.../flink/operation/stream/{appId}`，或新式 `.../flink/operation/application?operationType=stream&appId={appId}&project_code=...`；均可从路径末段或 `appId` 查询参数提取 appId。同时可从告警时间线判断任务是否在持续运行或已停止。
+告警消息中包含完整的任务名和 appId（如 `Job Link:https://datasuite.shopee.io/flink/operation/stream/708245`），可直接提取 appId。同时可从告警时间线判断任务是否在持续运行或已停止。
 
 **Step 3：一键诊断或逐项检查**
 
@@ -559,9 +560,15 @@ WHERE <分区条件>
 
 **CK 表**（`spx_mart_manage_app`、含 `{region}` 占位符）：
 ```
-query_ck(sql="SELECT ...", env="live", cluster="<ck2 或 ck6>")；若工具参数被序列化为空，用 query_ck_bundle(bundle='{"sql":"SELECT ...","env":"live","cluster":"ck2"}')
+query_ck(env=live, cluster=<ck2 或 ck6>, sql="SELECT ...")
 ```
-> 接口查到的是读集群，我们直查写集群；cluster 由 ds_id 映射决定（107/110/112/119→ck2，114/115/122→ck6），`api_trace`/`get_api_lineage` 会自动建议；`spx_mart_pub` 为 TEST，用 env=test 直连
+或（推荐在 Agent 易丢参时使用）：
+```
+query_ck_bundle(bundle='{"sql":"SELECT ...","env":"live","cluster":"ck5","max_rows":50}')
+```
+> 接口查到的是读集群，我们直查写集群；cluster 由 ds_id 映射决定（107/110/112/119→ck2，114/115/122→ck6），`api_trace`/`get_api_lineage` 会自动建议；`spx_mart_pub` 为 TEST，用 env=test 直连。**若 `UNKNOWN_TABLE` 或工具说明要求读集群**，在 **ck5/ck7** 与 **ck2/ck6** 之间切换重试。
+
+**`ads_spx_fm_hub_pup_order_volume_tab_10m_{region}_all` 探查注意**：不同环境下列名以 **`SELECT * ... LIMIT 1`** 为准；看板 **P0 店铺数** 与接口字段常对应 **`risky_tag = 0`** 聚合，而非直接存在 `p0_pup_shop_qty` 物理列（以 `get_api_lineage` 返回 biz_sql 为准）。
 
 **Presto 表**（`sls_mart`、`spx_mart`、`spx_smartsort_ddc` 等）：
 ```
@@ -615,7 +622,9 @@ api_trace(api_id, issue_description, custom_where="station_id=166 AND grass_regi
 
 #### 6.1 本地过程文档（必选）
 
-保存到 `docs/investigations/` 目录，文件名格式为 `YYYYMMDD-<简短描述>.md`。文档内容见 [investigation-template.md](investigation-template.md)。
+保存到 **`docs/investigations/`** 目录（若工作区为 `SpxMgmtAppSop` 等含 `docs/investigations/` 的仓库则写该路径），文件名格式为 `YYYYMMDD-<简短描述>.md`。模板见仓库内 `investigation-template.md`（若不存在则按本文 Phase 5 结构：**现象、API/血缘、分层验证 SQL 与数值、Flink 侧结论、CK 再验证、最终口径** 自行组织）。
+
+**完整过程文档示例（FM + Flink + CK 闭环）**：`SpxMgmtAppSop/docs/investigations/20260413-fm-id-pending-pickup-hub-jaya-baru-flink741497-full-trace.md`（可与 Confluence 全文同步）。
 
 #### 6.2 Confluence 知识沉淀（推荐）
 
@@ -702,7 +711,7 @@ confluence_create_page(
 | 乱跳转页面丢失 XHR | 用户已在问题页面，跳转后原 XHR 记录消失 | 先 `browser_tabs` 确认当前 URL，若已在目标页面直接 `browser_network_requests`，禁止主动 `browser_navigate` |
 | 排查时擅自修改代码 | 定位阶段不应修改任何代码文件 | 定位阶段只读不写，修复需用户明确授权后再动手 |
 | 本地代码不是最新 | 排查代码时找不到预期逻辑，或误判已修复的问题为 Bug | 排查前对所有相关仓库执行 `git pull origin release`；找不到逻辑时先用 `git log --all --oneline` 查全分支历史，确认是否有未拉取的新 commit |
-| 不确定源表在哪个 CK 集群 | 手动试 ck2/ck6 导致字段缺失报错 | 优先用 `api_trace` 溯源，工具会自动标注该 API 源表属于 ck2 还是 ck6；或从 biz_sql 里看 `{mgmt_db2}` 占位符，`spx_mart_manage_app` 的 ID 市场表通常在 ck6，其他市场在 ck2 |
+| 不确定源表在哪个 CK 集群 | 手动试 ck2/ck6 导致字段缺失报错 | 优先用 `api_trace` 溯源；`spx_mart_manage_app` 下 **读** 往往在 **ck5/ck7**、**写** 在 **ck2/ck6**（以工具说明与 `UNKNOWN_TABLE` 为准）。**列缺失**时先 `SELECT * LIMIT 1` 核对真实列名，勿假设存在 `p0_pup_shop_qty` 等派生指标物理列 |
 | get_api_lineage 查询超时 | 血缘表查询 120 秒超时 | 若项目内有血缘文档（如 `app-analysis/知识沉淀` 下的 CSV），可查 `operation__xxx` 或表名关键词获取源表；或重试 `get_api_lineage`，或改 `api_trace(query_source_data=False)` 仅取血缘 |
 | **过度关注代码/配置变更** | 数据突然停止，但过度分析 git 历史、DDL 变更，忽略运维事件 | **数据之前正常、突然停止 → 优先检查集群迁移、依赖更换、任务重启等运维事件**；这些比代码 bug 更常见 |
 | **找不到 Flink 任务** | 按预期任务名搜索，但找不到或任务配置与预期不符 | 1) 任务可能有版本后缀（如 `_ri_version`）；2) 依赖包更换可能导致配置回退（V1→V2）；3) 用 `SHOW CREATE TABLE` 查分布式表实际指向的 local 表；4) 横向对比其他市场任务配置 |
@@ -714,13 +723,15 @@ confluence_create_page(
 | **僵尸 Queue / 孤立记录** | Queue 长时间卡在 Assigned/Occupied 状态，Waiting Time 持续增长 | 先区分：1) 同一 queue_id 是否有 status=4 的记录（有则是 FINAL 去重问题，biz_sql 通常能处理）；2) 若完全没有 status=4 记录，则是业务系统未正常关闭 Queue，需 Ops 手动 release 或排查 VQM 系统事件 |
 | **站点无数据但管道正常（操作模式变更）** | 某站点所有指标为 0，同类型其他站点正常，管道写入时间正常 | 不要急于假设"新站替代旧站"。先用 Hive tracking 表查 `bi_current_station_id` / `assign_station_id` 是否仍关联订单，再追踪单订单轨迹确认物理操作站点（`station_id`）是否已变为其他类型站点（如 OF Hub）；详见 Phase 3 Layer 5 |
 | **station_id 多义性** | CK 和 Hive 中同一订单的 station 信息不一致 | 不同表中 station 字段语义不同：FO RI 的 `station_id` = 物理操作站点，Hive tracking 的 `bi_current_station_id` = BI 派生站点（Delivering 时取 `assign_station_id`），Hive DF 的 `assign_station_id` = 派送归属。排查时必须明确是哪个字段，不能混用 |
-|| **FO RI 表字段名因市场不同** | 查 `dwd_spx_fo_order_ri_br_all` 时 `status`/`mtime` 报 UNKNOWN_IDENTIFIER | BR 市场的 FO RI 表没有 `status` 和 `mtime` 字段，应使用 `tracking_status` 和 `_version`；其他市场也可能有差异。**务必先 `SELECT * LIMIT 1` 确认字段名** |
-|| **快照表无法回溯历史** | 想验证订单是否曾经出现在 Backlog/某个视图中，但表中查不到 | `dwd_spx_mm_backlog_order_10m` 等快照表只保留最新 `data_timestamp` 的数据。如需确认订单历史状态，改查 FO RI 表的时间戳字段（如 `soc_inbound_time_map`）还原轨迹 |
-|| **FO RI 表在错误集群/库查询** | 查 `spx_mart_ddc.dwd_spx_fo_order_ri` 报 UNKNOWN_DATABASE | BR 市场的 FO RI 表在 `spx_mart_manage_app`（ck2），不在 `spx_mart_ddc`。不同市场的 FO RI 表所在库和集群不同，先用 `api_trace` 或 `get_api_lineage` 确认 |
-|| **DataSuite 搜索 API 不精确** | `search_flink_apps` 返回大量无关结果或找不到目标任务 | DataSuite 模糊匹配质量差：1) 用更短、更唯一的关键词；2) 指定 `project_name` 参数减少范围；3) 搜不到时用 SeaTalk 告警群消息反查 appId |
-|| **Flink MCP Cookie 过期** | Flink API 持续返回 401，缺少 `DATA-SUITE-AUTH-userToken-v4` | macOS Chrome 加密存储 Cookie，`browser_cookie3` 读不到明文。让用户刷新 DataSuite 登录或用 CDP 获取 Cookie。**退回策略**：用 SeaTalk 告警消息 + CK system.parts 组合诊断 |
-|| **Flink 告警"已解决"但任务仍异常** | 告警状态为 "resolved"，但 CK 表实际没有新数据 | "resolved" 只表示触发条件暂时不满足（如重启次数低于阈值），不代表任务恢复正常。必须用 CK 表数据 + system.parts 验证实际写入状态 |
-|| **Main Task 和 Sink Task 分离架构** | CK 无数据，但 Main Task 看似正常 | 部分 Flink 管道分为 Main Task（计算 + 写 Kafka）和 Sink Task（Kafka → CK），两者可能有不同的 appId。CK 断流时需同时检查两个任务的状态。从 `*_live_flink.conf` 查 `sinks` 配置确认架构 |
+| **FO RI 表字段名因市场不同** | 查 `dwd_spx_fo_order_ri_br_all` 时 `status`/`mtime` 报 UNKNOWN_IDENTIFIER | BR 市场的 FO RI 表没有 `status` 和 `mtime` 字段，应使用 `tracking_status` 和 `_version`；其他市场也可能有差异。**务必先 `SELECT * LIMIT 1` 确认字段名** |
+| **快照表无法回溯历史** | 想验证订单是否曾经出现在 Backlog/某个视图中，但表中查不到 | `dwd_spx_mm_backlog_order_10m` 等快照表只保留最新 `data_timestamp` 的数据。如需确认订单历史状态，改查 FO RI 表的时间戳字段（如 `soc_inbound_time_map`）还原轨迹 |
+| **FO RI 表在错误集群/库查询** | 查 `spx_mart_ddc.dwd_spx_fo_order_ri` 报 UNKNOWN_DATABASE | BR 市场的 FO RI 表在 `spx_mart_manage_app`（ck2），不在 `spx_mart_ddc`。不同市场的 FO RI 表所在库和集群不同，先用 `api_trace` 或 `get_api_lineage` 确认 |
+| **DataSuite 搜索 API 不精确** | `search_flink_apps` 返回大量无关结果或找不到目标任务 | DataSuite 模糊匹配质量差：1) 用更短、更唯一的关键词；2) 指定 `project_name` 参数减少范围；3) 搜不到时用 SeaTalk 告警群消息反查 appId |
+| **Flink MCP Cookie 过期** | Flink API 持续返回 401，缺少 `DATA-SUITE-AUTH-userToken-v4` | macOS Chrome 加密存储 Cookie，`browser_cookie3` 读不到明文。让用户刷新 DataSuite 登录或用 CDP 获取 Cookie。**退回策略**：用 SeaTalk 告警消息 + CK system.parts 组合诊断 |
+| **Flink 告警"已解决"但任务仍异常** | 告警状态为 "resolved"，但 CK 表实际没有新数据 | "resolved" 只表示触发条件暂时不满足（如重启次数低于阈值），不代表任务恢复正常。必须用 CK 表数据 + system.parts 验证实际写入状态 |
+| **Main Task 和 Sink Task 分离架构** | CK 无数据，但 Main Task 看似正常 | 部分 Flink 管道分为 Main Task（计算 + 写 Kafka）和 Sink Task（Kafka → CK），两者可能有不同的 appId。CK 断流时需同时检查两个任务的状态。从 `*_live_flink.conf` 查 `sinks` 配置确认架构 |
+| **`query_ck` MCP 空参** | 调用返回缺 `sql`/`env` 或 `{}` | 一律改用 **`query_ck_bundle`**，bundle 为含 `sql`、`env`、`cluster`（live 必填）的 JSON 字符串 |
+| **FM Pending Pickup Hub 与 P0 口径** | 直查 CK 找不到 `p0_pup_shop_qty` 列 | 该表为宽表明细；Hub 看板 P0 多为 **`risky_tag = 0`** 的聚合口径。先 `get_api_lineage` 确认 biz_sql，再 `sumIf(1, risky_tag = 0)` 等与页面字段对齐 |
 
 ## 更多参考
 
@@ -753,4 +764,5 @@ confluence_create_page(
 | 2026-03-27 | **Phase 3 新增 Layer 5：站点操作模式变更排查路径**：当管道正常但特定站点数据为 0 时，新增「操作模式变更」验证层，包含 CK 与 Hive 交叉验证、单订单轨迹追踪、station_id 语义对照表（物理操作 vs 派送归属 vs BI 派生）。**常见坑新增两条**：「站点无数据但管道正常」和「station_id 多义性」 | BR LM Hub_SP_Osasco_Bonfim 排查：初始假设"新站替代旧站"被用户纠正，实际为 LM Hub → OF Hub 模式迁移；CK FO RI 的 `station_id`（物理站点=OF Hub）与 Hive tracking 的 `bi_current_station_id`（BI 派生=旧 LM Hub）语义不同，导致看板显示 0 但 Hive 有大量关联订单 |
 | 2026-03-31 | **Phase 6.2 Confluence 内容建议修正**：将「精简版排查结论」改为「与本地文档内容一致，完整同步」。Confluence 正文应包含完整排查过程（含每步 SQL 与查询结果），不要省略排查步骤。本地文档写完后应将全文同步到 Confluence，而非另写精简版 | Key Stats 周表排查：首次创建 Confluence 页面时，按旧指导「精简版」省略了排查步骤 1-4，只放了根因和修复方案，导致用户指出缺少探查过程；排查步骤和中间证据是后续类似问题最有价值的参考 |
 | 2026-04-08 | **Phase 3 新增 Layer 6：单号级排查路径**：当用户反馈特定单号在某视图中缺失时，按「查视图源表 - 查 FO RI 表还原生命周期 - 计算是否满足视图条件」的步骤排查。新增快照表概念说明和 SQL 模板。**常见坑新增三条**：FO RI 表字段名因市场不同、快照表无法回溯历史、FO RI 表在错误集群/库查询 | BR SOC Backlog 排查：单号 BR2606440272287 不在 Backlog 表中，通过查 FO RI 表确认订单已妥投且 SOC 停留时间 21.4h < 24h 阈值；排查中 dwd_spx_fo_order_ri_br_all 的 status/mtime 字段不存在导致报错，spx_mart_ddc 在 ck2 上也不存在 |
-|| 2026-04-09 | **Phase 0.1 集成 Flink MCP 工具链**：新增完整的 5 步 Flink MCP 诊断流程：从表名搜索任务 → SeaTalk 告警群反查 appId → 一键诊断或逐项检查 → CK system.parts 验证写入历史 → 横向对比健康市场。工具清单新增 8 个 Flink MCP 工具和 SeaTalk 消息搜索。新增 DataSuite Cookie 过期应对方案。**常见坑新增五条**：DataSuite 搜索不精确、Cookie 过期退回策略、告警"已解决"但实际异常、Main/Sink Task 分离架构 | ID Pending Pickup 看板无数据排查：通过 SeaTalk 告警群反查到 Main Task (741497) 和 Sink Task (708245) 的 appId；CK system.parts 确认 ID 表从未写入过数据；DataSuite Cookie 持续 401 导致无法用 Flink API 直接诊断，退回到 SeaTalk + CK 组合方式完成诊断 |
+|| 2026-04-13 | **工具清单**：增加 **`query_ck_bundle`** 及空参回退说明。**Phase 4**：CK 查询示例补充 bundle；读/写集群切换与 `UNKNOWN_TABLE`。**常见坑**：`query_ck` 空参、FM Hub P0 与 `risky_tag` 口径。**Phase 6.1**：过程文档路径说明 + 指向 **Jaya Baru / 741497** 完整案例 Markdown | ID 市场 Pending Pickup Hub 与 AdsSpxMgmtFmHubPupOrderVolume10mTab 积压治理、CK 验证与 skill 对齐 |
+| 2026-04-09 | **Phase 0.1 集成 Flink MCP 工具链**：新增完整的 5 步 Flink MCP 诊断流程：从表名搜索任务 → SeaTalk 告警群反查 appId → 一键诊断或逐项检查 → CK system.parts 验证写入历史 → 横向对比健康市场。工具清单新增 8 个 Flink MCP 工具和 SeaTalk 消息搜索。新增 DataSuite Cookie 过期应对方案。**常见坑新增五条**：DataSuite 搜索不精确、Cookie 过期退回策略、告警"已解决"但实际异常、Main/Sink Task 分离架构 | ID Pending Pickup 看板无数据排查：通过 SeaTalk 告警群反查到 Main Task (741497) 和 Sink Task (708245) 的 appId；CK system.parts 确认 ID 表从未写入过数据；DataSuite Cookie 持续 401 导致无法用 Flink API 直接诊断，退回到 SeaTalk + CK 组合方式完成诊断 |
