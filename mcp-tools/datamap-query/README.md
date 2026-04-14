@@ -170,7 +170,7 @@ DataMap MCP 使用三组 API：
 
 ## 注意事项
 
-- Cookie 过期或收到 401 时会自动尝试 SSO 静默刷新（v3.5.9+），大多数情况下无需手动干预
+- Cookie 过期或收到 401 时会自动尝试 SSO 静默刷新（v3.5.9+；401 时跳过 60s 冷却）；仍失败时错误中含 CDP 与静默刷新诊断（v3.5.17+，`format_auth_troubleshoot`），大多数情况下无需手动干预
 - 若自动刷新后仍失败（SSO 主会话过期），需在 Chrome 中重新登录 [DataSuite](https://datasuite.shopee.io)
 - 写入操作（`update_datamap`）需要配置 `DATAMAP_OPEN_API_TOKEN` 环境变量
 - 写入操作默认 dry_run=True，预览确认后再设置 dry_run=False 执行

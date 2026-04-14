@@ -50,6 +50,12 @@ v3.5.9 起，chrome-auth 具备以下认证增强能力：
 - **自动 SSO 刷新**：过期或 401 时自动续期。顺序为 **CDP 隐藏标签**（多端口依次尝试）→ **macOS `open -g` 后台打开 Chrome**（不抢前台）→ **AppleScript 可见标签**（最后手段，可用环境变量 `CHROME_AUTH_DISABLE_APPLESCRIPT=1` 关闭）。推荐 Chrome 使用 `--remote-debugging-port=9222` 并设置 `CHROME_CDP_PORT=9222`，静默程度最高
 - **精准过期诊断**：401 错误时提供精确的过期时间和操作建议（如"Cookie 已于 14:30:00 过期，请刷新登录"），替代之前笼统的"可能已过期"
 
+v3.5.17 起补充：
+
+- **401 跳过静默刷新冷却**：调用方传入 `auth_failed=True` 时不再受每域名 60 秒冷却限制，避免「刚失败又命中冷却不重刷」
+- **DataSuite 多落地页**：`datasuite.shopee.io` 静默导航按 `/flink/`、`/scheduler/`、`/` 依次尝试
+- **结构化 401 说明**：`scheduler-query` / `flink-query` / `datamap-query` 等在鉴权失败时输出 **CDP 端口是否可达、`CHROME_CDP_PORT`、本次静默导航 URL 与成败、关键 Cookie 摘要**（`format_auth_troubleshoot`），便于区分未连上调试 Chrome 与需重新登录
+
 遇到 401/403 错误时，这些 MCP 会返回 Cookie 诊断信息并自动尝试刷新。仅当 SSO 主会话也过期（需要重新输入密码）时才需要用户手动在 Chrome 中登录 DataSuite。
 
 详细文档：[chrome-auth README](../../mcp-tools/chrome-auth/README.md)

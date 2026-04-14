@@ -171,9 +171,9 @@ https://datasuite.shopee.io/scheduler/task/mkpldp_shop_health.studio_6075240/ins
 ## 注意事项
 
 - `env` 参数区分环境，从 Scheduler URL 中可判断：`/scheduler/dev/` -> `dev`，`/scheduler/task/` -> `prod`
-- Cookie 过期或收到 401 时会自动尝试 SSO 静默刷新，大多数情况下无需手动干预
+- Cookie 过期或收到 401 时会自动尝试 SSO 静默刷新（401 会跳过 chrome-auth 的 60s 冷却）；仍失败时错误信息含 **CDP 端口探测、本次静默导航 URL 与结果、关键 Cookie 是否齐全**（`format_auth_troubleshoot`），便于区分未连上调试 Chrome 与需重新登录
 - 若自动刷新后仍失败（SSO 主会话过期），需在 Chrome 中重新登录 DataSuite
 - Presto 任务用 `get_presto_query_sql`，Spark/Hive 任务用 `get_spark_query_sql` 或 `diagnose_spark_app`
 - Spark History Server 数据有保留期限（通常 7 天），较早的 application 可能查不到
 - `diagnose_spark_app` 是最全面的 Spark 诊断入口，推荐用于告警排查
-- Cookie 诊断逻辑由 `chrome_auth.diagnostic` 统一提供，各 MCP 工具共享
+- 认证诊断由 `chrome_auth.diagnostic.format_auth_troubleshoot` 与 `cookie_diagnostic` 统一提供，各 MCP 工具共享

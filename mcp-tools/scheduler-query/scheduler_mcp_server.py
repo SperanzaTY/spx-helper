@@ -16,7 +16,7 @@ from typing import Dict, Any, Optional, List
 
 import requests
 from chrome_auth import get_auth, AuthResult
-from chrome_auth.diagnostic import cookie_diagnostic as _cookie_diagnostic
+from chrome_auth.diagnostic import format_auth_troubleshoot
 from mcp.server.fastmcp import FastMCP
 
 logging.basicConfig(level=logging.INFO)
@@ -40,8 +40,16 @@ def _load_cookies(force: bool = False, auth_failed: bool = False) -> Dict[str, s
 
 
 def _diag(cookies: Dict[str, str]) -> str:
-    expires_at = _last_auth.expires_at if _last_auth else None
-    return _cookie_diagnostic(cookies, expires_at=expires_at)
+    r = _last_auth
+    return format_auth_troubleshoot(
+        DOMAIN,
+        cookies,
+        cookie_source=(r.source if r else ""),
+        expires_at=(r.expires_at if r else None),
+        sso_refresh_attempted=(r.sso_refresh_attempted if r else False),
+        sso_refresh_succeeded=(r.sso_refresh_succeeded if r else False),
+        sso_refresh_urls_tried=(r.sso_refresh_urls_tried if r else ()),
+    )
 
 
 # ──────────────────────────── HTTP 客户端 ────────────────────────────
@@ -110,7 +118,7 @@ def _request(method: str, path: str, params: dict = None, json_body: dict = None
                     continue
                 raise RuntimeError(
                     f"请求 {path} 失败: {resp.status_code}\n"
-                    f"Cookie 诊断: {_diag(cookies)}\n"
+                    f"认证与 Cookie 诊断:\n{_diag(cookies)}\n"
                     f"这通常是 Chrome 登录态问题，不是代码 bug。请在 Chrome 中打开 {BASE_URL} 确认已登录。"
                 )
             resp.raise_for_status()

@@ -6,6 +6,57 @@
 
 ---
 
+## v3.5.17 -- 2026-04-14 -- `feat`: chrome-auth 401 体验（诊断 + DataSuite 多 URL 刷新 + 跳过冷却）
+
+**提交者**: @tianyi.liang  
+**Commit Type**: feat  
+**修改模块**: `mcp-tools/chrome-auth/`、`mcp-tools/scheduler-query/`、`mcp-tools/flink-query/`、`mcp-tools/datamap-query/`、版本号与指南文档
+
+### 变更说明
+
+**版本号**
+
+- `chrome-extension/manifest.json`、`package.json`、`seatalk-agent/package.json`：`3.5.16` → `3.5.17`（扩展无功能代码变更，仅版本同步）
+
+**chrome-auth**
+
+- `get_auth(..., auth_failed=True)` 时 **跳过** SSO 静默刷新的 60 秒冷却，保证每次 401 后都能再触发导航
+- `datasuite.shopee.io` 静默刷新按 **`/flink/` → `/scheduler/` → `/`** 依次尝试
+- 新增 **`probe_cdp_connectivity`**、**`format_auth_troubleshoot`**（401 时输出 CDP 探测顺序、可达端口、`CHROME_CDP_PORT`、本次静默刷新 URL 与结果、关键 Cookie 摘要）
+- **`AuthResult`** 增加 `sso_refresh_attempted` / `sso_refresh_succeeded` / `sso_refresh_urls_tried` 供 MCP 拼诊断
+
+**依赖 MCP**
+
+- `scheduler-query`、`flink-query`、`datamap-query`：401 最终错误中的「Cookie 诊断」升级为 **「认证与 Cookie 诊断」**，调用 `format_auth_troubleshoot`；Grafana 路径使用 `critical_keys=()` 避免误报缺 DataSuite 专用键
+
+**文档**
+
+- `mcp-tools/chrome-auth/README.md`、各子模块 README、`docs/guides/MCP_TOOLS.md`、`README.md` 徽章、`docs/guides/CHROME_EXTENSION.md` 版本说明
+
+### 测试项
+
+- `python3 -m py_compile` 通过：`chrome_auth/__init__.py`、`diagnostic.py`、`cdp_provider.py`、`types.py`，以及 `scheduler_mcp_server.py`、`flink_mcp_server.py`、`datamap_mcp_server.py`
+
+---
+
+## docs -- 2026-04-14 -- `docs`: spx-bug-trace Confluence 文稿目录与 CK live→test 同步修复清单
+
+**Commit Type**: docs  
+**修改模块**: `.cursor/skills/spx-bug-trace/`、`docs/guides/SKILL.md`
+
+### 变更说明
+
+- 新增 `.cursor/skills/spx-bug-trace/confluence/`：`README.md`、**TEST_CK_LIVE_TO_TEST_SYNC_TABLE_FIX_PLAN.md**（逐表修复方案与附录列数快照，可复制到 Confluence）
+- `spx-bug-trace/SKILL.md` Phase 6.2：补充上述目录说明
+- `docs/guides/SKILL.md`：补充 Confluence 文稿目录索引
+- 已在 Confluence SPSC 父页 3105880558 下创建页面 **pageId=3160657626**；本地 `README.md` / 修复清单已写入该链接
+
+### 测试项
+
+- 无（纯文档）
+
+---
+
 ## v3.5.16 -- 2026-04-14 -- `feat`: Flink/Bug 排查 Skill、`PrestoQueryTool`、文档同步
 
 **提交者**: @tianyi.liang

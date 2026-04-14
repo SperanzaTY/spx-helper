@@ -77,3 +77,80 @@ def cookie_diagnostic(
         lines.append(MAC_CHROME_ENCRYPT_HINT)
         lines.append(CDP_9222_HINT)
     return "\n".join(lines)
+
+
+def format_auth_troubleshoot(
+    domain: str,
+    cookies: Dict[str, str],
+    *,
+    cookie_source: str = "",
+    expires_at: Optional[float] = None,
+    sso_refresh_attempted: bool = False,
+    sso_refresh_succeeded: bool = False,
+    sso_refresh_urls_tried: Tuple[str, ...] = (),
+    cdp_port: Optional[int] = None,
+    critical_keys: Optional[Tuple[str, ...]] = None,
+) -> str:
+    """401/403 时给终端用户的结构化说明（CDP 可达性、本次静默刷新、关键 Cookie）。"""
+    from .cdp_provider import probe_cdp_connectivity, sso_refresh_urls_for_domain
+
+    probe = probe_cdp_connectivity(cdp_port)
+    env_p = probe["env_chrome_cdp_port"]
+    reach = probe["reachable_ports"]
+    order = probe["ports_probe_order"]
+
+    blocks: list[str] = []
+    blocks.append(
+        "[环境] CDP 探测端口顺序: "
+        + ",".join(str(p) for p in order)
+        + f"；环境变量 CHROME_CDP_PORT={env_p}"
+    )
+    if reach:
+        blocks.append(
+            f"[环境] 当前可达 CDP 端口: {reach}（静默刷新与 Network.getCookies 使用这些端口）"
+        )
+    else:
+        blocks.append(
+            "[环境] 未发现可达 CDP（127.0.0.1 上常见调试端口 /json 无响应）。"
+            "请使用仓库 mcp-tools/chrome-auth/scripts/start_chrome_remote_debug.sh 启动 Chrome，"
+            "并设置 CHROME_CDP_PORT 与之一致。"
+        )
+
+    if cookie_source:
+        blocks.append(f"[本次] Cookie 策略来源: {cookie_source}")
+
+    planned = sso_refresh_urls_for_domain(domain)
+    if planned:
+        blocks.append(f"[配置] 域名静默刷新 URL 候选顺序: {planned}")
+
+    if sso_refresh_attempted:
+        status = "成功" if sso_refresh_succeeded else "失败或未停留在已登录页"
+        blocks.append(
+            f"[本次] 已尝试静默 SSO 导航，顺序: {list(sso_refresh_urls_tried)}；结果: {status}"
+        )
+        if not sso_refresh_succeeded:
+            blocks.append(
+                "[提示] 若末次落地 URL 含 login、signin、sso/authorize，请在浏览器中完成一次完整登录；"
+                "静默刷新只能延续已有会话，不能代替首次登录或强风控验证。"
+            )
+
+    keys = DEFAULT_CRITICAL_KEYS if critical_keys is None else critical_keys
+    if keys:
+        present = [k for k in keys if k in cookies]
+        missing = [k for k in keys if k not in cookies]
+        blocks.append(
+            f"[Cookie] 关键键已具备: {present or '（无）'}；仍缺: {missing or '（无）'}；"
+            f"当前共 {len(cookies)} 个 Cookie"
+        )
+    else:
+        blocks.append(f"[Cookie] 当前共 {len(cookies)} 个 Cookie（未配置域名专用关键键列表）")
+
+    blocks.append("----")
+    if keys:
+        blocks.append(cookie_diagnostic(cookies, expires_at=expires_at, critical_keys=keys))
+    else:
+        blocks.append(
+            "Cookie 未按固定关键键逐项分析（非 DataSuite 域）。"
+            "请在 Chrome 中打开该站点并完成登录后重试。"
+        )
+    return "\n".join(blocks)

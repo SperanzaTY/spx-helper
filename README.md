@@ -2,7 +2,7 @@
 
 > **Shopee 大数据开发助手** — Chrome 扩展 + MCP 工具套件 + SeaTalk AI Agent
 
-[![Version](https://img.shields.io/badge/version-3.5.16-blue.svg)](https://github.com/SperanzaTY/spx-helper/releases)
+[![Version](https://img.shields.io/badge/version-3.5.17-blue.svg)](https://github.com/SperanzaTY/spx-helper/releases)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 SPX Helper 是一套为 Shopee 大数据开发工程师打造的效率工具集，包含四个核心模块：
@@ -125,6 +125,7 @@ GitHub（备份）  ：https://github.com/SperanzaTY/spx-helper
 
 ## 更新日志
 
+- **v3.5.17**：chrome-auth 401 体验（`format_auth_troubleshoot`、DataSuite 多 URL 静默刷新、401 跳过刷新冷却）；scheduler / flink / datamap MCP 鉴权失败说明增强；spx-bug-trace 本地 Confluence 文稿目录；发版说明见 [docs/RELEASE_LOG.md](docs/RELEASE_LOG.md)。
 - **v3.5.16**：Flink 告警与 Bug 排查 Skill 强化（L2 闭环、`query_ck_bundle`、CK 读/写集群说明等）；`presto_query_tool.py` 供平台 Agent 集成；发版说明见 [docs/RELEASE_LOG.md](docs/RELEASE_LOG.md)。
 - **v3.5.15**：Flink 一键诊断 Graph Monitor、DataSuite 运营页 `url` 修正、CK `query_ck`/`query_ck_bundle`、chrome-auth Keyhole SSO 续期 URL、SeaTalk rail 精简与文档/Skill 同步（详见 [docs/RELEASE_LOG.md](docs/RELEASE_LOG.md)）。
 

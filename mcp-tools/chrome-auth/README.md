@@ -132,7 +132,11 @@ class AuthResult:
 2. **macOS `open -g`**：无 CDP 时，用系统 `open -g -a "Google Chrome" <url>` 在**后台**打开页面，**不将 Chrome 置前**，通常无明显弹窗感（可能多一个后台标签页）。可用环境变量 `CHROME_AUTH_BROWSER_APP` 指定浏览器名（如 `Chromium`）。
 3. **AppleScript（最后手段）**：会新建可见标签并等待，较打扰。若完全不要此步，可设置 `CHROME_AUTH_DISABLE_APPLESCRIPT=1`；若需禁用 `open -g` 试验，可设 `CHROME_AUTH_DISABLE_OPEN_G=1`。
 
-刷新成功后重新读取 Cookie，对调用方透明。每个域名有 60 秒冷却期防止频繁刷新。
+刷新成功后重新读取 Cookie，对调用方透明。每个域名有 **60 秒冷却期**防止频繁刷新；**但若调用方传入 `auth_failed=True`（例如 HTTP 401/403 后重试），会跳过冷却**，保证每次鉴权失败都能再触发一轮静默导航。
+
+**DataSuite 域名**（`datasuite.shopee.io`）会按顺序尝试多个落地页：`/flink/` → `/scheduler/` → `/`，避免单一入口在部分网络下无法完成续期。
+
+401 时 MCP 会通过 **`format_auth_troubleshoot`** 输出结构化说明（`CHROME_CDP_PORT`、可达 CDP 端口、本次静默刷新是否成功、关键 Cookie 是否齐全），便于区分「未连上 CDP」与「会话已彻底失效需人工登录」。
 
 ### `invalidate_domain(domain)`
 
@@ -199,6 +203,10 @@ from chrome_auth import cookie_diagnostic
 print(cookie_diagnostic(result.cookies, expires_at=result.expires_at))
 # 例: "Cookie 已于 14:30:00 过期（10 分钟前），请在 Chrome 中打开 https://datasuite.shopee.io 刷新登录"
 ```
+
+### `format_auth_troubleshoot(domain, cookies, *, cookie_source=..., expires_at=..., sso_refresh_*=..., cdp_port=..., critical_keys=...)`
+
+供 **scheduler-query / flink-query / datamap-query** 等在 401 时拼错误详情：包含 CDP 端口探测、`get_auth` 返回的 **`AuthResult.sso_refresh_*`**（本次是否做过静默导航、尝试了哪些 URL、是否成功）、以及 `cookie_diagnostic` 结论。非 DataSuite 域可传 `critical_keys=()` 跳过「DataSuite 关键键」段落（例如 Grafana）。
 
 ---
 

@@ -659,6 +659,8 @@ confluence_create_page(
 
 **内容建议**：Confluence 正文应与本地过程文档**内容一致**，完整包含：问题描述、排查过程（含每步的 SQL 与查询结果）、根因分析（含图示）、修复方案、技术背景。**不要省略排查过程**——排查步骤和中间证据是后续类似问题最有价值的参考，也便于通过 `confluence_search` 快速检索。本地文档写完后，应将**全文**同步到 Confluence，而非另写一份精简版。
 
+**Skill 内本地 Confluence 文稿目录**：`.cursor/skills/spx-bug-trace/confluence/` 存放可全文复制到 Confluence 的长模板（如跨环境 CK 同步逐表修复清单、验收 SQL）。与 **`docs/investigations/`** 分工：`investigations` 偏单次案例过程，`confluence` 偏可复用清单与多方执行说明；入口见该目录下 `README.md`。
+
 #### 6.3 Google Sheets 问题沉淀（推荐）
 
 **内容分工**：Confluence 存详情与过程；GSheet 存一行摘要与坑点（**可选校验、仅供参考、人工沉淀**；见文首 **GSheet 定位**），便于快速浏览与排雷。

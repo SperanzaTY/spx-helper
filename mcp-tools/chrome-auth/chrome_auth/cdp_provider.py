@@ -25,13 +25,70 @@ _SSO_REFRESH_DOMAINS = (
     "data-infra.shopee.io",
     "grafana.idata.shopeemobile.com",
 )
+# 多 URL：401 时依次尝试，避免单一落地页在部分网络下无法完成 SSO
+_SSO_REFRESH_URL_CHAINS: Dict[str, List[str]] = {
+    "datasuite.shopee.io": [
+        "https://datasuite.shopee.io/flink/",
+        "https://datasuite.shopee.io/scheduler/",
+        "https://datasuite.shopee.io/",
+    ],
+}
+
 _SSO_REFRESH_URLS = {
-    "datasuite.shopee.io": "https://datasuite.shopee.io/flink/",
     # Keyhole 入口；勿用 https://data-infra.shopee.io/ 根路径（多为网关/重定向，不像可用产品页）
     "keyhole.data-infra.shopee.io": "https://keyhole.data-infra.shopee.io/",
     "data-infra.shopee.io": "https://keyhole.data-infra.shopee.io/",
     "grafana.idata.shopeemobile.com": "https://grafana.idata.shopeemobile.com/",
 }
+
+
+def sso_refresh_urls_for_domain(domain: str) -> List[str]:
+    """Return ordered SSO navigation URLs for silent refresh, or []."""
+    d = (domain or "").strip().lower()
+    if not d:
+        return []
+    for key, urls in _SSO_REFRESH_URL_CHAINS.items():
+        if key in d or d in key:
+            return list(urls)
+    for key, url in _SSO_REFRESH_URLS.items():
+        if key in d or d in key:
+            return [url]
+    return []
+
+
+def probe_cdp_connectivity(cdp_port: Optional[int] = None) -> Dict[str, Any]:
+    """Lightweight probe for 401 diagnostics (reachable CDP /json ports)."""
+    ordered: List[int] = []
+    env_port = os.environ.get("CHROME_CDP_PORT")
+    if env_port:
+        try:
+            ordered.append(int(env_port))
+        except ValueError:
+            pass
+    if cdp_port is not None and cdp_port not in ordered:
+        ordered.append(cdp_port)
+    for p in DEFAULT_CDP_PORTS:
+        if p not in ordered:
+            ordered.append(p)
+
+    reachable: List[int] = []
+    errors: Dict[int, str] = {}
+    for p in ordered:
+        try:
+            resp = http_requests.get(f"http://127.0.0.1:{p}/json", timeout=2)
+            if resp.status_code == 200:
+                reachable.append(p)
+            else:
+                errors[p] = f"HTTP {resp.status_code}"
+        except Exception as e:
+            errors[p] = str(e)[:120]
+
+    return {
+        "env_chrome_cdp_port": env_port or "(未设置)",
+        "ports_probe_order": ordered,
+        "reachable_ports": reachable,
+        "per_port_error": errors,
+    }
 
 
 def _effective_ttl(min_expires: Optional[float], user_ttl: Optional[float]) -> Optional[float]:

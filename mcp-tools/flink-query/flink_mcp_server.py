@@ -18,7 +18,7 @@ from urllib.parse import parse_qs, urlencode, urlparse, urljoin
 
 import requests as http_requests
 from chrome_auth import get_auth, AuthResult
-from chrome_auth.diagnostic import cookie_diagnostic as _cookie_diagnostic
+from chrome_auth.diagnostic import format_auth_troubleshoot
 from mcp.server.fastmcp import FastMCP
 
 logging.basicConfig(level=logging.INFO)
@@ -41,8 +41,16 @@ def _load_cookies(force: bool = False, auth_failed: bool = False) -> Dict[str, s
 
 
 def _diag(cookies: Dict[str, str]) -> str:
-    expires_at = _last_auth.expires_at if _last_auth else None
-    return _cookie_diagnostic(cookies, expires_at=expires_at)
+    r = _last_auth
+    return format_auth_troubleshoot(
+        DOMAIN,
+        cookies,
+        cookie_source=(r.source if r else ""),
+        expires_at=(r.expires_at if r else None),
+        sso_refresh_attempted=(r.sso_refresh_attempted if r else False),
+        sso_refresh_succeeded=(r.sso_refresh_succeeded if r else False),
+        sso_refresh_urls_tried=(r.sso_refresh_urls_tried if r else ()),
+    )
 
 
 # ──────────────────────────── HTTP 客户端 ────────────────────────────
@@ -95,7 +103,7 @@ def _request(method: str, path: str, params: dict = None, json_body: dict = None
                     continue
                 raise RuntimeError(
                     f"请求 {path} 失败: {resp.status_code}\n"
-                    f"Cookie 诊断:\n{_diag(cookies)}"
+                    f"认证与 Cookie 诊断:\n{_diag(cookies)}"
                 )
             resp.raise_for_status()
             return resp.json()
@@ -218,7 +226,7 @@ def _logify_query_sse(
                         headers["x-csrf-token"] = cookies["CSRF-TOKEN"]
                     continue
                 raise RuntimeError(
-                    f"Logify 认证失败: HTTP {resp.status_code}\nCookie 诊断:\n{_diag(cookies)}"
+                    f"Logify 认证失败: HTTP {resp.status_code}\n认证与 Cookie 诊断:\n{_diag(cookies)}"
                 )
             resp.raise_for_status()
         except http_requests.RequestException as e:
@@ -266,7 +274,7 @@ def _logify_query_sse(
                     headers["x-csrf-token"] = cookies["CSRF-TOKEN"]
                 continue
             raise RuntimeError(
-                f"Logify 认证失败 (SSE): {last_error}\nCookie 诊断:\n{_diag(cookies)}"
+                f"Logify 认证失败 (SSE): {last_error}\n认证与 Cookie 诊断:\n{_diag(cookies)}"
             )
 
         return rows
@@ -1781,8 +1789,17 @@ def _load_grafana_cookies(force: bool = False, auth_failed: bool = False) -> Dic
 
 
 def _grafana_diag(cookies: Dict[str, str]) -> str:
-    expires_at = _last_grafana_auth.expires_at if _last_grafana_auth else None
-    return _cookie_diagnostic(cookies, expires_at=expires_at)
+    r = _last_grafana_auth
+    return format_auth_troubleshoot(
+        GRAFANA_DOMAIN,
+        cookies,
+        cookie_source=(r.source if r else ""),
+        expires_at=(r.expires_at if r else None),
+        sso_refresh_attempted=(r.sso_refresh_attempted if r else False),
+        sso_refresh_succeeded=(r.sso_refresh_succeeded if r else False),
+        sso_refresh_urls_tried=(r.sso_refresh_urls_tried if r else ()),
+        critical_keys=(),
+    )
 
 
 def _resolve_grafana_ds_uid() -> str:
@@ -1811,7 +1828,7 @@ def _resolve_grafana_ds_uid() -> str:
             raise RuntimeError(
                 f"Grafana 鉴权失败: HTTP {r.status_code}（/api/frontend/settings）\n"
                 f"请在 Chrome 中打开 {GRAFANA_BASE}/ 登录；并确认 MCP 与 Cursor 使用同一 Chrome CDP（CHROME_CDP_PORT）。\n"
-                f"Cookie 诊断:\n{_grafana_diag(cookies)}"
+                f"认证与 Cookie 诊断:\n{_grafana_diag(cookies)}"
             )
         r.raise_for_status()
         ds_map = r.json().get("datasources", {})
@@ -1877,7 +1894,7 @@ def _grafana_query_batch(
                 continue
             raise RuntimeError(
                 f"Grafana 查询鉴权失败: HTTP {r.status_code}\n"
-                f"Cookie 诊断:\n{_grafana_diag(cookies)}"
+                f"认证与 Cookie 诊断:\n{_grafana_diag(cookies)}"
             )
         r.raise_for_status()
         raw = r.json()
@@ -1885,7 +1902,7 @@ def _grafana_query_batch(
 
     if raw is None:
         raise RuntimeError(
-            f"Grafana 查询超过最大重试次数\nCookie 诊断:\n{_grafana_diag(cookies)}"
+            f"Grafana 查询超过最大重试次数\n认证与 Cookie 诊断:\n{_grafana_diag(cookies)}"
         )
 
     parsed: Dict[str, Any] = {}

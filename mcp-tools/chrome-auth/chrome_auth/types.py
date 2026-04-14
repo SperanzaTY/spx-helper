@@ -2,7 +2,7 @@
 
 import time
 from dataclasses import dataclass, field
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 
 
 @dataclass
@@ -14,6 +14,10 @@ class AuthResult:
     token: Optional[str] = None
     source: str = ""
     expires_at: Optional[float] = None
+    # Last get_auth() SSO refresh attempt (for MCP 401 troubleshooting)
+    sso_refresh_attempted: bool = False
+    sso_refresh_succeeded: bool = False
+    sso_refresh_urls_tried: Tuple[str, ...] = field(default_factory=tuple)
 
     @property
     def ok(self) -> bool:
