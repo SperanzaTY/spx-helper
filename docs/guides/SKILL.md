@@ -34,6 +34,8 @@ Skill（指令层）     →  定义"怎么做"     → .cursor/skills/<name>/SK
 
 **v3.5.16 起仓库内 Skill 要点**：`flink-alert-triage` 增补 Phase 2.0c（L2 须在对话内用 MCP 拉数闭环、禁止以「自行看面板」替代结论）、DataSuite 可调项与 MCP 字段对照、`query_ck_bundle` 与换实例指标混窗等；`spx-bug-trace` 增补 CK 读/写集群与 `UNKNOWN_TABLE` 处理、FM 表口径与常见坑表修正、过程文档与示例路径说明。
 
+**v3.5.19**：`spx-bug-trace` 增补 **「MCP 失败时的结论约束」**（须引用工具错误、参数名 `sql`、Scheduler 单条 Presto 绑定等）；与 [MCP 工具指南 — Agent triage](MCP_TOOLS.md#agent-triage-mcp-and-query-failures) 联动。
+
 **双副本同步**：`flink-alert-triage` 在仓库中为 `.cursor/skills/flink-alert-triage/SKILL.md`，与开发者本机主副本 `~/.cursor/skills/flink-alert-triage/SKILL.md` 内容应对齐；更新 skill 后请 `cp` 同步另一侧。  
 Alarm Bot 用的 **`alarm-bot-prompt.md`** 同目录存放，修改后也请同步到 `~/.cursor/skills/flink-alert-triage/alarm-bot-prompt.md`，便于本机与仓库一致。
 

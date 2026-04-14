@@ -6,6 +6,37 @@
 
 ---
 
+## v3.5.19 -- 2026-04-14 -- `feat`: Presto History 启发式提示；MCP Agent 排查文档
+
+**提交者**: @tianyi.liang  
+**Commit Type**: feat（scheduler-query 行为 + 文档 / Skill）；相对 **v3.5.18** 升 PATCH 至 **v3.5.19**
+
+### 变更说明
+
+**scheduler-query**
+
+- **`scheduler_task_code.presto_history_sql_hints`**：根据 History 中的 `query` 文本推断 **`presto_sql_kind`**，对空 SQL、DDL/元数据类语句等附加 **`presto_sql_warning`**。
+- **`get_presto_query_sql`**：将上述字段合并进返回 JSON；docstring 说明单条绑定局限。
+- **`get_instance_detail`**：Presto 分支 **tip** 补充多 Query / 显式 `presto_query_id` 指引。
+- **单测**：`tests/test_presto_hints.py`。
+
+**文档与 Skill**
+
+- **`docs/guides/MCP_TOOLS.md`**：新增 **「Agent triage: MCP and query failures」**；更新日志 v3.5.19；scheduler-query 补充说明 v3.5.19。
+- **`.cursor/skills/spx-bug-trace/SKILL.md`**：**「MCP 失败时的结论约束」** 与 MCP 指南联动。
+- **`docs/guides/SKILL.md`**：v3.5.19 Skill 要点一行。
+- **`mcp-tools/scheduler-query/README.md`**、**`mcp-tools/presto-query/README.md`**：Presto / MCP 参数与排查链接。
+
+**版本号**：`3.5.18` → `3.5.19`（manifest、根 package.json、seatalk-agent/package.json）
+
+### 测试项
+
+- `cd mcp-tools/scheduler-query && python3 tests/test_presto_hints.py`
+- `cd mcp-tools/scheduler-query && python3 tests/test_extract_task_code.py`
+- `python3 -m py_compile mcp-tools/scheduler-query/scheduler_mcp_server.py mcp-tools/scheduler-query/scheduler_task_code.py`
+
+---
+
 ## v3.5.18 -- 2026-04-14 -- `fix` + `feat`: chrome-auth CDP hidden 续期；scheduler 实例编码解析
 
 **提交者**: @tianyi.liang  

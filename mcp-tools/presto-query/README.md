@@ -8,6 +8,8 @@
 
 让AI在Cursor中直接查询Presto数据库。
 
+**MCP 参数名**：工具 **`query_presto`** 的 SQL 参数名为 **`sql`**（勿写成 `query`）。权限类错误（如对 `information_schema` 无权限）需在血缘或目标库表上换用可执行的 `DESCRIBE` / `SELECT ... LIMIT`。Agent 排查顺序见仓库 **`docs/guides/MCP_TOOLS.md`** 章节 **「Agent triage: MCP and query failures」**。
+
 **核心文件:**
 - `presto_mcp_server.py` - MCP服务器
 - `presto_query_tool.py` - `PrestoQueryTool` 类（平台 Agent / 非 MCP Python 集成，直连 Personal API）

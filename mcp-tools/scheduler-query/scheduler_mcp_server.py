@@ -19,7 +19,10 @@ from chrome_auth import get_auth, AuthResult
 from chrome_auth.diagnostic import format_auth_troubleshoot
 from mcp.server.fastmcp import FastMCP
 
-from scheduler_task_code import extract_task_code as _extract_task_code
+from scheduler_task_code import (
+    extract_task_code as _extract_task_code,
+    presto_history_sql_hints as _presto_history_sql_hints,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -922,7 +925,11 @@ def get_instance_detail(task_instance_code: str, env: str = "prod") -> str:
                 )
             else:
                 result["presto_history_url"] = f"{PRESTO_HISTORY_BASE}/query.html?{yarn_id}"
-                result["tip"] = "这是 Presto 任务，使用 get_presto_query_sql 传入 yarn_application_id 可获取实际执行的 SQL"
+                result["tip"] = (
+                    "这是 Presto 任务，可用 get_presto_query_sql（传本实例的 task_instance_code 或 presto_query_id）拉取 History 中的 SQL。"
+                    "注意：Scheduler 的 yarn_application_id 通常只对应本次实例的一次 Presto 提交；若返回的是 ALTER/元数据类语句或不像业务 SQL，"
+                    "请到实例详情核对是否还有其它 Presto Query ID，或直接向 get_presto_query_sql 传入 presto_query_id。"
+                )
 
         return json.dumps(result, ensure_ascii=False, indent=2)
     except Exception as e:
@@ -1893,7 +1900,7 @@ def get_presto_query_sql(presto_query_id: str = "", task_instance_code: str = ""
 
     支持两种使用方式：
     1. 直接提供 presto_query_id（如果已知）
-    2. 提供 task_instance_code，自动从 Scheduler 获取 Presto Query ID
+    2. 提供 task_instance_code，自动从 Scheduler 获取 Presto Query ID（通常仅绑定一条 History 记录；若为 DDL 或非主业务 SQL，见返回字段 presto_sql_warning）
 
     参数:
         presto_query_id: Presto 查询 ID，如 "SG_twspx-scheduled__gateway__5f786fe8_..."
@@ -1924,6 +1931,7 @@ def get_presto_query_sql(presto_query_id: str = "", task_instance_code: str = ""
         session = data.get("session", {})
         stats = data.get("queryStats", {})
 
+        sql_text = data.get("query", "") or ""
         result = {
             "query_id": data.get("queryId"),
             "presto_query_id": presto_query_id,
@@ -1932,7 +1940,7 @@ def get_presto_query_sql(presto_query_id: str = "", task_instance_code: str = ""
             "schema": session.get("schema"),
             "user": session.get("user"),
             "source": session.get("source"),
-            "sql": data.get("query", ""),
+            "sql": sql_text,
             "elapsed_time": stats.get("elapsedTime"),
             "cpu_time": stats.get("totalCpuTime"),
             "peak_memory": stats.get("peakUserMemoryReservation"),
@@ -1940,6 +1948,7 @@ def get_presto_query_sql(presto_query_id: str = "", task_instance_code: str = ""
             "data_output": stats.get("outputDataSize"),
             "history_server_url": f"{PRESTO_HISTORY_BASE}/query.html?{presto_query_id}",
         }
+        result.update(_presto_history_sql_hints(sql_text))
         if task_instance_code:
             result["task_instance_code"] = task_instance_code
         return json.dumps(result, ensure_ascii=False, indent=2)

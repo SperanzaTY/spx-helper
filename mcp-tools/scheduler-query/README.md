@@ -71,6 +71,13 @@
 
 本地校验解析规则（无需 MCP 依赖）：在 `mcp-tools/scheduler-query` 目录执行 `python3 tests/test_extract_task_code.py`。
 
+## Presto History 与 get_presto_query_sql
+
+- Presto 类型实例的 **yarn_application_id** 在多数场景下对应 Presto History 中的 **单条** query。
+- **`get_presto_query_sql`** 在返回 JSON 中会合并 **`presto_sql_kind`**，并在空 SQL、DDL/元数据类语句等情况下附带 **`presto_sql_warning`**，提示到实例详情核对其它 **Presto Query ID** 或显式传入 **`presto_query_id`**。
+- 启发式实现见 **`scheduler_task_code.presto_history_sql_hints`**；单测：`python3 tests/test_presto_hints.py`。
+- Agent 侧通用排查顺序见顶层 **`docs/guides/MCP_TOOLS.md`** 中的 **「Agent triage: MCP and query failures」**。
+
 ## 工具列表
 
 ### Scheduler 任务管理

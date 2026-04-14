@@ -64,6 +64,16 @@ git pull origin release
 | `query_messages_sqlite` (seatalk-reader MCP) | 搜索 SeaTalk 告警群消息，获取 Flink 任务 appId 和历史告警记录 |
 | 代码库文件读取 | 查看 `background.js`/`content.js`/`popup.js` 等源码逻辑 |
 
+### MCP 失败时的结论约束
+
+- 工具返回错误（401、403、Unknown table、Access Denied、`data: null` 等）时，必须在回复中**写明工具名与错误摘要**（可引用返回 JSON 中的 `error` / 诊断字段）；**禁止**在未成功取证时用「代码里就是这样」替代结论。
+- `mcp.json` 中的 server 名称与 Agent 里显示的工具前缀可能不同，以 **Settings → MCP 中实际可用工具** 为准。
+- **Presto**：`query_presto` 使用参数名 **`sql`**（不是 `query`）；对 `information_schema` 等无权限时改用血缘中的物理表或对目标表 `DESCRIBE` / 小样本 `LIMIT`。
+- **Scheduler + Presto**：`get_presto_query_sql` 从实例绑定的 ID 通常只对应 **一条** History 记录；若返回 DDL 或非主业务 SQL，对照 DataSuite 实例页的其它 **Presto Query ID** 或显式传 `presto_query_id`，并阅读工具返回中的 **`presto_sql_warning`**。
+- **DataMap**：列名以接口返回为准；区分「列不存在」与「有列无数据」，勿默认 RI 表必有某字段。
+
+完整检查顺序见仓库 **`docs/guides/MCP_TOOLS.md`** 章节 **「Agent triage: MCP and query failures」**（与「五、常见问题」同文件）。
+
 **GSheet 定位**（与接口血缘 MCP、代码仓库并列理解，勿混为一谈）：
 
 - **可选校验、仅供参考**：不替代 `get_api_lineage` / 直查库表；表内信息与平台/代码不一致时，以 **线上事实（查询结果、DataSuite、代码当前分支）** 为准。

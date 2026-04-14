@@ -2,7 +2,7 @@
 
 > **Shopee 大数据开发助手** — Chrome 扩展 + MCP 工具套件 + SeaTalk AI Agent
 
-[![Version](https://img.shields.io/badge/version-3.5.18-blue.svg)](https://github.com/SperanzaTY/spx-helper/releases)
+[![Version](https://img.shields.io/badge/version-3.5.19-blue.svg)](https://github.com/SperanzaTY/spx-helper/releases)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 SPX Helper 是一套为 Shopee 大数据开发工程师打造的效率工具集，包含四个核心模块：
@@ -125,6 +125,7 @@ GitHub（备份）  ：https://github.com/SperanzaTY/spx-helper
 
 ## 更新日志
 
+- **v3.5.19**：**scheduler-query** `get_presto_query_sql` 增加 **`presto_sql_kind` / `presto_sql_warning`**（`presto_history_sql_hints`）；Presto 实例 **tip** 补充多 Query 说明；**MCP_TOOLS** 与 **spx-bug-trace** 增加 Agent 侧 MCP 失败排查与结论约束；README 联动。发版说明见 [docs/RELEASE_LOG.md](docs/RELEASE_LOG.md)。
 - **v3.5.18**：chrome-auth CDP SSO 续期优先 **`Target.createTarget(hidden)`**（不支持时降级）；**scheduler-query** 实例编码解析（`scheduler_task_code`、DAY/HOUR/MINUTE/MONTH/WEEK/YEAR、`etl_batch`、单测）；远程调试脚本登录提示优先 Scheduler；发版说明见 [docs/RELEASE_LOG.md](docs/RELEASE_LOG.md)。
 - **v3.5.17**：chrome-auth 401 体验（`format_auth_troubleshoot`、DataSuite 多 URL 静默刷新、401 跳过刷新冷却）；scheduler / flink / datamap MCP 鉴权失败说明增强；spx-bug-trace 本地 Confluence 文稿目录；发版说明见 [docs/RELEASE_LOG.md](docs/RELEASE_LOG.md)。
 - **v3.5.16**：Flink 告警与 Bug 排查 Skill 强化（L2 闭环、`query_ck_bundle`、CK 读/写集群说明等）；`presto_query_tool.py` 供平台 Agent 集成；发版说明见 [docs/RELEASE_LOG.md](docs/RELEASE_LOG.md)。

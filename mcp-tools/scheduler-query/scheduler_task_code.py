@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
-"""从 Scheduler taskInstanceCode 解析 taskCode（无 MCP / requests 依赖，便于单测）。"""
+"""Scheduler 辅助：从 taskInstanceCode 解析 taskCode；Presto History SQL 启发式提示（无 MCP / requests 依赖，便于单测）。"""
 
 from __future__ import annotations
 
 import re
+from typing import Any, Dict, Optional
 
 # 实例编码 -> taskCode：去掉首段「业务时间 + 周期 + 分片」等后缀。
 # Studio 常见周期后缀名：DAY / HOUR / MINUTE / MONTH / WEEK / YEAR / QUARTER 等；
@@ -56,3 +57,40 @@ def extract_task_code(task_instance_code: str) -> str:
             if i + 1 < len(tokens) and len(tokens[i + 1]) >= 8 and tokens[i + 1].isdigit():
                 return f"{project}.{'_'.join(tokens[:i+1])}"
     return s
+
+
+def presto_history_sql_hints(sql: Optional[str]) -> Dict[str, Any]:
+    """Heuristics on Presto History `query` text when ID is bound from Scheduler yarnApplicationId (single query)."""
+    hints: Dict[str, Any] = {}
+    s = (sql or "").strip()
+    if not s:
+        hints["presto_sql_warning"] = (
+            "Presto History 返回的 query 文本为空。请到 DataSuite 实例页核对 Yarn 绑定的是否为占位或失败记录，"
+            "或改用已知的 presto_query_id 参数重试 get_presto_query_sql。"
+        )
+        return hints
+    ul = s.lstrip().upper()
+    ddl_prefixes = (
+        "ALTER ",
+        "RENAME ",
+        "CREATE ",
+        "DROP ",
+        "SHOW ",
+        "DESCRIBE ",
+        "GRANT ",
+        "REVOKE ",
+    )
+    if any(ul.startswith(p) for p in ddl_prefixes):
+        hints["presto_sql_kind"] = "ddl_or_metadata"
+        hints["presto_sql_warning"] = (
+            "当前 History 中的 SQL 呈现为 DDL/元数据类语句，未必是业务 INSERT/SELECT。"
+            "Scheduler 的 yarn_application_id 通常只对应一次 Presto 提交；同一实例可能有多条 Query。"
+            "请到实例详情核对其它 Presto Query ID，或向 get_presto_query_sql 直接传入 presto_query_id。"
+        )
+    elif ul.startswith("INSERT"):
+        hints["presto_sql_kind"] = "dml_insert"
+    elif ul.startswith("SELECT") or ul.startswith("(SELECT"):
+        hints["presto_sql_kind"] = "select"
+    else:
+        hints["presto_sql_kind"] = "other"
+    return hints
