@@ -2,7 +2,7 @@
 
 > **Shopee 大数据开发助手** — Chrome 扩展 + MCP 工具套件 + SeaTalk AI Agent
 
-[![Version](https://img.shields.io/badge/version-3.5.20-blue.svg)](https://github.com/SperanzaTY/spx-helper/releases)
+[![Version](https://img.shields.io/badge/version-3.5.21-blue.svg)](https://github.com/SperanzaTY/spx-helper/releases)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 SPX Helper 是一套为 Shopee 大数据开发工程师打造的效率工具集，包含四个核心模块：
@@ -125,6 +125,7 @@ GitHub（备份）  ：https://github.com/SperanzaTY/spx-helper
 
 ## 更新日志
 
+- **v3.5.21**：**scheduler-query** Mart SLA 短链闭环：**`slaInstance/get`** + **`fetch_mart_sla_instances_from_shortlink`**；**`triage_mart_sla_alert`** 默认 **`sla_shortlink_fetch_instances`** 在无正文编码时补全 **taskInstanceCode**；脚本 **`scripts/probe-datasuite-sla-cdp.js`** 辅助 CDP/Network 对照。发版说明见 [docs/RELEASE_LOG.md](docs/RELEASE_LOG.md)。
 - **v3.5.20**：**scheduler-query** Mart SLA（**`parse_mart_sla_alert`** / **`triage_mart_sla_alert`**、**`resolve_mart_sla_shortlink`** / ``shp.ee``、**`extract_task_code`** 支持 **datahub.bti**）；**Git hooks** 发版 manifest **相对主远程 `release` 最多领先一档**（**`pre-push`** + **`pre-commit`** 共用 **`.githooks/lib/version-step.sh`**）；文档与规则索引同步。发版说明见 [docs/RELEASE_LOG.md](docs/RELEASE_LOG.md)。
 - **v3.5.19**：**scheduler-query** `get_presto_query_sql` 增加 **`presto_sql_kind` / `presto_sql_warning`**（`presto_history_sql_hints`）；Presto 实例 **tip** 补充多 Query 说明；**MCP_TOOLS** 与 **spx-bug-trace** 增加 Agent 侧 MCP 失败排查与结论约束；README 联动。发版说明见 [docs/RELEASE_LOG.md](docs/RELEASE_LOG.md)。
 - **v3.5.18**：chrome-auth CDP SSO 续期优先 **`Target.createTarget(hidden)`**（不支持时降级）；**scheduler-query** 实例编码解析（`scheduler_task_code`、DAY/HOUR/MINUTE/MONTH/WEEK/YEAR、`etl_batch`、单测）；远程调试脚本登录提示优先 Scheduler；发版说明见 [docs/RELEASE_LOG.md](docs/RELEASE_LOG.md)。

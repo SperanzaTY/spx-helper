@@ -30,6 +30,11 @@ def _collect_instance_codes(text: str) -> List[str]:
     return out
 
 
+def collect_instance_codes_from_text(text: str) -> List[str]:
+    """对任意文本（含 JSON 序列化结果）抽取 Scheduler ``taskInstanceCode`` 形态编码。"""
+    return _collect_instance_codes(text or "")
+
+
 def parse_mart_sla_alert(alert_text: str) -> Dict[str, Any]:
     """从 SeaTalk / 邮件粘贴的「新 mart SLA」英文告警中提取结构化字段。
 
@@ -116,8 +121,9 @@ def build_triage_markdown(parsed: Dict[str, Any], instance_blocks: List[Dict[str
 
     if not instance_blocks:
         lines.append(
-            "**Scheduler**: 未从正文中解析到 `taskInstanceCode`，"
-            "请到 DataSuite 详情页复制实例编码后使用 `get_instance_detail`。"
+            "**Scheduler**: 未关联到任何 `taskInstanceCode`。"
+            "若告警仅有短链，请确认已用带 Cookie 的 MCP 调用 ``slaInstance/get`` 补全（见 ``triage_mart_sla_alert`` 的 "
+            "``sla_shortlink_fetch_instances``），或在详情页 Network 中过滤 ``slaInstance`` 自查。"
         )
     else:
         lines.append("### 关联实例（Scheduler）")

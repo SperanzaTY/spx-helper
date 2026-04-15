@@ -75,7 +75,7 @@
 
 其它命名形态若无法匹配上述规则，会回退到旧逻辑（兼容部分非标准 studio 实例）；仍无法解析时 **taskCode 与实例编码相同**，可能导致接口返回 `data: null`，需对照 Scheduler 页面上的任务编码核对。
 
-本地校验解析规则（无需 MCP 依赖）：在 `mcp-tools/scheduler-query` 目录执行 `python3 tests/test_extract_task_code.py`；Mart SLA 解析单测：`python3 tests/test_mart_sla_parser.py`。
+本地校验解析规则（无需 MCP 依赖）：在 `mcp-tools/scheduler-query` 目录执行 `python3 tests/test_extract_task_code.py`；Mart SLA 解析单测：`python3 tests/test_mart_sla_parser.py`；**`python3 tests/test_mart_sla_instance_api.py`**。
 
 ## 新 Mart SLA 告警（`parse_mart_sla_alert` / `triage_mart_sla_alert`）
 
@@ -85,11 +85,12 @@
 |------|------|
 | `parse_mart_sla_alert(alert_text)` | 仅本地解析，不请求 Scheduler |
 | `resolve_mart_sla_shortlink(shp_url)` | 将 **`https://shp.ee/...`** 短链 HEAD 一次，从 ``Location`` 解析出 **DataSuite** ``/scheduler/sla/instance/detail/...`` 的浏览器打开链接（**无需 Cookie**；不调用页面内 XHR） |
-| `triage_mart_sla_alert(alert_text, env?, max_instances?, deep_spark?, resolve_shortlinks?)` | 解析后对每个实例（默认最多 3 个）调用 `get_instance_detail`、`get_instance_log`；`deep_spark=true` 时对 Spark 实例额外调用 `get_spark_app_summary`（默认不做完整 `diagnose_spark_app`，避免过慢）；**默认**对正文中的 ``shp.ee`` 填充 **`shortlink_resolutions`**（与 `resolve_mart_sla_shortlink` 相同逻辑，可设 `resolve_shortlinks=false` 关闭） |
+| `fetch_mart_sla_instances_from_shortlink(shp_url, env?)` | 短链解析后，用 **与 Scheduler 相同的 Chrome Cookie** 调用 **`GET {datasuite}/sla/slaInstance/get`**（非 prod 为 ``/sla/dev/``、``/sla/uat/`` 等），从返回体抽取 **taskInstanceCode**（含 ``curRunTaskInstanceCode`` / Gantt 嵌套字段） |
+| `triage_mart_sla_alert(alert_text, env?, max_instances?, deep_spark?, resolve_shortlinks?, sla_shortlink_fetch_instances?)` | 解析后对每个实例（默认最多 3 个）调用 `get_instance_detail`、`get_instance_log`；**默认** ``sla_shortlink_fetch_instances=true``：正文无 **taskInstanceCode** 时，对 ``shp.ee`` 走 **slaInstance/get** 补全后再拉 Scheduler；`deep_spark=true` 时对 Spark 实例额外调用 `get_spark_app_summary`；**默认**填充 **`shortlink_resolutions`**（可设 `resolve_shortlinks=false`）；补全过程见 **`sla_shortlink_fetch_trace`** |
 
 返回 JSON；`triage_mart_sla_alert` 另含 `markdown_report` 简报，便于直接贴到值班群。
 
-**关于短链与「真实 API」**：`shp.ee` 的 301 响应里已带 **DataSuite SLA 详情路径**（经 ``shopeemobile`` 落地页的 ``pc=`` 参数），故**不必用 CDP**即可还原浏览器 URL。若要把**详情 JSON**也拉进 MCP，仍需在已登录 DataSuite 的 Chrome 里打开该页，从 **DevTools → Network** 复制 XHR 的 path，再在 `scheduler-query` 里用现有 `_request` + Cookie 接入（欢迎把样例发给维护者）。
+**关于短链**：`shp.ee` 的 **HEAD** 即可还原浏览器打开的 SLA 详情 URL（**无需 Cookie**）。要从详情页同源 JSON 拉 **Scheduler 实例编码**，MCP 已接入 SLA 子服务的 **`slaInstance/get`**（路径经 Confluence / Web API regression 对照）。若接口升级或权限异常，可用仓库根 **`scripts/probe-datasuite-sla-cdp.js`** 列出本机 Chrome CDP 中含 DataSuite 的 tab，在 **DevTools → Network** 过滤关键字 **`slaInstance`** 与 MCP 请求对比。
 
 ## Presto History 与 get_presto_query_sql
 
@@ -132,6 +133,9 @@
 
 #### `resolve_mart_sla_shortlink`
 将告警中的 **`shp.ee`** 短链解析为 **DataSuite SLA 详情页** 完整 URL（HEAD + 解析 ``Location``，无需登录）。
+
+#### `fetch_mart_sla_instances_from_shortlink`
+短链 + Cookie 调用 **`slaInstance/get`**，返回抽取的 **`task_instance_codes`** 与原始响应摘要。
 
 #### `get_task_lineage`
 查询任务的上下游血缘关系。

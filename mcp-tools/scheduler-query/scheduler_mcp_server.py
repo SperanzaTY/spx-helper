@@ -29,6 +29,10 @@ from mart_sla_parser import (
     instance_next_steps as _mart_sla_instance_tips,
 )
 from mart_sla_shortlink import resolve_mart_sla_shortlink as _resolve_mart_sla_shortlink
+from mart_sla_instance_api import (
+    build_sla_instance_get_params as _build_sla_instance_get_params,
+    extract_task_codes_from_sla_instance_get as _extract_codes_from_sla_get,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -140,6 +144,68 @@ def _request(method: str, path: str, params: dict = None, json_body: dict = None
                 continue
             raise RuntimeError(f"请求 {path} 失败: {e}") from e
     return {}
+
+
+def _sla_root(env: str = "") -> str:
+    """SLA 子服务根路径（与 Confluence「Domain + /sla + env」一致；prod 无 env 段）。"""
+    e = (env or "prod").strip().lower()
+    if not e or e == "prod":
+        return f"{BASE_URL}/sla"
+    if e == "staging":
+        return f"{BASE_URL}/sla/uat"
+    mapped = ENV_PATH_MAP.get(e, e)
+    return f"{BASE_URL}/sla/{mapped}"
+
+
+def _sla_request(method: str, rel_path: str, params: dict = None, env: str = "") -> dict:
+    """调用 ``datasuite.shopee.io/sla/...``（浏览器 Cookie，与 Scheduler 主 API 同源）。"""
+    root = _sla_root(env)
+    url = f"{root}/{rel_path.lstrip('/')}"
+    cookies = _load_cookies()
+    headers = HEADERS.copy()
+    headers["referer"] = f"{BASE_URL}/scheduler/sla/"
+    if "CSRF-TOKEN" in cookies:
+        headers["x-csrf-token"] = cookies["CSRF-TOKEN"]
+
+    for attempt in range(MAX_RETRIES + 1):
+        try:
+            resp = requests.request(
+                method,
+                url,
+                params=params,
+                cookies=cookies,
+                headers=headers,
+                timeout=30,
+            )
+            if resp.status_code in (401, 403):
+                if attempt < MAX_RETRIES:
+                    logger.warning(f"SLA API {resp.status_code} 重试中，刷新 cookie...")
+                    cookies = _load_cookies(force=True, auth_failed=True)
+                    if "CSRF-TOKEN" in cookies:
+                        headers["x-csrf-token"] = cookies["CSRF-TOKEN"]
+                    continue
+                raise RuntimeError(
+                    f"SLA 请求 {rel_path} 失败: {resp.status_code}\n"
+                    f"认证与 Cookie 诊断:\n{_diag(cookies)}\n"
+                    f"请在 Chrome 中打开 {BASE_URL} 并确认已登录。"
+                )
+            resp.raise_for_status()
+            return resp.json()
+        except requests.RequestException as e:
+            if attempt < MAX_RETRIES:
+                time.sleep(1)
+                continue
+            raise RuntimeError(f"SLA 请求 {rel_path} 失败: {e}") from e
+    return {}
+
+
+def _sla_instance_get(resolved_shortlink: Dict[str, Any], env: str = "") -> Dict[str, Any]:
+    """GET ``slaInstance/get``，入参来自 ``resolve_mart_sla_shortlink`` 的结构化字段。"""
+    params = _build_sla_instance_get_params(resolved_shortlink)
+    if not params:
+        return {"ok": False, "error": "shortlink 解析结果缺少 slaCode 或 sla_instance_key"}
+    data = _sla_request("GET", "slaInstance/get", params=params, env=env)
+    return {"ok": True, "response": data, "request_params": params}
 
 
 # ──────────────────────────── 辅助函数 ────────────────────────────
@@ -2111,8 +2177,8 @@ def resolve_mart_sla_shortlink(shp_url: str) -> str:
     原理：对短链发 HTTP HEAD，读取 ``Location``；若为 ``shopeemobile.com`` 落地页，则提取
     查询参数 ``pc``（URL 编码的 datasuite 链接）及 ``projectCode`` / ``slaBizTime``，拼出完整打开链接。
 
-    说明：本工具**不**调用 DataSuite 后端 JSON API；页面内 XHR 需在已登录 Chrome 的 DevTools 中自行发现，
-    若你提供 API 路径可再接入 ``_request`` 做结构化拉取。
+    说明：本工具**不**调用 DataSuite 后端 JSON API。若需从短链得到 **taskInstanceCode**，请用
+    **`fetch_mart_sla_instances_from_shortlink`** 或带 **`sla_shortlink_fetch_instances`** 的 **`triage_mart_sla_alert`**（Cookie 调 ``slaInstance/get``）。
 
     参数:
         shp_url: 完整短链，如 ``https://shp.ee/ef9mfKa4``
@@ -2123,6 +2189,42 @@ def resolve_mart_sla_shortlink(shp_url: str) -> str:
     try:
         data = _resolve_mart_sla_shortlink(shp_url)
         return json.dumps(data, ensure_ascii=False, indent=2)
+    except Exception as e:
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+
+@mcp.tool()
+def fetch_mart_sla_instances_from_shortlink(shp_url: str, env: str = "prod") -> str:
+    """
+    短链闭环：``shp.ee`` -> HEAD 还原 DataSuite SLA 详情参数 -> ``GET .../sla/slaInstance/get`` -> 抽取 ``taskInstanceCode``。
+
+    需本机 Chrome 已登录 ``datasuite.shopee.io``（与 scheduler-query 其它工具相同的 Cookie 来源）。
+    用于正文不含实例编码、仅告警短链时的排查；亦可与 ``get_instance_detail`` 串联。
+
+    参数:
+        shp_url: 完整 ``https://shp.ee/...`` 短链
+        env: prod（默认）或 dev / staging
+
+    返回:
+        JSON：含 ``shortlink``、``sla_instance_get``、``task_instance_codes``、``note``。
+    """
+    try:
+        res = _resolve_mart_sla_shortlink(shp_url)
+        out: Dict[str, Any] = {"shortlink": res, "env": env}
+        if not res.get("ok"):
+            out["task_instance_codes"] = []
+            out["note"] = "短链解析失败，未请求 SLA 接口"
+            return json.dumps(out, ensure_ascii=False, indent=2)
+        api = _sla_instance_get(res, env)
+        out["sla_instance_get"] = api
+        resp = api.get("response") if isinstance(api, dict) else {}
+        codes = _extract_codes_from_sla_get(resp)
+        out["task_instance_codes"] = codes
+        out["note"] = (
+            "已从 slaInstance/get 抽取编码；若为空请检查 success 字段与登录态，"
+            "或用 scripts/probe-datasuite-sla-cdp.js 对照浏览器 Network。"
+        )
+        return json.dumps(out, ensure_ascii=False, indent=2)
     except Exception as e:
         return json.dumps({"error": str(e)}, ensure_ascii=False)
 
@@ -2156,6 +2258,7 @@ def triage_mart_sla_alert(
     max_instances: int = 3,
     deep_spark: bool = False,
     resolve_shortlinks: bool = True,
+    sla_shortlink_fetch_instances: bool = True,
 ) -> str:
     """
     新 Mart SLA 告警分诊：解析正文并自动拉取 Scheduler 实例详情与日志（可选 Spark 摘要）。
@@ -2164,6 +2267,10 @@ def triage_mart_sla_alert(
     调用 get_instance_detail、get_instance_log；若 deep_spark=true 且存在 YARN application id，
     再调用 get_spark_app_summary（不做完整 diagnose_spark_app，避免默认路径过慢）。
 
+    当正文未带实例编码但含 ``shp.ee`` 短链时，若 ``sla_shortlink_fetch_instances=true``（默认），
+    会在已登录 DataSuite 的 Chrome Cookie 下调用 SLA 子服务 ``GET /sla/slaInstance/get``，
+    从返回体提取 ``curRunTaskInstanceCode`` / ``estimateLastTaskInstanceCode`` 等，再拉 Scheduler 详情。
+
     参数:
         alert_text: 完整告警文本
         env: prod（默认）或 dev / staging 等，与 scheduler-query 其它工具一致
@@ -2171,6 +2278,7 @@ def triage_mart_sla_alert(
         deep_spark: 是否额外拉 Spark History 应用摘要（需已登录 Keyhole）
         resolve_shortlinks: 是否对正文中的 ``shp.ee`` 链接调用与 ``resolve_mart_sla_shortlink`` 相同的 HEAD 解析，
             产出 ``datasuite_sla_open_url``（无需 Cookie，默认 True）
+        sla_shortlink_fetch_instances: 正文无实例编码时，是否用短链解析结果调用 ``slaInstance/get`` 补全编码（默认 True）
 
     返回:
         JSON，含 parsed、markdown_report、instances（各含 detail / log / spark_summary 可选）等。
@@ -2178,7 +2286,58 @@ def triage_mart_sla_alert(
     try:
         parsed = _parse_mart_sla_alert(alert_text)
         lim = max(0, min(max_instances, 20))
-        codes = (parsed.get("task_instance_codes") or [])[:lim]
+
+        resolutions: List[Dict[str, Any]] = []
+        if resolve_shortlinks:
+            for u in (parsed.get("detail_urls") or [])[:5]:
+                if "shp.ee" in u.lower():
+                    try:
+                        resolutions.append(_resolve_mart_sla_shortlink(u))
+                    except Exception as se:
+                        resolutions.append({"ok": False, "input_url": u, "error": str(se)})
+
+        parsed_codes: List[str] = list(parsed.get("task_instance_codes") or [])
+        codes: List[str] = list(parsed_codes)
+        sla_fetch_trace: List[Dict[str, Any]] = []
+
+        if sla_shortlink_fetch_instances and not parsed_codes:
+            to_scan = list(resolutions)
+            if not to_scan:
+                for u in (parsed.get("detail_urls") or [])[:5]:
+                    if "shp.ee" not in u.lower():
+                        continue
+                    try:
+                        to_scan.append(_resolve_mart_sla_shortlink(u))
+                    except Exception as se:
+                        sla_fetch_trace.append({"input_url": u, "ok": False, "error": str(se)})
+            for res in to_scan:
+                trace: Dict[str, Any] = {"shortlink_resolution": res}
+                if not res.get("ok"):
+                    sla_fetch_trace.append(trace)
+                    continue
+                try:
+                    api = _sla_instance_get(res, env)
+                except Exception as ae:
+                    trace["sla_instance_get"] = {"ok": False, "error": str(ae)}
+                    sla_fetch_trace.append(trace)
+                    continue
+                trace["sla_instance_get"] = api
+                resp = api.get("response") if isinstance(api, dict) else {}
+                extracted = _extract_codes_from_sla_get(resp)
+                trace["task_instance_codes_extracted"] = extracted
+                sla_fetch_trace.append(trace)
+                for c in extracted:
+                    if c not in codes:
+                        codes.append(c)
+
+        seen_c: set = set()
+        uniq_codes: List[str] = []
+        for c in codes:
+            if c and c not in seen_c:
+                seen_c.add(c)
+                uniq_codes.append(c)
+        codes = uniq_codes[:lim]
+
         instance_blocks: List[Dict[str, Any]] = []
         instances_payload: List[Dict[str, Any]] = []
 
@@ -2228,21 +2387,17 @@ def triage_mart_sla_alert(
             "env": env,
             "deep_spark": deep_spark,
             "resolve_shortlinks": resolve_shortlinks,
+            "sla_shortlink_fetch_instances": sla_shortlink_fetch_instances,
         }
-        if resolve_shortlinks:
-            resolutions: List[Dict[str, Any]] = []
-            for u in (parsed.get("detail_urls") or [])[:5]:
-                if "shp.ee" in u.lower():
-                    try:
-                        resolutions.append(_resolve_mart_sla_shortlink(u))
-                    except Exception as se:
-                        resolutions.append({"ok": False, "input_url": u, "error": str(se)})
-            if resolutions:
-                out["shortlink_resolutions"] = resolutions
+        if resolutions:
+            out["shortlink_resolutions"] = resolutions
+        if sla_fetch_trace:
+            out["sla_shortlink_fetch_trace"] = sla_fetch_trace
         if not codes:
             out["hint"] = (
-                "正文中未解析到 taskInstanceCode 时，请到 DataSuite SLA 详情页复制实例编码，"
-                "再使用 get_instance_detail / get_instance_log。"
+                "未能得到 Scheduler 实例编码：请确认 Chrome 已登录 DataSuite（scheduler-query Cookie），"
+                "且 SLA 接口返回成功；仍失败时可打开 shortlink 解析出的详情页，在 DevTools Network 中过滤 "
+                "`slaInstance` 核对请求与响应。"
             )
         return json.dumps(out, ensure_ascii=False, indent=2)
     except Exception as e:

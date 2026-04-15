@@ -6,6 +6,34 @@
 
 ---
 
+## v3.5.21 -- 2026-04-15 -- `feat`: Mart SLA 短链经 slaInstance/get 自动补全实例编码
+
+**提交者**: @tianyi.liang  
+**Commit Type**: feat（scheduler-query）；相对 **v3.5.20** 升 PATCH 至 **v3.5.21**
+
+### 变更说明
+
+**scheduler-query**
+
+- **`mart_sla_instance_api`**：从 ``slaInstance/get`` JSON 抽取 ``taskInstanceCode``；**`fetch_mart_sla_instances_from_shortlink`** 独立工具（短链 + Cookie 调 SLA 子服务）。
+- **`triage_mart_sla_alert`**：新增参数 **`sla_shortlink_fetch_instances`**（默认 True）；正文无编码时，用 ``shp.ee`` 解析结果调用 **`GET /sla/slaInstance/get`**（与 Confluence SLA Web API 一致）补全编码后再拉 Scheduler 详情；返回 **`sla_shortlink_fetch_trace`** 便于排障。
+- **`mart_sla_parser.collect_instance_codes_from_text`**：供 JSON 反序列化后复用正则抽取。
+- **脚本**：仓库根 **`scripts/probe-datasuite-sla-cdp.js`**，列出本机 Chrome CDP 中含 DataSuite/SLA 的 tab，便于对照 Network 关键字 ``slaInstance``。
+- **打包**：`pyproject.toml` `only-include` 增加 **`mart_sla_instance_api.py`**；单测 **`tests/test_mart_sla_instance_api.py`**。
+
+**文档**
+
+- **`mcp-tools/scheduler-query/README.md`**、**`docs/guides/MCP_TOOLS.md`**、**`.cursor/rules/mcp-tools.mdc`**、**根 `README.md`**。
+
+**版本号**：`3.5.20` → `3.5.21`（manifest、根 package.json、seatalk-agent/package.json）
+
+### 测试项
+
+- `cd mcp-tools/scheduler-query && python3 tests/test_mart_sla_instance_api.py`
+- `python3 -m py_compile mcp-tools/scheduler-query/mart_sla_instance_api.py mcp-tools/scheduler-query/scheduler_mcp_server.py`
+
+---
+
 ## v3.5.20 -- 2026-04-15 -- `feat`: Mart SLA（解析 / 短链 / 分诊）与发版 manifest 步长 Hook
 
 **提交者**: @tianyi.liang  

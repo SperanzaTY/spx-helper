@@ -1,6 +1,6 @@
 # Chrome 扩展使用指南
 
-> SPX Helper Chrome 扩展 — Shopee 大数据开发日常工具箱（当前版本 v3.5.20）
+> SPX Helper Chrome 扩展 — Shopee 大数据开发日常工具箱（当前版本 v3.5.21）
 
 ---
 
@@ -73,7 +73,9 @@ chrome-extension/
 
 ## 版本
 
-当前版本：v3.5.20（与 `chrome-extension/manifest.json` 及项目整体版本号同步）
+当前版本：v3.5.21（与 `chrome-extension/manifest.json` 及项目整体版本号同步）
+
+**v3.5.21**：manifest 与根目录发版号 PATCH 同步；扩展功能代码无变更，拉取后仅需在 `chrome://extensions/` 刷新扩展以同步版本显示。
 
 **v3.5.20**：manifest 与根目录发版号 PATCH 同步；扩展功能代码无变更，拉取后仅需在 `chrome://extensions/` 刷新扩展以同步版本显示。
 
