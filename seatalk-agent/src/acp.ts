@@ -11,6 +11,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import * as acp from '@agentclientprotocol/sdk';
+import { checkCodexCli, listCodexModels, spawnCodexAgent } from './codex-app-server.js';
 
 const AGENT_BIN = path.join(os.homedir(), '.local', 'bin', 'agent');
 
@@ -57,6 +58,21 @@ export interface ToolCallInfo {
 }
 export type OnToolCall = (info: ToolCallInfo) => void;
 export type OnModeUpdate = (modeId: string) => void;
+export interface PlanStepInfo {
+  step: string;
+  status: 'pending' | 'in_progress' | 'completed';
+}
+export type OnPlanUpdate = (info: { explanation?: string; steps: PlanStepInfo[] }) => void;
+export interface AgentApprovalRequest {
+  requestId: string;
+  kind: 'command' | 'file' | 'permissions';
+  title: string;
+  command?: string;
+  cwd?: string;
+  reason?: string;
+  preview?: string;
+}
+export type AgentApprovalDecision = 'accept' | 'acceptForSession' | 'decline' | 'cancel';
 export interface UsageInfo {
   contextSize: number;
   contextUsed: number;
@@ -71,7 +87,34 @@ export interface AcpCallbacks {
   onThoughtChunk?: OnThoughtChunk;
   onToolCall?: OnToolCall;
   onModeUpdate?: OnModeUpdate;
+  onPlanUpdate?: OnPlanUpdate;
   onUsageUpdate?: OnUsageUpdate;
+  onApprovalRequest?: (info: AgentApprovalRequest) => void;
+}
+
+export type AgentBackend = 'cursor-acp' | 'codex-app-server';
+
+export interface AgentRuntimeConfig {
+  approvalPolicy?: 'untrusted' | 'on-request' | 'never';
+  sandbox?: '' | 'read-only' | 'workspace-write' | 'danger-full-access';
+  webSearch?: '' | 'disabled' | 'cached' | 'live';
+}
+
+export interface AgentPromptUsage {
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  totalTokens?: number | null;
+  cachedReadTokens?: number | null;
+  thoughtTokens?: number | null;
+}
+
+export interface AgentConnection {
+  prompt(params: { sessionId: string; prompt: Array<{ type: string; text?: string; path?: string; url?: string }> }): Promise<{ stopReason?: string; usage?: AgentPromptUsage | null }>;
+  cancel(params: { sessionId: string }): Promise<void>;
+  newSession(params: { cwd: string; mcpServers?: acp.McpServer[] }): Promise<{ sessionId: string; models?: { availableModels?: ModelInfo[]; currentModelId?: string } }>;
+  setSessionMode(params: { sessionId: string; modeId: string }): Promise<void>;
+  unstable_setSessionModel(params: { sessionId: string; modelId: string }): Promise<void>;
+  resolveApproval(params: { requestId: string; decision: AgentApprovalDecision }): Promise<void>;
 }
 
 // ── SeaTalkAcpClient — implements acp.Client ──
@@ -318,14 +361,71 @@ export interface ModelInfo {
 }
 
 export interface AgentProcess {
-  connection: acp.ClientSideConnection;
+  backend: AgentBackend;
+  connection: AgentConnection;
   sessionId: string;
   proc: ChildProcess;
-  client: SeaTalkAcpClient;
+  client: SeaTalkAcpClient | null;
   availableModels: ModelInfo[];
   currentModelId: string;
   resumed: boolean;
   supportsImage: boolean;
+}
+
+function getPreferredBackend(): AgentBackend {
+  const raw = (process.env.SPX_AGENT_BACKEND || 'auto').trim().toLowerCase();
+  if (raw === 'cursor' || raw === 'cursor-acp' || raw === 'acp') return 'cursor-acp';
+  if (raw === 'codex' || raw === 'codex-app-server' || raw === 'app-server') return 'codex-app-server';
+
+  const cursorOk = checkAgentCli().ok;
+  if (cursorOk) return 'cursor-acp';
+
+  const codexOk = checkCodexCli().ok;
+  if (codexOk) return 'codex-app-server';
+
+  return 'cursor-acp';
+}
+
+class AcpConnectionAdapter implements AgentConnection {
+  constructor(private readonly connection: acp.ClientSideConnection) {}
+
+  async prompt(params: { sessionId: string; prompt: Array<{ type: string; text?: string }> }) {
+    const res = await this.connection.prompt({
+      sessionId: params.sessionId,
+      prompt: params.prompt as any,
+    });
+    return {
+      stopReason: res.stopReason,
+      usage: (res as any).usage ?? null,
+    };
+  }
+
+  async cancel(params: { sessionId: string }) {
+    await this.connection.cancel({ sessionId: params.sessionId });
+  }
+
+  async newSession(params: { cwd: string; mcpServers?: acp.McpServer[] }) {
+    const res = await this.connection.newSession({
+        cwd: params.cwd,
+        mcpServers: params.mcpServers || [],
+      });
+    return { sessionId: res.sessionId };
+  }
+
+  async setSessionMode(params: { sessionId: string; modeId: string }) {
+    await this.connection.setSessionMode({ sessionId: params.sessionId, modeId: params.modeId });
+  }
+
+  async unstable_setSessionModel(params: { sessionId: string; modelId: string }) {
+    await this.connection.unstable_setSessionModel({
+      sessionId: params.sessionId,
+      modelId: params.modelId,
+    });
+  }
+
+  async resolveApproval(_params: { requestId: string; decision: AgentApprovalDecision }) {
+    return;
+  }
 }
 
 export async function spawnAgent(opts: {
@@ -334,8 +434,15 @@ export async function spawnAgent(opts: {
   log: (msg: string) => void;
   modelId?: string;
   previousSessionId?: string;
-  sessionMode?: 'ask' | 'agent';
+  sessionMode?: 'ask' | 'agent' | 'plan';
+  runtimeConfig?: AgentRuntimeConfig;
 }): Promise<AgentProcess> {
+  const backend = getPreferredBackend();
+  opts.log(`agent backend selected: ${backend}`);
+  if (backend === 'codex-app-server') {
+    return spawnCodexAgent(opts);
+  }
+
   const { workspacePath, callbacks, log, modelId } = opts;
 
   const cliCheck = checkAgentCli();
@@ -450,10 +557,25 @@ export async function spawnAgent(opts: {
     log('set_mode not supported, skipping');
   }
 
-  return { connection, sessionId, proc, client, availableModels: [], currentModelId: '', resumed, supportsImage };
+  return {
+    backend: 'cursor-acp',
+    connection: new AcpConnectionAdapter(connection),
+    sessionId,
+    proc,
+    client,
+    availableModels: [],
+    currentModelId: '',
+    resumed,
+    supportsImage,
+  };
 }
 
 export async function listModels(log: (msg: string) => void): Promise<{ models: ModelInfo[]; currentModelId: string }> {
+  const backend = getPreferredBackend();
+  if (backend === 'codex-app-server') {
+    return listCodexModels(log);
+  }
+
   const cliCheck = checkAgentCli();
   if (!cliCheck.ok) {
     log(`agent CLI not found, skipping model listing`);

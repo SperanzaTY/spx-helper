@@ -1,9 +1,9 @@
-// sidebar-app.js — Cursor ACP chat panel (Cursor-native style)
+// sidebar-app.js — Agent chat panel with Cursor/Codex backend branding
 // Uses self-contained window.__cursorUI (no seatalk-enhance dependency)
 (function () {
   var UI = window.__cursorUI;
   if (!UI || !UI.streaming || !UI.createPanel) {
-    console.warn('[cursor-acp] window.__cursorUI not ready, skipping');
+    console.warn('[agent-ui] window.__cursorUI not ready, skipping');
     return;
   }
   // Clean up previous injection: DOM elements, event listeners, observers
@@ -79,14 +79,21 @@
   var MODE_KEY = '__cursorMode';
   var isProcessing = false, contextData = null, currentMode = (function () { try { return localStorage.getItem(MODE_KEY) || 'agent'; } catch (_) { return 'agent'; } })();
   var cachedStatus = { connected: false, text: 'Connecting...' };
+  var cachedBackend = 'cursor-acp';
+  var cachedRuntimeConfig = { approvalPolicy: 'never', sandbox: 'danger-full-access', webSearch: 'live' };
+  var runtimeConfigPushTimer = null;
+  var lastBackendSeenAt = 0;
+  var BACKEND_STALE_MS = 15000;
   var cachedModels = { models: [], currentModelId: '' };
   var cachedWorkspace = '', cachedWorkspaceList = [];
   var panelHandle = null, messagesEl = null, inputEl = null, sendBtn = null, stopBtn = null;
-  /** Last context-window stats from ACP usage_update; turn total from prompt result (fallback when size is 0). */
+  /** Last context-window stats from backend usage_update; turn total from prompt result (fallback when size is 0). */
   var _usageCtxSize = 0, _usageCtxUsed = 0, _usageTurnTotal = 0;
   var modeSelect = null, modelSelect = null, ctxBar = null, ctxLabel = null;
   var wsLabel = null;
   var turnView = null, turnEl = null, turnFullText = '', turnFullThinking = '';
+  var turnPlan = null;
+  var turnPlanEl = null;
   var turnAccumText = []; // all intermediate text segments (preserved across tool calls)
   var turnToolCalls = {}; // accumulate tool call state across tool_start / tool_update
   var pendingImages = []; // [{data: base64String, mimeType, name}]
@@ -100,6 +107,7 @@
   var settingsBtn = null, settingsDd = null, usageBadgeEl = null;
   var globalAgentSettingsPopEl = null, grantToggleEl = null, _globalSettingsPopOutsideHandler = null;
   var _railSettingsResizeHandler = null;
+  var _statusRefreshTimer = null;
   var _updateJustApplied = false;
 
   // Remote state
@@ -119,6 +127,77 @@
   var _alarmStatus = { enabled: false, monitoredSessions: [], promptTemplate: '', sessionSettings: {}, pendingCount: 0, pending: [], recentRecords: [] };
   var _alarmPopoverEl = null;
 
+  function isCodexBackend() {
+    return cachedBackend === 'codex-app-server';
+  }
+
+  function backendBrand() {
+    return isCodexBackend() ? 'Codex' : 'Cursor';
+  }
+
+  function backendProtocol() {
+    return isCodexBackend() ? 'JSON-RPC' : 'ACP';
+  }
+
+  function askBrandText() {
+    return 'Ask ' + backendBrand();
+  }
+
+  function backendHintProduct() {
+    return isCodexBackend() ? 'Codex' : 'Cursor IDE';
+  }
+
+  function sandboxLabel(value) {
+    if (value === 'read-only') return 'Read Only';
+    if (value === 'workspace-write') return 'Workspace Write';
+    if (value === 'danger-full-access') return 'Danger Full Access';
+    return 'Default';
+  }
+
+  function refreshBackendBranding() {
+    if (messagesEl && messages.length === 0) renderAllMessages(messagesEl);
+    var qoIcons = document.querySelectorAll('.cursor-qo-icon');
+    for (var i = 0; i < qoIcons.length; i++) qoIcons[i].title = askBrandText();
+    var selFabText = document.querySelector('.cursor-sel-fab span');
+    if (selFabText) selFabText.textContent = askBrandText();
+    if (settingsDd) {
+      var reconnectItem = settingsDd.querySelector('[data-action="reconnect_acp"]');
+      if (reconnectItem) reconnectItem.innerHTML = '<span class="dd-icon"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg></span>重连 ' + backendProtocol();
+    }
+    if (panelHandle && panelHandle.el) {
+      var titleEl = panelHandle.el.querySelector('.hp-panel-title');
+      if (titleEl) titleEl.textContent = backendBrand().toUpperCase();
+    }
+    updatePanelAcpStatus();
+    updateSidebarBtnStatus();
+    renderGlobalAgentSettings();
+  }
+
+  function ensureStatusRefreshTimer() {
+    if (_statusRefreshTimer) return;
+    _statusRefreshTimer = setInterval(function () {
+      updatePanelAcpStatus();
+      updateSidebarBtnStatus();
+    }, 3000);
+  }
+
+  function noteBackendSeen() {
+    lastBackendSeenAt = Date.now();
+  }
+
+  function isBackendStale() {
+    return !lastBackendSeenAt || (Date.now() - lastBackendSeenAt) > BACKEND_STALE_MS;
+  }
+
+  function isBackendInteractive() {
+    return !!cachedStatus.connected && !isBackendStale();
+  }
+
+  function effectiveStatusText() {
+    if (cachedStatus.connected && isBackendStale()) return 'Agent disconnected';
+    return cachedStatus.text || (cachedStatus.connected ? 'Connected' : 'Disconnected');
+  }
+
   // ── Persistence ──
   function loadConvs() { try { var r = localStorage.getItem(STORE_KEY); return r ? JSON.parse(r) : []; } catch (_) { return []; } }
   function saveConvs(c) { try { localStorage.setItem(STORE_KEY, JSON.stringify(c.slice(-50))); } catch (_) {} }
@@ -132,6 +211,7 @@
         var o = { role: m.role, text: m.text };
         if (m.thinking) o.thinking = m.thinking.length > 2000 ? m.thinking.substring(0, 2000) + '\n...(思考内容过长，已截断)' : m.thinking;
         if (m.toolSummary) o.toolSummary = m.toolSummary;
+        if (m.plan) o.plan = m.plan;
         return o;
       }),
       summary: first ? first.text.substring(0, 80) : '(empty)',
@@ -229,6 +309,15 @@
 
     // Agent turn
     '.cursor-agent-turn { padding:12px 16px; border-bottom:1px solid var(--cp-border); }',
+    '.cursor-plan-card { margin:0 0 10px; padding:10px 12px; border-radius:8px; background:var(--cp-bg3); border:1px solid var(--cp-border2); }',
+    '.cursor-plan-title { font-size:11px; font-weight:600; color:var(--cp-text2); margin-bottom:6px; text-transform:uppercase; letter-spacing:0.4px; }',
+    '.cursor-plan-expl { font-size:12px; line-height:1.5; color:var(--cp-text-dim); margin-bottom:8px; white-space:pre-wrap; }',
+    '.cursor-plan-list { margin:0; padding:0; list-style:none; display:flex; flex-direction:column; gap:6px; }',
+    '.cursor-plan-item { display:flex; gap:8px; align-items:flex-start; font-size:12px; line-height:1.45; color:var(--cp-text); }',
+    '.cursor-plan-badge { display:inline-flex; align-items:center; justify-content:center; min-width:18px; height:18px; padding:0 6px; border-radius:999px; font-size:10px; font-weight:700; text-transform:uppercase; background:var(--cp-bg4); border:1px solid var(--cp-border3); color:var(--cp-text-dim); }',
+    '.cursor-plan-item.completed .cursor-plan-badge { background:rgba(78,201,176,0.14); border-color:rgba(78,201,176,0.3); color:var(--cp-ok); }',
+    '.cursor-plan-item.in_progress .cursor-plan-badge { background:rgba(86,156,214,0.14); border-color:rgba(86,156,214,0.3); color:var(--cp-accent); }',
+    '.cursor-plan-item.pending .cursor-plan-badge { background:rgba(220,165,97,0.12); border-color:rgba(220,165,97,0.28); color:var(--cp-warn); }',
 
     // Streaming result — markdown rendering
     '.ca-result { font-size:13px; line-height:1.6; color:var(--cp-text); word-break:break-word; cursor:text; user-select:text; }',
@@ -622,7 +711,7 @@
     if (messages.length === 0) {
       container.innerHTML = '<div class="cursor-empty-wrap"><div class="cursor-empty">' +
         '<div class="ce-icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none"><path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5Z" fill="currentColor"/></svg></div>' +
-        '<div class="ce-title">Cursor Agent</div>' +
+        '<div class="ce-title">' + backendBrand() + ' Agent</div>' +
         '<div class="ce-sub">在下方输入问题开始对话</div>' +
         '</div></div>';
       return;
@@ -657,6 +746,7 @@
       } else {
         var turnContainer = document.createElement('div');
         turnContainer.className = 'cursor-agent-turn';
+        if (m.plan) renderPlanCard(turnContainer, m.plan);
         if (m.thinking) {
           var view = sr.createView({ container: turnContainer, prefix: 'ca' });
           view.processChunk({ type: 'thinking_done', thinking: m.thinking });
@@ -687,6 +777,31 @@
     if (stopBtn) stopBtn.style.display = v ? '' : 'none';
   }
 
+  function renderPlanCard(container, planData) {
+    if (!container || !planData) return null;
+    var existing = container.querySelector('.cursor-plan-card');
+    if (existing) existing.remove();
+    var card = document.createElement('div');
+    card.className = 'cursor-plan-card';
+    var html = '<div class="cursor-plan-title">Plan</div>';
+    if (planData.explanation) {
+      html += '<div class="cursor-plan-expl">' + escapeHtml(planData.explanation) + '</div>';
+    }
+    var steps = Array.isArray(planData.steps) ? planData.steps : [];
+    if (steps.length > 0) {
+      html += '<ul class="cursor-plan-list">';
+      for (var i = 0; i < steps.length; i++) {
+        var st = steps[i].status || 'pending';
+        var badge = st === 'completed' ? 'done' : st === 'in_progress' ? 'run' : 'todo';
+        html += '<li class="cursor-plan-item ' + st + '"><span class="cursor-plan-badge">' + badge + '</span><span>' + escapeHtml(steps[i].step || '') + '</span></li>';
+      }
+      html += '</ul>';
+    }
+    card.innerHTML = html;
+    container.insertBefore(card, container.firstChild);
+    return card;
+  }
+
   // ── Turn management ──
   function startTurn() {
     if (turnView) return;
@@ -703,6 +818,8 @@
     turnView.reset();
     turnFullText = '';
     turnFullThinking = '';
+    turnPlan = null;
+    turnPlanEl = null;
     turnAccumText = [];
     turnToolCalls = {};
     messagesEl.scrollTop = messagesEl.scrollHeight;
@@ -725,7 +842,8 @@
     }
     var savedMsg = { role: 'assistant', text: finalText, thinking: turnFullThinking || undefined };
     if (toolSummaries.length > 0) savedMsg.toolSummary = toolSummaries;
-    if (finalText || turnFullThinking || toolSummaries.length > 0) {
+    if (turnPlan && (turnPlan.explanation || (turnPlan.steps && turnPlan.steps.length > 0))) savedMsg.plan = turnPlan;
+    if (finalText || turnFullThinking || toolSummaries.length > 0 || savedMsg.plan) {
       messages.push(savedMsg);
     }
     if (stopReason && stopReason !== 'end_turn' && messagesEl) {
@@ -748,7 +866,7 @@
         messagesEl.scrollTop = messagesEl.scrollHeight;
       }
     }
-    turnView = null; turnEl = null;
+    turnView = null; turnEl = null; turnPlan = null; turnPlanEl = null;
     setProcessingState(false);
     saveCurrentConv();
   }
@@ -795,21 +913,12 @@
     var text = inputEl.value.trim();
     var hasImages = pendingImages.length > 0;
     if ((!text && !hasImages) || isProcessing) return;
-    inputEl.value = ''; inputEl.style.height = '36px';
     var msgImages = hasImages ? pendingImages.slice() : undefined;
-    clearPendingImages();
-    messages.push({ role: 'user', text: text || (msgImages ? '[图片]' : ''), images: msgImages, context: contextData || undefined });
-    renderAllMessages(messagesEl);
-    var typing = document.createElement('div');
-    typing.className = 'ca-typing';
-    typing.innerHTML = '<span></span><span></span><span></span>';
-    messagesEl.appendChild(typing);
-    messagesEl.scrollTop = messagesEl.scrollHeight;
     var payload = { type: 'user_message', text: text || '' };
     if (msgImages) {
       payload.images = msgImages.map(function (img) { return { data: img.data, mimeType: img.mimeType }; });
     }
-    if (contextData) { payload.context = contextData; contextData = null; if (ctxBar) ctxBar.classList.remove('show'); }
+    if (contextData) payload.context = contextData;
     // Attach conversation history for context recovery after restart
     if (messages.length > 1) {
       var hist = [];
@@ -821,10 +930,20 @@
       }
       payload.history = hist;
     }
-    if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify(payload));
+    if (!sendToAgent(payload)) return;
+    inputEl.value = ''; inputEl.style.height = '36px';
+    clearPendingImages();
+    messages.push({ role: 'user', text: text || (msgImages ? '[图片]' : ''), images: msgImages, context: contextData || undefined });
+    renderAllMessages(messagesEl);
+    var typing = document.createElement('div');
+    typing.className = 'ca-typing';
+    typing.innerHTML = '<span></span><span></span><span></span>';
+    messagesEl.appendChild(typing);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+    if (contextData) { contextData = null; if (ctxBar) ctxBar.classList.remove('show'); }
   }
 
-  // ── Ask Cursor: message hover & text selection ──
+  // ── Ask backend agent: message hover & text selection ──
   var SEL_MSG_ITEM = '.messages-message-list-item';
   var SEL_MSG_BUBBLE = '.messages-message-list-item-bubble';
   var SEL_THREAD_ITEM = '.thread-message-list-item';
@@ -940,7 +1059,7 @@
     var icon = document.createElement('span');
     icon.className = 'quick-operation-icon cursor-qo-icon';
     icon.setAttribute('data-menu-key', 'cursor');
-    icon.title = 'Ask Cursor';
+    icon.title = askBrandText();
     icon.innerHTML = CURSOR_ICON_SVG;
     if (lastIcon) {
       menu.insertBefore(icon, lastIcon);
@@ -993,12 +1112,12 @@
   var existingMenus = document.querySelectorAll(SEL_QO_MENU);
   for (var em = 0; em < existingMenus.length; em++) { injectCursorIcon(existingMenus[em]); }
 
-  // Text selection → floating "Ask Cursor" button (clean up stale ones first)
+  // Text selection → floating ask button (clean up stale ones first)
   var oldFabs = document.querySelectorAll('.cursor-sel-fab');
   for (var fi = 0; fi < oldFabs.length; fi++) oldFabs[fi].remove();
   var selFab = document.createElement('button');
   selFab.className = 'cursor-sel-fab';
-  selFab.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><span>Ask Cursor</span>';
+  selFab.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><span>' + askBrandText() + '</span>';
   document.body.appendChild(selFab);
   var selFabTimer = null;
 
@@ -1086,6 +1205,7 @@
   // ── Receive ──
   window.__agentReceive = function (jsonStr) {
     try {
+      noteBackendSeen();
       var d = JSON.parse(jsonStr);
       if (d.type === 'turn_start') {
         if (turnView) return;
@@ -1161,6 +1281,21 @@
       } else if (d.type === 'turn_end') {
         if (!turnView && !turnEl) return;
         endTurn(d.stopReason);
+      } else if (d.type === 'plan_update') {
+        if (!turnEl) startTurn();
+        var nextExpl = d.explanation || '';
+        if ((!d.steps || d.steps.length === 0) && turnPlan && turnPlan.explanation && nextExpl) {
+          nextExpl = turnPlan.explanation + nextExpl;
+        }
+        turnPlan = {
+          explanation: nextExpl || (turnPlan && turnPlan.explanation) || '',
+          steps: d.steps || (turnPlan && turnPlan.steps) || []
+        };
+        turnPlanEl = renderPlanCard(turnEl, turnPlan);
+        if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight;
+      } else if (d.type === 'heartbeat') {
+        updatePanelAcpStatus();
+        updateSidebarBtnStatus();
       } else if (d.type === 'status') {
         var wasDisconnected = !cachedStatus.connected;
         cachedStatus = { connected: !!d.connected, text: d.text || (d.connected ? 'Connected' : 'Disconnected') };
@@ -1176,12 +1311,22 @@
         if (wasDisconnected && cachedStatus.connected && _updateJustApplied) {
           _updateJustApplied = false;
           appendUpdateProgress('Agent 已重新连接');
-          if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: 'update_check' }));
+          sendToAgent({ type: 'update_check' }, { showNotice: false });
           setTimeout(function () {
             closeRailUpdatePop();
             showNewBadge();
           }, 1500);
         }
+      } else if (d.type === 'backend') {
+        cachedBackend = d.backend || 'cursor-acp';
+        refreshBackendBranding();
+      } else if (d.type === 'runtime_config') {
+        cachedRuntimeConfig = {
+          approvalPolicy: d.approvalPolicy || 'never',
+          sandbox: d.sandbox || '',
+          webSearch: d.webSearch || ''
+        };
+        renderGlobalAgentSettings();
       } else if (d.type === 'restart_progress') {
         appendRestartLog(d.text || '');
       } else if (d.type === 'logs') {
@@ -1194,8 +1339,8 @@
         currentMode = savedMode || d.mode || 'agent';
         try { localStorage.setItem(MODE_KEY, currentMode); } catch (_) {}
         updateModeTabs();
-        if (savedMode && savedMode !== d.mode && typeof window.__agentSend === 'function') {
-          window.__agentSend(JSON.stringify({ type: 'set_mode', mode: currentMode }));
+        if (savedMode && savedMode !== d.mode) {
+          sendToAgent({ type: 'set_mode', mode: currentMode }, { showNotice: false });
         }
       } else if (d.type === 'models') {
         cachedModels = { models: d.models || [], currentModelId: d.currentModelId || '' };
@@ -1209,7 +1354,7 @@
           cachedWorkspace = savedWs;
           updateWsLabel();
           saveRecentWorkspace(savedWs);
-          if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: 'set_workspace', path: savedWs }));
+          sendToAgent({ type: 'set_workspace', path: savedWs }, { showNotice: false });
         } else {
           cachedWorkspace = d.path || '';
           updateWsLabel();
@@ -1227,7 +1372,7 @@
           updateWsLabel();
           saveCurrentConv(); currentIdx = -1; messages = []; turnView = null;
           renderAllMessages(messagesEl);
-          if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: 'set_workspace', path: fp }));
+          sendToAgent({ type: 'set_workspace', path: fp });
         }
       } else if (d.type === 'update_available') {
         cachedUpdate = { available: !!d.available, local: d.local || '', remote: d.remote || '', behind: d.behind || 0, changelog: d.changelog || '', error: d.error };
@@ -1242,7 +1387,7 @@
           appendUpdateProgress('代码已拉取，Agent 即将重启...');
           setTimeout(function () { appendUpdateProgress('等待 Agent 重新连接...'); }, 2000);
           setTimeout(function () {
-            appendUpdateProgress('如果长时间未重连，请在 Cursor IDE 中打开 SPX Helper 工作区，让 AI 重启 SeaTalk Agent');
+            appendUpdateProgress('如果长时间未重连，请在 ' + backendHintProduct() + ' 中打开 SPX Helper 工作区，让 AI 重启 SeaTalk Agent');
             if (!railUpdatePopEl) return;
             var actions = railUpdatePopEl.querySelector('.spx-rail-update-actions');
             if (actions) actions.innerHTML = '<button class="spx-rail-update-btn secondary" data-act="check">重新检查</button>';
@@ -1267,6 +1412,8 @@
         _grantToggleVisible = true;
         updateGrantToggle();
         showRecallConfirmDialog(d);
+      } else if (d.type === 'codex_approval_request') {
+        showCodexApprovalDialog(d);
       } else if (d.type === 'send_grant_status') {
         _sendGrantActive = !!d.active;
         _grantToggleVisible = true;
@@ -1305,7 +1452,7 @@
       } else if (d.type === 'alarm_resolved') {
         console.log('[alarm] resolved:', d.mid, d.replyPreview);
       }
-    } catch (err) { console.error('[cursor-acp] __agentReceive error:', err); }
+    } catch (err) { console.error('[agent-ui] __agentReceive error:', err); }
   };
 
   // ── Send grant state ──
@@ -1448,17 +1595,66 @@
     messagesEl.scrollTop = messagesEl.scrollHeight;
   }
 
+  function showCodexApprovalDialog(d) {
+    if (!messagesEl) return;
+    var card = document.createElement('div');
+    card.className = 'cursor-confirm-card';
+    var previewText = (d.preview || '').length > 320 ? d.preview.substring(0, 320) + '...' : (d.preview || '');
+    var kindLabel = d.kind === 'file' ? '文件改动审批' : d.kind === 'permissions' ? '权限申请审批' : '命令执行审批';
+    var cwdField = d.cwd
+      ? '<div class="cc-field"><span>目录</span><span>' + escapeHtml(d.cwd) + '</span></div>'
+      : '';
+    var reasonField = d.reason
+      ? '<div class="cc-field"><span>原因</span><span>' + escapeHtml(d.reason) + '</span></div>'
+      : '';
+
+    card.innerHTML =
+      '<div class="cc-title">' +
+        '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l8 4v6c0 5-3.5 9.5-8 10-4.5-.5-8-5-8-10V6l8-4z"/></svg>' +
+        escapeHtml(kindLabel) +
+      '</div>' +
+      '<div class="cc-field"><span>项目</span><span>' + escapeHtml(d.title || '') + '</span></div>' +
+      cwdField +
+      reasonField +
+      (previewText ? '<div class="cc-preview">' + escapeHtml(previewText).replace(/\n/g, '<br>') + '</div>' : '') +
+      '<div class="cc-actions">' +
+        '<button class="cc-btn cancel">拒绝</button>' +
+        '<button class="cc-btn confirm cc-btn-allow-once">允许一次</button>' +
+        '<button class="cc-btn confirm cc-btn-allow-session">本会话允许</button>' +
+      '</div>';
+
+    var btns = card.querySelectorAll('.cc-btn');
+    btns[0].onclick = function () {
+      resolveCard(card, '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg> 已拒绝');
+      sendToAgent({ type: 'codex_approval_cancelled', requestId: d.requestId }, { requireLive: false });
+    };
+    btns[1].onclick = function () {
+      resolveCard(card, '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> 已允许一次');
+      sendToAgent({ type: 'codex_approval_confirmed', requestId: d.requestId, scope: 'once' }, { requireLive: false });
+    };
+    btns[2].onclick = function () {
+      resolveCard(card, '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> 本会话已放行');
+      sendToAgent({ type: 'codex_approval_confirmed', requestId: d.requestId, scope: 'session' }, { requireLive: false });
+    };
+
+    messagesEl.appendChild(card);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+
   function updatePanelAcpStatus() {
     if (!panelHandle || !panelHandle.el) return;
     var bar = panelHandle.el.querySelector('.cursor-acp-status-bar');
     if (!bar) return;
     var dot = bar.querySelector('.cursor-acp-dot');
+    var label = bar.querySelector('.cursor-acp-label');
     var txt = bar.querySelector('.cursor-acp-text');
     var rc = bar.querySelector('.cursor-acp-reconnect');
-    if (dot) dot.className = 'cursor-acp-dot ' + (cachedStatus.connected ? 'on' : 'off');
-    if (txt) txt.textContent = cachedStatus.text || (cachedStatus.connected ? '已连接' : '断开');
+    if (dot) dot.className = 'cursor-acp-dot ' + (isBackendInteractive() ? 'on' : 'off');
+    if (label) label.textContent = backendProtocol();
+    if (txt) txt.textContent = effectiveStatusText();
     if (rc) {
-      if (cachedStatus.connected) rc.classList.remove('show');
+      rc.title = '重连 ' + backendProtocol() + ' 与 Agent';
+      if (isBackendInteractive()) rc.classList.remove('show');
       else rc.classList.add('show');
     }
   }
@@ -1472,7 +1668,7 @@
   function updateSidebarBtnStatus() {
     var btn = document.getElementById('cursor-sidebar-btn');
     if (!btn) return;
-    if (cachedStatus.connected) {
+    if (isBackendInteractive()) {
       btn.style.opacity = '';
     } else {
       btn.style.opacity = '0.6';
@@ -1494,6 +1690,46 @@
       _globalSettingsPopOutsideHandler = null;
     }
     if (globalAgentSettingsPopEl) globalAgentSettingsPopEl.style.display = 'none';
+  }
+
+  function renderGlobalAgentSettings() {
+    if (!globalAgentSettingsPopEl) return;
+    var approvalSel = globalAgentSettingsPopEl.querySelector('.spx-runtime-approval');
+    var sandboxSel = globalAgentSettingsPopEl.querySelector('.spx-runtime-sandbox');
+    var webSearchSel = globalAgentSettingsPopEl.querySelector('.spx-runtime-web-search');
+    var backendHint = globalAgentSettingsPopEl.querySelector('.spx-runtime-backend');
+    var runtimeWrap = globalAgentSettingsPopEl.querySelector('.spx-runtime-settings');
+    if (approvalSel) approvalSel.value = cachedRuntimeConfig.approvalPolicy === 'untrusted' ? 'untrusted' : 'never';
+    if (sandboxSel) sandboxSel.value = cachedRuntimeConfig.sandbox || '';
+    if (webSearchSel) webSearchSel.value = cachedRuntimeConfig.webSearch || '';
+    if (backendHint) backendHint.textContent = isCodexBackend()
+      ? 'Codex 会在下一轮/重连后应用这些会话设置；Approval 仅暴露稳定的 never / untrusted。'
+      : '当前后端不是 Codex，这些设置暂不会生效。';
+    if (runtimeWrap) runtimeWrap.style.opacity = isCodexBackend() ? '1' : '0.55';
+  }
+
+  function pushRuntimeConfigFromPopup() {
+    if (!globalAgentSettingsPopEl) return;
+    var approvalSel = globalAgentSettingsPopEl.querySelector('.spx-runtime-approval');
+    var sandboxSel = globalAgentSettingsPopEl.querySelector('.spx-runtime-sandbox');
+    var webSearchSel = globalAgentSettingsPopEl.querySelector('.spx-runtime-web-search');
+    cachedRuntimeConfig = {
+      approvalPolicy: approvalSel ? approvalSel.value : 'never',
+      sandbox: sandboxSel ? sandboxSel.value : '',
+      webSearch: webSearchSel ? webSearchSel.value : ''
+    };
+    var payload = {
+      type: 'set_runtime_config',
+      approvalPolicy: cachedRuntimeConfig.approvalPolicy,
+      sandbox: cachedRuntimeConfig.sandbox,
+      webSearch: cachedRuntimeConfig.webSearch
+    };
+    if (runtimeConfigPushTimer) clearTimeout(runtimeConfigPushTimer);
+    runtimeConfigPushTimer = setTimeout(function () {
+      sendToAgent(payload, { requireLive: false });
+      runtimeConfigPushTimer = null;
+    }, 180);
+    renderGlobalAgentSettings();
   }
 
   function positionGlobalSettingsPop(anchorEl) {
@@ -1622,6 +1858,45 @@
   var _restartLogEl = null;
   var _restartTimer = null;
 
+  function appendLocalNotice(text) {
+    ensurePanelOpenForOverlay();
+    if (!messagesEl) return;
+    var card = document.createElement('div');
+    card.className = 'cursor-local-notice';
+    card.style.cssText = 'margin:10px 16px;padding:10px 12px;background:rgba(212,68,68,0.08);border:1px solid rgba(212,68,68,0.22);border-radius:8px;font-size:12px;line-height:1.5;color:var(--cp-text2);';
+    card.textContent = text;
+    messagesEl.appendChild(card);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+
+  function sendToAgent(payload, opts) {
+    opts = opts || {};
+    if (typeof window.__agentSend !== 'function') {
+      cachedStatus = { connected: false, text: 'Agent disconnected' };
+      updatePanelAcpStatus();
+      updateSidebarBtnStatus();
+      if (opts.showNotice !== false) appendLocalNotice('当前页面没有可用的 Agent 绑定。请等待重新注入，或重启 SeaTalk Agent。');
+      return false;
+    }
+    if (opts.requireLive !== false && isBackendStale()) {
+      cachedStatus = { connected: false, text: 'Agent disconnected' };
+      updatePanelAcpStatus();
+      updateSidebarBtnStatus();
+      if (opts.showNotice !== false) appendLocalNotice('当前页面上的 Agent UI 已失联。请先点“重连”或等待重新注入后再操作。');
+      return false;
+    }
+    try {
+      window.__agentSend(JSON.stringify(payload));
+      return true;
+    } catch (_) {
+      cachedStatus = { connected: false, text: 'Agent disconnected' };
+      updatePanelAcpStatus();
+      updateSidebarBtnStatus();
+      if (opts.showNotice !== false) appendLocalNotice('发送请求到 Agent 失败。请重试，或重启 SeaTalk Agent。');
+      return false;
+    }
+  }
+
   function showRestartProgress() {
     ensurePanelOpenForOverlay();
     if (!messagesEl) return;
@@ -1646,7 +1921,7 @@
       elapsed++;
       if (countdownEl) countdownEl.textContent = '已等待 ' + elapsed + 's — 新进程启动后将自动重连...';
       if (elapsed > 30 && countdownEl) {
-        countdownEl.innerHTML = '已等待 ' + elapsed + 's — <span style="color:#f5a623">如果长时间无响应，请在 Cursor IDE 中打开 SPX Helper 工作区，让 AI 重启 SeaTalk Agent</span>';
+        countdownEl.innerHTML = '已等待 ' + elapsed + 's — <span style="color:#f5a623">如果长时间无响应，请在 ' + backendHintProduct() + ' 中打开 SPX Helper 工作区，让 AI 重启 SeaTalk Agent</span>';
       }
     }, 1000);
   }
@@ -1698,7 +1973,8 @@
     var rows = [
       { key: 'CDP 代理端口', val: info.cdpProxyPort != null ? String(info.cdpProxyPort) : info.cdpPort || '?', ok: true },
       { key: 'CDP 连接', val: info.cdpConnected ? '已连接' : '断开', ok: info.cdpConnected },
-      { key: 'ACP 连接', val: info.acpConnected ? '已连接' : '断开', ok: info.acpConnected },
+      { key: '后端', val: info.backend || backendBrand(), ok: true },
+      { key: backendProtocol() + ' 连接', val: info.acpConnected ? '已连接' : '断开', ok: info.acpConnected },
       { key: '工作区', val: info.workspace || '—', ok: true },
       { key: 'Session ID', val: info.sessionId || '—', ok: !!info.sessionId },
       { key: '当前模型', val: info.modelId || '—', ok: !!info.modelId },
@@ -2874,11 +3150,11 @@
     badge.style.display = 'flex';
     badge.style.color = 'var(--cp-text-dim2)';
     if (_usageTurnTotal > 0) {
-      badge.title = '本回合 token 合计（来自 prompt 返回）；若需「占满上下文窗口」比例，需 Cursor 通过 ACP usage_update 上报 context size';
+      badge.title = '本回合 token 合计（来自 prompt 返回）；若需「占满上下文窗口」比例，需 ' + backendBrand() + ' 上报 usage_update context size';
       badge.textContent = '本回合 ' + formatTokens(_usageTurnTotal);
       return;
     }
-    badge.title = '尚无用量：完成一轮对话后显示本回合 token；窗口占用比例依赖 Cursor 上报 usage_update';
+    badge.title = '尚无用量：完成一轮对话后显示本回合 token；窗口占用比例依赖 ' + backendBrand() + ' 上报 usage_update';
     badge.textContent = '—';
   }
 
@@ -3024,7 +3300,7 @@
         '<div class="spx-rail-settings-wrap">' +
           '<div class="cursor-sidebar-btn spx-agent-gear-btn" title="Agent 设置与维护" role="button" tabindex="0"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="19" height="19"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></div>' +
           '<div class="spx-rail-settings-dd">' +
-            '<div class="spx-rail-dd-item" data-action="reconnect_acp"><span class="dd-icon"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg></span>重连 ACP</div>' +
+            '<div class="spx-rail-dd-item" data-action="reconnect_acp"><span class="dd-icon"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg></span>重连 ' + backendProtocol() + '</div>' +
             '<div class="spx-rail-dd-sep"></div>' +
             '<div class="spx-rail-dd-item" data-action="restart_agent"><span class="dd-icon"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></span>重启 Agent</div>' +
             '<div class="spx-rail-dd-item" data-action="check_update"><span class="dd-icon"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg></span>检查更新</div>' +
@@ -3075,6 +3351,37 @@
           '</span>' +
         '</div>' +
         '<p class="spx-agent-settings-pop-hint">开启后 SeaTalk 中的 AI 回复可自动发送，无需在对话面板逐条确认。</p>' +
+        '<div class="spx-runtime-settings" style="margin-top:12px;padding-top:10px;border-top:1px solid rgba(255,255,255,0.08)">' +
+          '<div style="font-size:10px;color:#f4f4f5;margin-bottom:8px">Codex Runtime</div>' +
+          '<div style="display:flex;flex-direction:column;gap:8px">' +
+            '<label style="display:flex;align-items:center;justify-content:space-between;gap:10px">' +
+              '<span class="spx-agent-settings-pop-label">Approval</span>' +
+              '<select class="spx-runtime-approval" style="min-width:128px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:4px;color:#e4e4e7;font-size:10px;padding:3px 6px;outline:none">' +
+                '<option value="never">never</option>' +
+                '<option value="untrusted">untrusted</option>' +
+              '</select>' +
+            '</label>' +
+            '<label style="display:flex;align-items:center;justify-content:space-between;gap:10px">' +
+              '<span class="spx-agent-settings-pop-label">Sandbox</span>' +
+              '<select class="spx-runtime-sandbox" style="min-width:128px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:4px;color:#e4e4e7;font-size:10px;padding:3px 6px;outline:none">' +
+                '<option value="">default</option>' +
+                '<option value="read-only">read-only</option>' +
+                '<option value="workspace-write">workspace-write</option>' +
+                '<option value="danger-full-access">danger-full-access</option>' +
+              '</select>' +
+            '</label>' +
+            '<label style="display:flex;align-items:center;justify-content:space-between;gap:10px">' +
+              '<span class="spx-agent-settings-pop-label">Web Search</span>' +
+              '<select class="spx-runtime-web-search" style="min-width:128px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:4px;color:#e4e4e7;font-size:10px;padding:3px 6px;outline:none">' +
+                '<option value="">default</option>' +
+                '<option value="disabled">disabled</option>' +
+                '<option value="cached">cached</option>' +
+                '<option value="live">live</option>' +
+              '</select>' +
+            '</label>' +
+          '</div>' +
+          '<p class="spx-agent-settings-pop-hint spx-runtime-backend" style="margin-top:8px"></p>' +
+        '</div>' +
       '</div>';
     document.body.appendChild(globalAgentSettingsPopEl);
     grantToggleEl = globalAgentSettingsPopEl.querySelector('.cursor-grant-toggle');
@@ -3082,8 +3389,18 @@
       e.stopPropagation();
       closeGlobalAgentSettingsPop();
     });
+    globalAgentSettingsPopEl.querySelector('.spx-runtime-approval').addEventListener('change', function () {
+      pushRuntimeConfigFromPopup();
+    });
+    globalAgentSettingsPopEl.querySelector('.spx-runtime-sandbox').addEventListener('change', function () {
+      pushRuntimeConfigFromPopup();
+    });
+    globalAgentSettingsPopEl.querySelector('.spx-runtime-web-search').addEventListener('change', function () {
+      pushRuntimeConfigFromPopup();
+    });
     bindGrantToggle();
     updateGrantToggle();
+    renderGlobalAgentSettings();
 
     updateVerBadge();
 
@@ -3150,17 +3467,16 @@
       var action = item.dataset.action;
       settingsDd.classList.remove('show');
       if (action === 'restart_agent') {
-        showRestartProgress();
-        if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: action }));
+        if (sendToAgent({ type: action }, { requireLive: false })) showRestartProgress();
       } else if (action === 'reconnect_acp' || action === 'reinject_ui') {
-        if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: action }));
+        sendToAgent({ type: action }, { requireLive: false });
       } else if (action === 'show_logs') {
-        if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: 'get_logs' }));
+        sendToAgent({ type: 'get_logs' });
       } else if (action === 'show_diagnostics') {
-        if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: 'get_diagnostics' }));
+        sendToAgent({ type: 'get_diagnostics' });
       } else if (action === 'check_update') {
         showRailUpdatePopover(settingsBtn || verBadgeEl);
-        if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: 'update_check' }));
+        sendToAgent({ type: 'update_check' });
       } else if (action === 'global_agent_settings') {
         showGlobalAgentSettingsPop(settingsBtn);
       }
@@ -3174,7 +3490,7 @@
 
     panelHandle = UI.createPanel({
       id: 'cursor-panel',
-      title: 'CURSOR',
+      title: backendBrand().toUpperCase(),
       width: 440,
       height: 560,
       sizeKey: 'cursorPanelSize',
@@ -3277,14 +3593,14 @@
     acpBar.className = 'cursor-acp-status-bar';
     acpBar.innerHTML =
       '<span class="cursor-acp-dot none"></span>' +
-      '<span class="cursor-acp-label">ACP</span>' +
+      '<span class="cursor-acp-label">' + backendProtocol() + '</span>' +
       '<span class="cursor-acp-text">Connecting...</span>' +
-      '<button type="button" class="cursor-acp-reconnect" title="重连 ACP 与 Agent">重连</button>';
+      '<button type="button" class="cursor-acp-reconnect" title="重连 ' + backendProtocol() + ' 与 Agent">重连</button>';
     panelHandle.el.insertBefore(acpBar, bodyEl);
     acpBar.querySelector('.cursor-acp-reconnect').addEventListener('click', function (e) {
       e.preventDefault();
       e.stopPropagation();
-      if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: 'reconnect_acp' }));
+      sendToAgent({ type: 'reconnect_acp' }, { requireLive: false });
     });
     updatePanelAcpStatus();
 
@@ -3366,9 +3682,7 @@
     });
 
     wsPicker.querySelector('.cursor-ws-picker-browse').addEventListener('click', function () {
-      if (typeof window.__agentSend === 'function') {
-        window.__agentSend(JSON.stringify({ type: 'browse_folder' }));
-      }
+      sendToAgent({ type: 'browse_folder' });
     });
 
     function loadRecentWorkspaces() {
@@ -3397,7 +3711,7 @@
       wsPicker.classList.remove('show');
       saveCurrentConv(); currentIdx = -1; messages = []; turnView = null;
       renderAllMessages(messagesEl);
-      if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: 'set_workspace', path: p }));
+      sendToAgent({ type: 'set_workspace', path: p });
     }
 
     // Context bar (created here, inserted into inputArea later)
@@ -3432,7 +3746,7 @@
         if (c && c.workspace && c.workspace !== cachedWorkspace) {
           cachedWorkspace = c.workspace;
           updateWsLabel();
-          if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: 'set_workspace', path: c.workspace }));
+          sendToAgent({ type: 'set_workspace', path: c.workspace });
         }
       }
     });
@@ -3495,7 +3809,7 @@
       cachedModels.currentModelId = item.dataset.mid;
       updateModelBadge();
       modelDropdown.classList.remove('show');
-      if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: 'set_model', modelId: cachedModels.currentModelId }));
+      sendToAgent({ type: 'set_model', modelId: cachedModels.currentModelId });
     });
     document.addEventListener('click', function () { if (modelDropdown) modelDropdown.classList.remove('show'); }, _abortSignal);
 
@@ -3553,7 +3867,7 @@
     });
 
     stopBtn.addEventListener('click', function () {
-      if (typeof window.__agentSend === 'function') window.__agentSend(JSON.stringify({ type: 'cancel' }));
+      sendToAgent({ type: 'cancel' });
       // Don't setProcessingState(false) here — wait for turn_end from backend.
       // But set a safety timeout in case turn_end never comes.
       setTimeout(function () {
@@ -3582,6 +3896,7 @@
 
   // ── Sidebar button ──
   mountSeatalkAgentRail();
+  ensureStatusRefreshTimer();
 
   var oldBtn = document.getElementById('cursor-sidebar-btn');
   if (oldBtn) oldBtn.remove();
@@ -3593,7 +3908,7 @@
       var st = cachedStatus.connected
         ? '<span style="color:#4ec9b0">● 已连接</span>'
         : '<span style="color:#d44">○ 断开连接</span>';
-      return '<b>Cursor</b><div style="font-size:10px;color:#858585;margin-top:2px">' + st + '</div>';
+      return '<b>' + backendBrand() + '</b><div style="font-size:10px;color:#858585;margin-top:2px">' + st + '</div>';
     }
   });
   updateSidebarBtnStatus();
@@ -3672,6 +3987,10 @@
 
   window.__cursorSidebarCleanup = function () {
     if (_abortCtrl) _abortCtrl.abort();
+    if (_statusRefreshTimer) {
+      clearInterval(_statusRefreshTimer);
+      _statusRefreshTimer = null;
+    }
     for (var oi = 0; oi < _observers.length; oi++) {
       try { _observers[oi].disconnect(); } catch (_) {}
     }
@@ -3701,5 +4020,5 @@
     if (fab) fab.remove();
   };
 
-  console.log('[cursor-acp] panel loaded (Cursor-native style)');
+  console.log('[agent-ui] panel loaded (' + backendBrand() + ' branding)');
 })();

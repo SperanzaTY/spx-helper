@@ -6,6 +6,7 @@ import { execSync, spawn as spawnChild } from 'node:child_process';
 import { connectViaInspector, findSeaTalkPid, type ICdpClient } from './cdp.js';
 import { Bridge } from './bridge.js';
 import { spawnAgent, killAgent, listModels, resolveModelId, loadMcpServers, type AgentProcess } from './acp.js';
+import type { AgentApprovalRequest, AgentRuntimeConfig } from './acp.js';
 import { CdpProxy } from './cdp-proxy.js';
 import { AlarmManager, type WatchMessage, type PendingAlarm } from './alarm-manager.js';
 
@@ -161,19 +162,70 @@ function applyUpdate(onProgress: (msg: string) => void, logFn: typeof log): bool
 }
 
 const SESSION_FILE = path.join(__dirname, '..', '.last-session.json');
+const DATA_DIR = path.join(os.homedir(), '.seatalk-agent');
+const RUNTIME_CONFIG_FILE = path.join(DATA_DIR, 'codex-runtime-config.json');
 
-function loadSavedSession(): { sessionId: string; workspace: string } | null {
+type SavedSessionInfo = {
+  sessionId: string;
+  workspace: string;
+  runtimeConfigSignature?: string;
+};
+
+function runtimeConfigSignature(config: AgentRuntimeConfig): string {
+  return JSON.stringify({
+    approvalPolicy: config.approvalPolicy || 'never',
+    sandbox: config.sandbox || '',
+    webSearch: config.webSearch || '',
+  });
+}
+
+function loadSavedSession(): SavedSessionInfo | null {
   try {
     if (fs.existsSync(SESSION_FILE)) {
-      return JSON.parse(fs.readFileSync(SESSION_FILE, 'utf-8'));
+      return JSON.parse(fs.readFileSync(SESSION_FILE, 'utf-8')) as SavedSessionInfo;
     }
   } catch {}
   return null;
 }
 
-function saveSession(sessionId: string, workspace: string) {
+function saveSession(sessionId: string, workspace: string, runtimeConfig?: AgentRuntimeConfig) {
   try {
-    fs.writeFileSync(SESSION_FILE, JSON.stringify({ sessionId, workspace }), 'utf-8');
+    fs.writeFileSync(
+      SESSION_FILE,
+      JSON.stringify({
+        sessionId,
+        workspace,
+        runtimeConfigSignature: runtimeConfig ? runtimeConfigSignature(runtimeConfig) : undefined,
+      }),
+      'utf-8',
+    );
+  } catch {}
+}
+
+function loadRuntimeConfig(): AgentRuntimeConfig {
+  try {
+    if (!fs.existsSync(RUNTIME_CONFIG_FILE)) {
+      return { approvalPolicy: 'never', sandbox: 'danger-full-access', webSearch: 'live' };
+    }
+    const parsed = JSON.parse(fs.readFileSync(RUNTIME_CONFIG_FILE, 'utf-8')) as AgentRuntimeConfig;
+    return {
+      approvalPolicy: parsed.approvalPolicy || 'never',
+      sandbox: parsed.sandbox || 'danger-full-access',
+      webSearch: parsed.webSearch || 'live',
+    };
+  } catch {
+    return { approvalPolicy: 'never', sandbox: 'danger-full-access', webSearch: 'live' };
+  }
+}
+
+function saveRuntimeConfig(config: AgentRuntimeConfig) {
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(RUNTIME_CONFIG_FILE, JSON.stringify({
+      approvalPolicy: config.approvalPolicy || 'never',
+      sandbox: config.sandbox || 'danger-full-access',
+      webSearch: config.webSearch || 'live',
+    }), 'utf-8');
   } catch {}
 }
 
@@ -444,11 +496,33 @@ async function main() {
   let userCancelled = false;
   let defaultMode = 'ask';
   let currentWorkspace = WORKSPACE;
+  let codexRuntimeConfig: AgentRuntimeConfig = loadRuntimeConfig();
   let sessionPromptCount = 0;
   const savedSession = loadSavedSession();
   let lastSessionId = savedSession?.sessionId || '';
   const toolTitleCache = new Map<string, string>();
   let cachedWorkspaceList: Array<{ name: string; path: string }> = [];
+  const pendingCodexApprovalRequests = new Map<string, AgentApprovalRequest>();
+
+  function sendBackendToPanel() {
+    bridge
+      .sendToPanel({
+        type: 'backend',
+        backend: agent?.backend || 'cursor-acp',
+      })
+      .catch(() => {});
+  }
+
+  function sendRuntimeConfigToPanel() {
+    bridge
+      .sendToPanel({
+        type: 'runtime_config',
+        approvalPolicy: codexRuntimeConfig.approvalPolicy || 'never',
+        sandbox: codexRuntimeConfig.sandbox || '',
+        webSearch: codexRuntimeConfig.webSearch || '',
+      })
+      .catch(() => {});
+  }
 
   // ── Skill loader — scans .cursor/skills/ for SKILL.md files ──
 
@@ -595,7 +669,7 @@ async function main() {
         const res = await agent.connection.newSession({ cwd: currentWorkspace, mcpServers: loadMcpServers(log) });
         agent.sessionId = res.sessionId;
         lastSessionId = res.sessionId;
-        saveSession(lastSessionId, currentWorkspace);
+        saveSession(lastSessionId, currentWorkspace, codexRuntimeConfig);
         sessionPromptCount = 0;
         log(`new session for workspace: ${agent.sessionId}`);
         try {
@@ -635,8 +709,16 @@ async function main() {
     onModeUpdate: (modeId: string) => {
       bridge.sendToPanel({ type: 'mode', mode: modeId }).catch(() => {});
     },
+    onPlanUpdate: (info: { explanation?: string; steps: import('./acp.js').PlanStepInfo[] }) => {
+      bridge.sendToPanel({ type: 'plan_update', explanation: info.explanation || '', steps: info.steps || [] }).catch(() => {});
+    },
     onUsageUpdate: (info: import('./acp.js').UsageInfo) => {
       bridge.sendToPanel({ type: 'usage', contextSize: info.contextSize, contextUsed: info.contextUsed, costAmount: info.costAmount, costCurrency: info.costCurrency }).catch(() => {});
+    },
+    onApprovalRequest: (info: AgentApprovalRequest) => {
+      pendingCodexApprovalRequests.set(info.requestId, info);
+      bridge.sendToPanel({ type: 'codex_approval_request', ...info }).catch(() => {});
+      log(`codex approval requested (${info.requestId}): ${info.kind} ${info.title}`);
     },
   };
 
@@ -652,26 +734,36 @@ async function main() {
         }
       }
 
-      log(`starting ACP agent (workspace: ${currentWorkspace})...`);
+      const canResumePreviousSession =
+        !!lastSessionId &&
+        (saved?.runtimeConfigSignature || '') === runtimeConfigSignature(codexRuntimeConfig);
+      if (lastSessionId && !canResumePreviousSession) {
+        log('runtime config changed since last session, starting a fresh Codex thread');
+      }
+
+      log(`starting AI agent (workspace: ${currentWorkspace})...`);
       agent = await spawnAgent({
         workspacePath: currentWorkspace,
         callbacks: acpCallbacks,
         log,
-        previousSessionId: lastSessionId || undefined,
+        previousSessionId: canResumePreviousSession ? lastSessionId : undefined,
         modelId: currentModelId || undefined,
+        sessionMode: (defaultMode as 'ask' | 'agent' | 'plan'),
+        runtimeConfig: codexRuntimeConfig,
       });
 
       lastSessionId = agent.sessionId;
-      saveSession(lastSessionId, currentWorkspace);
+      saveSession(lastSessionId, currentWorkspace, codexRuntimeConfig);
 
       agent.proc.on('exit', (code) => {
-        log(`ACP agent process exited (code=${code}), will respawn in 3s...`);
+        log(`AI agent process exited (code=${code}), will respawn in 3s...`);
         agent = null;
-        bridge.sendToPanel({ type: 'status', connected: false, text: 'ACP 断开，重连中...' }).catch(() => {});
+        bridge.sendToPanel({ type: 'status', connected: false, text: 'Agent 断开，重连中...' }).catch(() => {});
         setTimeout(async () => {
           killOrphanAgentProcesses();
           const ok = await startAcp();
           if (ok) {
+            sendBackendToPanel();
             bridge.sendToPanel({ type: 'status', connected: true, text: 'Connected' }).catch(() => {});
             bridge.sendToPanel({ type: 'mode', mode: defaultMode }).catch(() => {});
             if (agent && agent.availableModels.length) {
@@ -682,7 +774,7 @@ async function main() {
       });
 
       sessionPromptCount = agent.resumed ? 1 : 0;
-      log(`ACP agent connected (resumed=${agent.resumed})`);
+      log(`AI agent connected (backend=${agent.backend}, resumed=${agent.resumed})`);
 
       try {
         const modelResult = await listModels(log);
@@ -718,11 +810,15 @@ async function main() {
       return true;
     } catch (e) {
       const errMsg = (e as Error).message;
-      log('ACP start failed:', errMsg);
+      log('AI agent start failed:', errMsg);
       bridge.sendToPanel({
         type: 'status',
         connected: false,
-        text: errMsg.includes('Cursor CLI') ? 'Cursor CLI 未安装' : 'ACP 连接失败',
+        text: errMsg.includes('Cursor CLI')
+          ? 'Cursor CLI 未安装'
+          : errMsg.includes('Codex CLI')
+            ? 'Codex CLI 未安装'
+            : 'Agent 连接失败',
       }).catch(() => {});
       bridge.sendToPanel({
         type: 'text_chunk',
@@ -1360,7 +1456,7 @@ async function main() {
         }
 
         try {
-          log(`sending prompt to ACP (sessionId=${agent.sessionId}, promptCount=${sessionPromptCount})...`);
+          log(`sending prompt to agent (sessionId=${agent.sessionId}, promptCount=${sessionPromptCount})...`);
           sessionPromptCount++;
           const result = await agent.connection.prompt({
             sessionId: agent.sessionId,
@@ -1426,6 +1522,7 @@ async function main() {
           const listed = await listModels(log);
           const resolved = resolveModelId(raw, listed.models);
           if ('error' in resolved) {
+            sendBackendToPanel();
             bridge.sendToPanel({ type: 'status', connected: true, text: 'Connected' }).catch(() => {});
             bridge.sendToPanel({ type: 'error', text: resolved.error }).catch(() => {});
             return;
@@ -1438,6 +1535,7 @@ async function main() {
           const ag = agent as AgentProcess | null;
           if (ok && ag) {
             ag.currentModelId = modelId;
+            sendBackendToPanel();
             bridge.sendToPanel({ type: 'status', connected: true, text: 'Connected' }).catch(() => {});
             bridge.sendToPanel({ type: 'mode', mode: defaultMode }).catch(() => {});
             if (ag.availableModels.length) {
@@ -1500,7 +1598,7 @@ async function main() {
             });
             agent.sessionId = res.sessionId;
             lastSessionId = res.sessionId;
-            saveSession(lastSessionId, currentWorkspace);
+            saveSession(lastSessionId, currentWorkspace, codexRuntimeConfig);
             sessionPromptCount = 0;
             log(`new session for workspace: ${agent.sessionId}`);
             try {
@@ -1521,7 +1619,7 @@ async function main() {
             });
             agent.sessionId = res.sessionId;
             lastSessionId = res.sessionId;
-            saveSession(lastSessionId, currentWorkspace);
+            saveSession(lastSessionId, currentWorkspace, codexRuntimeConfig);
             sessionPromptCount = 0;
             log(`new session: ${agent.sessionId}`);
             try {
@@ -1558,6 +1656,7 @@ async function main() {
         try {
           const ok = await startAcp();
           if (ok) {
+            sendBackendToPanel();
             bridge.sendToPanel({ type: 'status', connected: true, text: 'Connected' }).catch(() => {});
             bridge.sendToPanel({ type: 'mode', mode: defaultMode }).catch(() => {});
             const ag = agent as AgentProcess | null;
@@ -1576,6 +1675,57 @@ async function main() {
         } catch (e) {
           log('reinject_ui failed:', (e as Error).message);
         }
+      } else if (data.type === 'set_runtime_config') {
+        const nextApproval = (data.approvalPolicy as AgentRuntimeConfig['approvalPolicy']) || 'never';
+        const nextSandbox = (data.sandbox as AgentRuntimeConfig['sandbox']) || '';
+        const nextWebSearch = (data.webSearch as AgentRuntimeConfig['webSearch']) || '';
+        codexRuntimeConfig = { approvalPolicy: nextApproval, sandbox: nextSandbox, webSearch: nextWebSearch };
+        saveRuntimeConfig(codexRuntimeConfig);
+        log(`runtime config updated: approval=${nextApproval}, sandbox=${nextSandbox || '(default)'}, webSearch=${nextWebSearch || '(default)'}`);
+        sendRuntimeConfigToPanel();
+
+        if (agent?.backend === 'codex-app-server' && !acpStarting) {
+          bridge.sendToPanel({ type: 'status', connected: false, text: '应用 Codex 会话设置中...' }).catch(() => {});
+          if (agent) {
+            agent.proc.removeAllListeners('exit');
+            killAgent(agent.proc);
+            agent = null;
+          }
+          acpStarting = true;
+          try {
+            const ok = await startAcp();
+            const ag = agent as AgentProcess | null;
+            if (ok && ag) {
+              sendBackendToPanel();
+              sendRuntimeConfigToPanel();
+              bridge.sendToPanel({ type: 'status', connected: true, text: 'Connected' }).catch(() => {});
+              bridge.sendToPanel({ type: 'mode', mode: defaultMode }).catch(() => {});
+              if (ag.availableModels.length) {
+                bridge.sendToPanel({ type: 'models', models: ag.availableModels, currentModelId: ag.currentModelId }).catch(() => {});
+              }
+            } else {
+              bridge.sendToPanel({ type: 'status', connected: false, text: '应用设置失败' }).catch(() => {});
+            }
+          } finally {
+            acpStarting = false;
+          }
+        }
+      } else if (data.type === 'codex_approval_confirmed') {
+        const requestId = data.requestId as string;
+        const scope = (data.scope as string) || 'once';
+        const pending = pendingCodexApprovalRequests.get(requestId);
+        if (!pending || !agent) return;
+        pendingCodexApprovalRequests.delete(requestId);
+        const decision = scope === 'session' ? 'acceptForSession' : 'accept';
+        await agent.connection.resolveApproval({ requestId, decision });
+        log(`codex approval confirmed (${requestId}): ${decision}`);
+      } else if (data.type === 'codex_approval_cancelled') {
+        const requestId = data.requestId as string;
+        const pending = pendingCodexApprovalRequests.get(requestId);
+        if (!pending || !agent) return;
+        pendingCodexApprovalRequests.delete(requestId);
+        await agent.connection.resolveApproval({ requestId, decision: 'decline' });
+        log(`codex approval declined by user (${requestId})`);
       } else if (data.type === 'restart_agent') {
         if (acpStarting) { log('restart_agent ignored: already starting'); return; }
         log('restart_agent requested by user');
@@ -1696,6 +1846,7 @@ async function main() {
             cdpProxyPort,
             cdpConnected: !reconnecting,
             acpConnected: !!agent,
+            backend: agent?.backend || null,
             workspace: currentWorkspace,
             sessionId: agent?.sessionId || null,
             modelId: agent?.currentModelId || currentModelId || null,
@@ -2036,11 +2187,13 @@ async function main() {
   }
 
   function pushInitState() {
+    sendBackendToPanel();
+    sendRuntimeConfigToPanel();
     bridge
       .sendToPanel({
         type: 'status',
         connected: !!agent,
-        text: agent ? 'Connected' : 'ACP disconnected',
+        text: agent ? 'Connected' : 'Agent disconnected',
       })
       .catch(() => {});
     bridge.sendToPanel({ type: 'mode', mode: defaultMode }).catch(() => {});
@@ -2130,6 +2283,7 @@ async function main() {
 
     // Restore ACP status to newly injected panel
     if (agent) {
+      sendBackendToPanel();
       bridge.sendToPanel({ type: 'status', connected: true, text: 'Connected' }).catch(() => {});
       bridge.sendToPanel({ type: 'mode', mode: defaultMode }).catch(() => {});
       if (agent.availableModels.length) {
@@ -2143,6 +2297,7 @@ async function main() {
   const acpOk = await startAcp();
   if (acpOk && agent) {
     const ag = agent as AgentProcess;
+    sendBackendToPanel();
     bridge.sendToPanel({ type: 'status', connected: true, text: 'Connected' }).catch(() => {});
     bridge.sendToPanel({ type: 'mode', mode: defaultMode }).catch(() => {});
     if (ag.availableModels.length) {
@@ -2199,6 +2354,7 @@ async function main() {
       if (reconnecting) return;
       try {
         await client.evaluate('1', 3000);
+        bridge.sendToPanel({ type: 'heartbeat', ts: Date.now() }).catch(() => {});
       } catch {
         log('heartbeat failed, triggering reconnect');
         cdpReconnectLoop();

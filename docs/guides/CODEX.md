@@ -18,6 +18,8 @@
 - MCP 直接指向本地仓库源码，调试 MCP 时不需要等 release
 - Codex 技能和 Cursor 时代的沉淀可以并存，迁移成本较低
 
+另外，`seatalk-agent/` 现在也支持直接对接 Codex CLI 的 `app-server` 模式，不再只能依赖 Cursor ACP。
+
 ## 当前接入内容
 
 ### 项目规则
@@ -68,6 +70,37 @@ Codex repo-scoped skills 位于 `.agents/skills/`，当前已迁移：
 - `SKILL.md` 只保留触发条件、主流程和关键约束
 - 深入材料放在各 skill 自己的 `references/` 下按需加载
 - 原先 `.cursor/skills/` 中的长工作流被整理成更适合 Codex 上下文预算的版本
+
+### SeaTalk Agent
+
+`seatalk-agent` 现支持两种后端：
+
+- `cursor-acp`：沿用原先的 Cursor `agent acp` 流程
+- `codex-app-server`：使用 `codex app-server` 的 JSON-RPC/stdio 接口
+
+当实际后端是 `codex-app-server` 时，SeaTalk 侧边栏会显示 `Codex` / `JSON-RPC` 品牌，不再继续显示 `Cursor` / `ACP`。
+此外，Codex backend 下的 `Plan` tab 会走独立的 plan 协作语义：前端会显示计划卡片和步骤状态，而不是只把 `plan` 当成普通文案标签。
+SeaTalk 侧边栏的 `Agent 会话设置` 里还可以直接调整 Codex 线程的 `Approval`、`Sandbox` 与 `Web Search`；保存后会自动重连当前 Codex 会话。若运行时配置发生变化，Agent 会新建一个 Codex thread，确保新配置实际生效。
+其中 `Approval` 在 UI 中仅暴露 `never` 和 `untrusted`。`on-request` 虽然协议层仍兼容，但在 Codex app-server 下不保证稳定触发审批回调，因此不作为前端选项保留。
+
+默认策略：
+
+- 若本机可用 Cursor `agent` CLI，则优先走 `cursor-acp`
+- 若未安装 Cursor `agent`，但 `codex` CLI 可用，则自动切到 `codex-app-server`
+
+也可通过环境变量强制指定：
+
+```bash
+export SPX_AGENT_BACKEND=cursor
+# 或
+export SPX_AGENT_BACKEND=codex
+```
+
+在 `codex-app-server` 后端下，默认运行时配置是：
+
+- `Approval = never`
+- `Sandbox = danger-full-access`
+- `Web Search = live`
 
 ## 使用方式
 

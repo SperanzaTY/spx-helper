@@ -6,6 +6,39 @@
 
 ---
 
+## v3.6.0 -- 2026-04-15 -- `feat`: SeaTalk Agent 接入 Codex app-server 并补齐 Codex 运行时配置
+
+**提交者**: @tianyi.liang  
+**Commit Type**: feat（seatalk-agent + docs）；相对 **v3.5.21** 升 MINOR 至 **v3.6.0**
+
+### 变更说明
+
+**seatalk-agent**
+
+- 新增 **`codex-app-server`** 后端，支持通过 **Codex CLI `app-server`** 的 JSON-RPC/stdio 接口接入 SeaTalk。
+- 后端选择支持自动探测与环境变量强制指定：优先 `cursor-acp`，无 Cursor CLI 时自动切到 `codex-app-server`。
+- SeaTalk 侧边栏品牌与协议文案改为按实际 backend 动态显示：Codex backend 下显示 **`Codex` / `JSON-RPC`**。
+- **Plan 模式**改为真实计划流：支持接收 plan update，并在前端渲染计划卡片与步骤状态。
+- 新增 Codex 运行时配置：**`Approval`**、**`Sandbox`**、**`Web Search`**，支持前端调整与后端重连应用。
+- 运行时配置持久化到 **`~/.seatalk-agent/codex-runtime-config.json`**；配置变化时会新建 Codex thread，确保新设置实际生效。
+- Codex 默认运行策略改为 **`Approval=never`**、**`Sandbox=danger-full-access`**、**`Web Search=live`**。
+- 前端 `Approval` 仅保留稳定选项 **`never / untrusted`**；协议层保留 `on-request` 兼容，但不再作为 UI 选项暴露。
+- 补充 Codex 审批请求桥接能力：支持 `commandExecution`、`fileChange`、`permissions` 三类 approval request 转发。
+
+**文档**
+
+- 更新 **`README.md`**、**`docs/guides/CODEX.md`**、**`docs/guides/SEATALK_AGENT.md`**，同步 Codex backend、默认运行时配置、Plan 卡片和前端设置口径。
+
+**版本号**：`3.5.21` → `3.6.0`（manifest、根 package.json、seatalk-agent/package.json）
+
+### 测试项
+
+- `cd seatalk-agent && npx tsc --noEmit`
+- `node --check seatalk-agent/src/inject/sidebar-app.js`
+- `npm run verify:hooks`
+- CDP 实测：Codex backend 启动、Plan 卡片渲染、运行时配置持久化、重启 Agent 生效
+
+
 ## v3.5.21 -- 2026-04-15 -- `docs`: Codex 项目级配置、MCP 入口与 repo-scoped skills
 
 **提交者**: @tianyi.liang  
