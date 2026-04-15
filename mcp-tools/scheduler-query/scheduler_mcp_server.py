@@ -23,6 +23,12 @@ from scheduler_task_code import (
     extract_task_code as _extract_task_code,
     presto_history_sql_hints as _presto_history_sql_hints,
 )
+from mart_sla_parser import (
+    parse_mart_sla_alert as _parse_mart_sla_alert,
+    build_triage_markdown as _build_mart_sla_md,
+    instance_next_steps as _mart_sla_instance_tips,
+)
+from mart_sla_shortlink import resolve_mart_sla_shortlink as _resolve_mart_sla_shortlink
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -2093,6 +2099,152 @@ def get_spark_query_sql(yarn_application_id: str = "", task_instance_code: str =
         return json.dumps(result, ensure_ascii=False, indent=2)
     except requests.RequestException as e:
         return json.dumps({"error": f"Keyhole 请求失败: {e}"}, ensure_ascii=False)
+    except Exception as e:
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+
+@mcp.tool()
+def resolve_mart_sla_shortlink(shp_url: str) -> str:
+    """
+    将 shp.ee 短链解析为可在浏览器打开的 DataSuite「新 Mart SLA」详情页 URL（无需 Cookie）。
+
+    原理：对短链发 HTTP HEAD，读取 ``Location``；若为 ``shopeemobile.com`` 落地页，则提取
+    查询参数 ``pc``（URL 编码的 datasuite 链接）及 ``projectCode`` / ``slaBizTime``，拼出完整打开链接。
+
+    说明：本工具**不**调用 DataSuite 后端 JSON API；页面内 XHR 需在已登录 Chrome 的 DevTools 中自行发现，
+    若你提供 API 路径可再接入 ``_request`` 做结构化拉取。
+
+    参数:
+        shp_url: 完整短链，如 ``https://shp.ee/ef9mfKa4``
+
+    返回:
+        JSON：含 ``datasuite_sla_open_url``、``sla_instance_key``、``sla_code`` 等；失败时含 ``error``。
+    """
+    try:
+        data = _resolve_mart_sla_shortlink(shp_url)
+        return json.dumps(data, ensure_ascii=False, indent=2)
+    except Exception as e:
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+
+@mcp.tool()
+def parse_mart_sla_alert(alert_text: str) -> str:
+    """
+    解析「新 Mart SLA」类告警正文（纯本地，不请求 Scheduler）。
+
+    从 SeaTalk / 邮件粘贴的英文模板中提取：SLA 规则名、Mart 表、Data Environment、
+    Business Time / Configured SLA / Estimated Completion、Related Events 原文、
+    shp.ee 详情链接、以及正文中可识别的 taskInstanceCode（Studio / datahub.bti / etl_batch）。
+
+    参数:
+        alert_text: 完整告警文本
+
+    返回:
+        JSON 字符串，含 task_instance_codes、parse_warnings 等字段。
+    """
+    try:
+        data = _parse_mart_sla_alert(alert_text)
+        return json.dumps(data, ensure_ascii=False, indent=2)
+    except Exception as e:
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+
+@mcp.tool()
+def triage_mart_sla_alert(
+    alert_text: str,
+    env: str = "prod",
+    max_instances: int = 3,
+    deep_spark: bool = False,
+    resolve_shortlinks: bool = True,
+) -> str:
+    """
+    新 Mart SLA 告警分诊：解析正文并自动拉取 Scheduler 实例详情与日志（可选 Spark 摘要）。
+
+    典型流程：粘贴告警全文 -> 本工具解析出 taskInstanceCode -> 对每个实例（默认最多 3 个）
+    调用 get_instance_detail、get_instance_log；若 deep_spark=true 且存在 YARN application id，
+    再调用 get_spark_app_summary（不做完整 diagnose_spark_app，避免默认路径过慢）。
+
+    参数:
+        alert_text: 完整告警文本
+        env: prod（默认）或 dev / staging 等，与 scheduler-query 其它工具一致
+        max_instances: 最多查询多少个解析到的实例编码
+        deep_spark: 是否额外拉 Spark History 应用摘要（需已登录 Keyhole）
+        resolve_shortlinks: 是否对正文中的 ``shp.ee`` 链接调用与 ``resolve_mart_sla_shortlink`` 相同的 HEAD 解析，
+            产出 ``datasuite_sla_open_url``（无需 Cookie，默认 True）
+
+    返回:
+        JSON，含 parsed、markdown_report、instances（各含 detail / log / spark_summary 可选）等。
+    """
+    try:
+        parsed = _parse_mart_sla_alert(alert_text)
+        lim = max(0, min(max_instances, 20))
+        codes = (parsed.get("task_instance_codes") or [])[:lim]
+        instance_blocks: List[Dict[str, Any]] = []
+        instances_payload: List[Dict[str, Any]] = []
+
+        for code in codes:
+            detail_raw = get_instance_detail(code, env)
+            log_raw = get_instance_log(code, env)
+            try:
+                detail = json.loads(detail_raw)
+            except json.JSONDecodeError:
+                detail = {"error": "detail JSON 解析失败", "raw": detail_raw[:2000]}
+            try:
+                log = json.loads(log_raw)
+            except json.JSONDecodeError:
+                log = {"error": "log JSON 解析失败", "raw": log_raw[:2000]}
+
+            spark_summary: Any = None
+            if deep_spark and isinstance(detail, dict):
+                yarn = detail.get("yarn_application_id") or ""
+                if yarn.startswith("application_"):
+                    try:
+                        spark_summary = json.loads(get_spark_app_summary(task_instance_code=code, env=env))
+                    except Exception as se:
+                        spark_summary = {"error": str(se)}
+
+            tips = _mart_sla_instance_tips(detail if isinstance(detail, dict) else {}, deep_spark)
+            instance_blocks.append(
+                {
+                    "task_instance_code": code,
+                    "detail": detail,
+                    "next_steps": tips,
+                }
+            )
+            entry = {
+                "task_instance_code": code,
+                "detail": detail,
+                "log": log,
+            }
+            if spark_summary is not None:
+                entry["spark_summary"] = spark_summary
+            instances_payload.append(entry)
+
+        md = _build_mart_sla_md(parsed, instance_blocks)
+        out: Dict[str, Any] = {
+            "parsed": parsed,
+            "markdown_report": md,
+            "instances": instances_payload,
+            "env": env,
+            "deep_spark": deep_spark,
+            "resolve_shortlinks": resolve_shortlinks,
+        }
+        if resolve_shortlinks:
+            resolutions: List[Dict[str, Any]] = []
+            for u in (parsed.get("detail_urls") or [])[:5]:
+                if "shp.ee" in u.lower():
+                    try:
+                        resolutions.append(_resolve_mart_sla_shortlink(u))
+                    except Exception as se:
+                        resolutions.append({"ok": False, "input_url": u, "error": str(se)})
+            if resolutions:
+                out["shortlink_resolutions"] = resolutions
+        if not codes:
+            out["hint"] = (
+                "正文中未解析到 taskInstanceCode 时，请到 DataSuite SLA 详情页复制实例编码，"
+                "再使用 get_instance_detail / get_instance_log。"
+            )
+        return json.dumps(out, ensure_ascii=False, indent=2)
     except Exception as e:
         return json.dumps({"error": str(e)}, ensure_ascii=False)
 

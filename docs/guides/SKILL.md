@@ -36,6 +36,8 @@ Skill（指令层）     →  定义"怎么做"     → .cursor/skills/<name>/SK
 
 **v3.5.19**：`spx-bug-trace` 增补 **「MCP 失败时的结论约束」**（须引用工具错误、参数名 `sql`、Scheduler 单条 Presto 绑定等）；与 [MCP 工具指南 — Agent triage](MCP_TOOLS.md#agent-triage-mcp-and-query-failures) 联动。
 
+**v3.5.20**：`scheduler-query` Mart SLA（**`parse_mart_sla_alert`** / **`triage_mart_sla_alert`**、**`resolve_mart_sla_shortlink`** / ``shp.ee``、**datahub.bti**）；仓库 **Git hooks** 约束发版 manifest 版本步长。详见 [MCP_TOOLS.md](MCP_TOOLS.md)。
+
 **双副本同步**：`flink-alert-triage` 在仓库中为 `.cursor/skills/flink-alert-triage/SKILL.md`，与开发者本机主副本 `~/.cursor/skills/flink-alert-triage/SKILL.md` 内容应对齐；更新 skill 后请 `cp` 同步另一侧。  
 Alarm Bot 用的 **`alarm-bot-prompt.md`** 同目录存放，修改后也请同步到 `~/.cursor/skills/flink-alert-triage/alarm-bot-prompt.md`，便于本机与仓库一致。
 

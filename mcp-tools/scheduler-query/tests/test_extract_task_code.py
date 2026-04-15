@@ -32,6 +32,10 @@ def main() -> None:
             "spx_mart.datahub.etl_batch.281196_20260101_DAY_1",
             "spx_mart.datahub.etl_batch.281196",
         ),
+        (
+            "spx_datamart.datahub.bti.422404.hdfscopy_20260414_DAY_1",
+            "spx_datamart.datahub.bti.422404.hdfscopy",
+        ),
         ("only_project", "only_project"),
         ("spx_mart.studio_1", "spx_mart.studio_1"),
     ]

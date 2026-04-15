@@ -152,6 +152,28 @@ if [ "$SECRETS_FOUND" -eq 1 ]; then
   echo ""
 fi
 
+# ── 4.5 任意分支：只要暂存 manifest，相对主远程 release 上 manifest 版本最多领先一档（与 pre-push 一致）──
+if echo "$STAGED_FILES" | grep -q "^chrome-extension/manifest.json$"; then
+  STAGED_VER=$(git show :chrome-extension/manifest.json 2>/dev/null | grep '"version"' | head -1 | sed 's/.*"\([0-9.]*\)".*/\1/' || echo "")
+  if [ -n "$STAGED_VER" ]; then
+    VERSION_REMOTE=""
+    if [ -n "${SPX_RELEASE_VERSION_REMOTE:-}" ]; then
+      VERSION_REMOTE="$SPX_RELEASE_VERSION_REMOTE"
+    elif git remote get-url gitlab >/dev/null 2>&1; then
+      VERSION_REMOTE="gitlab"
+    else
+      VERSION_REMOTE="origin"
+    fi
+    git fetch "$VERSION_REMOTE" release --quiet 2>/dev/null || true
+    HOOKDIR="$(cd "$(dirname "$0")" && pwd)"
+    # shellcheck source=lib/version-step.sh
+    . "$HOOKDIR/lib/version-step.sh"
+    if ! manifest_version_step_check "$VERSION_REMOTE" "$STAGED_VER"; then
+      HAS_ERRORS=1
+    fi
+  fi
+fi
+
 # ── 5. README 版本号自动同步 ──
 
 if echo "$STAGED_FILES" | grep -q "chrome-extension/manifest.json"; then

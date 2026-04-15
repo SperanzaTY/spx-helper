@@ -104,6 +104,18 @@ else
   echo "✅ 版本号一致: v${VERSION}"
 fi
 
+# 2.35 本地版本相对 release 不得「跨档」领先（禁止未推送就连续多次改 manifest）
+# 规则：与 ${PRIMARY_REMOTE}/release 上的 manifest 相比，只允许
+#   - 同 MAJOR.MINOR 时 PATCH 最多 +1（如 3.5.20→3.5.21，禁止直接 3.5.22）
+#   - MAJOR 不变时 MINOR 最多 +1（如 3.5.x→3.6.y，禁止 3.5→3.7.0）
+#   - MAJOR 最多 +1（如 3.x→4.y.z，禁止 3→5.0.0）
+HOOKDIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=lib/version-step.sh
+. "$HOOKDIR/lib/version-step.sh"
+if ! manifest_version_step_check "$PRIMARY_REMOTE" "$VERSION"; then
+  HAS_ERRORS=1
+fi
+
 # 2.5 模块 ↔ 文档联动检查
 CHANGED_FILES=$(git diff-tree --no-commit-id --name-only -r HEAD)
 DOC_ERRORS=0

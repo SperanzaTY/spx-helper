@@ -12,6 +12,10 @@ from typing import Any, Dict, Optional
 _STUDIO_TASK_CODE_RE = re.compile(r"^(.+?\.studio_\d+)_.+$")
 # 例: spx_mart.datahub.etl_batch.281196_20260101_DAY_1
 _ETL_BATCH_TASK_CODE_RE = re.compile(r"^(.+?\.etl_batch\.\d+)_.+$")
+# 例: spx_datamart.datahub.bti.422404.hdfscopy_20260414_DAY_1
+_DATAHUB_BTI_TASK_CODE_RE = re.compile(
+    r"^(.+?\.datahub\.bti\.\d+\.[^_]+)_\d{6,}_(DAY|HOUR|MINUTE|MONTH|WEEK|YEAR|QUARTER)_\d+$"
+)
 
 
 def extract_task_code(task_instance_code: str) -> str:
@@ -33,6 +37,7 @@ def extract_task_code(task_instance_code: str) -> str:
     twbi_spx_ops.studio_6786158_202604012010_MINUTE_1 -> twbi_spx_ops.studio_6786158
     idecbi_sc.studio_8044569_202604_MONTH_1 -> idecbi_sc.studio_8044569
     spx_mart.datahub.etl_batch.281196_20260101_DAY_1 -> spx_mart.datahub.etl_batch.281196
+    spx_datamart.datahub.bti.422404.hdfscopy_20260414_DAY_1 -> spx_datamart.datahub.bti.422404.hdfscopy
     """
     s = task_instance_code.strip()
     if not s:
@@ -42,6 +47,9 @@ def extract_task_code(task_instance_code: str) -> str:
     if m:
         return m.group(1)
     m = _ETL_BATCH_TASK_CODE_RE.match(s)
+    if m:
+        return m.group(1)
+    m = _DATAHUB_BTI_TASK_CODE_RE.match(s)
     if m:
         return m.group(1)
 

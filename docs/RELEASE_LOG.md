@@ -6,6 +6,43 @@
 
 ---
 
+## v3.5.20 -- 2026-04-15 -- `feat`: Mart SLA（解析 / 短链 / 分诊）与发版 manifest 步长 Hook
+
+**提交者**: @tianyi.liang  
+**Commit Type**: feat（scheduler-query + Git hooks + 文档 / 规则）；相对 **v3.5.19** 升 PATCH 至 **v3.5.20**
+
+### 变更说明
+
+**scheduler-query**
+
+- **`mart_sla_parser`** / **`parse_mart_sla_alert`**：纯本地解析；单行粘贴告警中 **Business Time / Configured SLA / Estimated Completion** 按时间戳截取，避免整段正文被吞进一个字段。
+- **`triage_mart_sla_alert`**：解析后对 `taskInstanceCode` 调用 **`get_instance_detail`**、**`get_instance_log`**；可选 **`deep_spark`** 调用 **`get_spark_app_summary`**；**`resolve_shortlinks`**（默认 True）与 **`shortlink_resolutions`**。
+- **`mart_sla_shortlink`** / **`resolve_mart_sla_shortlink`**：从 ``shp.ee`` **HEAD** 的 ``Location`` 解析 **DataSuite** ``/scheduler/sla/instance/detail/...`` 打开链接（经 ``shopeemobile`` 落地页 ``pc=``，**无需 Cookie**）。
+- **`scheduler_task_code.extract_task_code`**：支持 **`datahub.bti.*`** 实例前缀。
+- **打包**：`pyproject.toml` `only-include` 增加 **`mart_sla_parser.py`**、**`mart_sla_shortlink.py`**。
+- **单测**：`tests/test_mart_sla_parser.py`、`tests/test_mart_sla_shortlink.py`；`tests/test_extract_task_code.py` 增加 BTI 用例。
+
+**Git hooks**
+
+- **`.githooks/lib/version-step.sh`**：`manifest` 的 **version** 相对主远程 **`release`** 最多「领先一档」（同 **MINOR** 下 **PATCH** 至多 +1，或 **MINOR** / **MAJOR** 至多 +1）。
+- **`pre-push`**：推送 **`release`** 时调用；**`pre-commit`**：任意分支只要暂存 **`chrome-extension/manifest.json`** 即调用（基准远程：**`SPX_RELEASE_VERSION_REMOTE`** 或优先 **`gitlab`** / **`origin`**，会先 **`git fetch <remote> release`**）。
+
+**文档与规则**
+
+- **`mcp-tools/scheduler-query/README.md`**、**`docs/guides/MCP_TOOLS.md`**、**`docs/guides/CHROME_EXTENSION.md`**、**`.cursor/rules/mcp-tools.mdc`**、**`docs/guides/SKILL.md`**、**`.cursor/rules/git-workflow.mdc`**、**根 `README.md`**。
+
+**版本号**：`3.5.19` → `3.5.20`（manifest、根 package.json、seatalk-agent/package.json）
+
+### 测试项
+
+- `cd mcp-tools/scheduler-query && python3 tests/test_extract_task_code.py`
+- `cd mcp-tools/scheduler-query && python3 tests/test_mart_sla_parser.py`
+- `cd mcp-tools/scheduler-query && python3 tests/test_mart_sla_shortlink.py`
+- `python3 -m py_compile mcp-tools/scheduler-query/scheduler_mcp_server.py mcp-tools/scheduler-query/scheduler_task_code.py mcp-tools/scheduler-query/mart_sla_parser.py mcp-tools/scheduler-query/mart_sla_shortlink.py`
+- `bash -n .githooks/pre-push .githooks/pre-commit .githooks/lib/version-step.sh`
+
+---
+
 ## v3.5.19 -- 2026-04-14 -- `feat`: Presto History 启发式提示；MCP Agent 排查文档
 
 **提交者**: @tianyi.liang  

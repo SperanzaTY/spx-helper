@@ -63,6 +63,7 @@ alwaysApply: true
 - ❌ 只改其中一个文件的版本号
 - ❌ 各文件版本号不一致
 - ❌ 用 package.json 作为版本判断来源
+- ❌ **未推送中间发版**就在工作区把 manifest **连续改多个 PATCH**（例如远程仍是 `3.5.20` 时本地直接改成 `3.5.22`）。每个发版 **相对主远程 `release` 上 manifest 版本最多「跳一档」**：同 `MAJOR.MINOR` 时 `PATCH` 至多 `+1`，或 `MINOR` 至多 `+1`，或 `MAJOR` 至多 `+1`（禁止跨档跳变）。由 **`.githooks/lib/version-step.sh`** 实现，**`.githooks/pre-push`** 在推送 `release` 时必检；**`.githooks/pre-commit`** 在 **任意分支上只要暂存 `chrome-extension/manifest.json`** 即校验（基准远程：`SPX_RELEASE_VERSION_REMOTE` 环境变量，否则优先 `gitlab`、否则 `origin`，会先 `git fetch <remote> release`）。
 
 ## 提交规则
 

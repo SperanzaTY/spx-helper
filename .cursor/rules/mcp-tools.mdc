@@ -148,6 +148,9 @@ python3 -c "import asyncio; from <module> import mcp; asyncio.run(mcp.list_tools
   - `get_task_instances(task_code, env?, date?, page_size?)` — 查询实例列表
   - `get_instance_detail(task_instance_code, env?)` — 查询实例详情（含 YARN App ID / Presto Query ID）
   - `get_instance_log(task_instance_code, env?)` — 查询运行日志
+  - `parse_mart_sla_alert(alert_text)` — 解析新 Mart SLA 告警正文（本地）
+  - `resolve_mart_sla_shortlink(shp_url)` — 将 shp.ee 短链解析为 DataSuite SLA 详情页 URL（HEAD Location，无需 Cookie）
+  - `triage_mart_sla_alert(alert_text, env?, max_instances?, deep_spark?, resolve_shortlinks?)` — SLA 告警分诊（解析 + 实例详情/日志，可选 Spark 摘要；默认可解析 shp.ee）
   - `get_task_lineage(task_code, env?)` — 查询上下游血缘
   - `get_task_metric_summary(task_code, env?)` — 运行指标汇总
   - `get_task_operation_log(task_code, days?, env?)` — 操作日志

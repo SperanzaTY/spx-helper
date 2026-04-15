@@ -67,9 +67,29 @@
 |--------------|----------|
 | `spx_mart.datahub.etl_batch.281196_20260101_DAY_1` | `spx_mart.datahub.etl_batch.281196` |
 
+### DataHub BTI 任务（`...datahub.bti.{数字}.{后缀}_...`）
+
+| 实例编码示例 | taskCode |
+|--------------|----------|
+| `spx_datamart.datahub.bti.422404.hdfscopy_20260414_DAY_1` | `spx_datamart.datahub.bti.422404.hdfscopy` |
+
 其它命名形态若无法匹配上述规则，会回退到旧逻辑（兼容部分非标准 studio 实例）；仍无法解析时 **taskCode 与实例编码相同**，可能导致接口返回 `data: null`，需对照 Scheduler 页面上的任务编码核对。
 
-本地校验解析规则（无需 MCP 依赖）：在 `mcp-tools/scheduler-query` 目录执行 `python3 tests/test_extract_task_code.py`。
+本地校验解析规则（无需 MCP 依赖）：在 `mcp-tools/scheduler-query` 目录执行 `python3 tests/test_extract_task_code.py`；Mart SLA 解析单测：`python3 tests/test_mart_sla_parser.py`。
+
+## 新 Mart SLA 告警（`parse_mart_sla_alert` / `triage_mart_sla_alert`）
+
+面向 SeaTalk「新 mart SLA」类英文告警：从粘贴的正文中提取 SLA 规则名、Mart 表、`Data Environment`、业务日/承诺/预计完成时间、`Related Events` 片段、`shp.ee` 链接，以及 **taskInstanceCode**（支持 `studio_*`、`datahub.bti.*`、`datahub.etl_batch.*` 等形态）。
+
+| 工具 | 说明 |
+|------|------|
+| `parse_mart_sla_alert(alert_text)` | 仅本地解析，不请求 Scheduler |
+| `resolve_mart_sla_shortlink(shp_url)` | 将 **`https://shp.ee/...`** 短链 HEAD 一次，从 ``Location`` 解析出 **DataSuite** ``/scheduler/sla/instance/detail/...`` 的浏览器打开链接（**无需 Cookie**；不调用页面内 XHR） |
+| `triage_mart_sla_alert(alert_text, env?, max_instances?, deep_spark?, resolve_shortlinks?)` | 解析后对每个实例（默认最多 3 个）调用 `get_instance_detail`、`get_instance_log`；`deep_spark=true` 时对 Spark 实例额外调用 `get_spark_app_summary`（默认不做完整 `diagnose_spark_app`，避免过慢）；**默认**对正文中的 ``shp.ee`` 填充 **`shortlink_resolutions`**（与 `resolve_mart_sla_shortlink` 相同逻辑，可设 `resolve_shortlinks=false` 关闭） |
+
+返回 JSON；`triage_mart_sla_alert` 另含 `markdown_report` 简报，便于直接贴到值班群。
+
+**关于短链与「真实 API」**：`shp.ee` 的 301 响应里已带 **DataSuite SLA 详情路径**（经 ``shopeemobile`` 落地页的 ``pc=`` 参数），故**不必用 CDP**即可还原浏览器 URL。若要把**详情 JSON**也拉进 MCP，仍需在已登录 DataSuite 的 Chrome 里打开该页，从 **DevTools → Network** 复制 XHR 的 path，再在 `scheduler-query` 里用现有 `_request` + Cookie 接入（欢迎把样例发给维护者）。
 
 ## Presto History 与 get_presto_query_sql
 
@@ -103,6 +123,15 @@
 
 #### `get_instance_log`
 查询实例运行日志。
+
+#### `parse_mart_sla_alert`
+解析「新 Mart SLA」告警正文（纯本地），输出结构化字段与 `task_instance_codes`。
+
+#### `triage_mart_sla_alert`
+在 `parse_mart_sla_alert` 基础上自动拉取实例详情与日志（可选 Spark 应用摘要）。
+
+#### `resolve_mart_sla_shortlink`
+将告警中的 **`shp.ee`** 短链解析为 **DataSuite SLA 详情页** 完整 URL（HEAD + 解析 ``Location``，无需登录）。
 
 #### `get_task_lineage`
 查询任务的上下游血缘关系。
