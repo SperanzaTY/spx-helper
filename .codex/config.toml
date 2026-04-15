@@ -1,0 +1,85 @@
+[mcp_servers.presto-query]
+command = "bash"
+args = ["./scripts/codex-mcp-launch.sh", "presto-query"]
+cwd = "."
+env_vars = ["PRESTO_PERSONAL_TOKEN", "PRESTO_USERNAME"]
+
+[mcp_servers.ck-query]
+command = "bash"
+args = ["./scripts/codex-mcp-launch.sh", "ck-query"]
+cwd = "."
+
+[mcp_servers.spark-query]
+command = "bash"
+args = ["./scripts/codex-mcp-launch.sh", "spark-query"]
+cwd = "."
+env_vars = ["LIVY_USERNAME", "LIVY_PASSWORD", "LIVY_QUEUE", "LIVY_REGION", "LIVY_URL", "LIVY_STATEMENT_TIMEOUT"]
+
+[mcp_servers.api-trace]
+command = "bash"
+args = ["./scripts/codex-mcp-launch.sh", "api-trace"]
+cwd = "."
+env_vars = ["PRESTO_PERSONAL_TOKEN", "PRESTO_USERNAME"]
+
+[mcp_servers.seatalk-reader]
+command = "bash"
+args = ["./scripts/codex-mcp-launch.sh", "seatalk-reader"]
+cwd = "."
+env_vars = ["CDP_PORT"]
+
+[mcp_servers.scheduler-query]
+command = "bash"
+args = ["./scripts/codex-mcp-launch.sh", "scheduler-query"]
+cwd = "."
+env_vars = ["CHROME_CDP_PORT", "CHROME_AUTH_DISABLE_APPLESCRIPT"]
+
+[mcp_servers.seatalk-group]
+command = "bash"
+args = ["./scripts/codex-mcp-launch.sh", "seatalk-group"]
+cwd = "."
+env_vars = ["INFRABOT_TOKEN"]
+
+[mcp_servers.flink-query]
+command = "bash"
+args = ["./scripts/codex-mcp-launch.sh", "flink-query"]
+cwd = "."
+env_vars = ["CHROME_CDP_PORT", "CHROME_AUTH_DISABLE_APPLESCRIPT"]
+
+[mcp_servers.datamap-query]
+command = "bash"
+args = ["./scripts/codex-mcp-launch.sh", "datamap-query"]
+cwd = "."
+env_vars = ["DATAMAP_OPEN_API_TOKEN", "CHROME_CDP_PORT", "CHROME_AUTH_DISABLE_APPLESCRIPT"]
+
+[mcp_servers.datastudio-mcp]
+command = "bash"
+args = ["./scripts/codex-mcp-launch.sh", "datastudio-mcp"]
+cwd = "."
+env_vars = [
+  "DATASTUDIO_BASE_PATH",
+  "DATASTUDIO_PROJECTS",
+  "CHROME_CDP_PORT",
+  "CHROME_AUTH_DISABLE_APPLESCRIPT",
+]
+
+[mcp_servers.mcp-atlassian]
+command = "uvx"
+args = ["--with", "fakeredis==2.34.0", "mcp-atlassian"]
+env_vars = [
+  "CONFLUENCE_URL",
+  "CONFLUENCE_PERSONAL_TOKEN",
+  "CONFLUENCE_SSL_VERIFY",
+  "JIRA_URL",
+  "JIRA_PERSONAL_TOKEN",
+  "TOOLSETS",
+]
+
+[mcp_servers.drawio]
+command = "npx"
+args = ["--yes", "@next-ai-drawio/mcp-server@latest"]
+env = { PATH = "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin" }
+
+[mcp_servers.google-sheets]
+command = "uvx"
+args = ["mcp-google-sheets"]
+env_vars = ["SERVICE_ACCOUNT_PATH", "DRIVE_FOLDER_ID"]
