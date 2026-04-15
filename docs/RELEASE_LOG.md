@@ -6,6 +6,33 @@
 
 ---
 
+## v3.5.21 -- 2026-04-15 -- `docs`: Codex 项目级配置、MCP 入口与 repo-scoped skills
+
+**提交者**: @tianyi.liang  
+**Commit Type**: docs（Codex 接入）；版本保持 **v3.5.21** 不变
+
+### 变更说明
+
+**Codex 项目接入**
+
+- 新增 **`AGENTS.md`**：沉淀项目结构、工作约束、release 规则与 MCP / skill 目录约定。
+- 新增 **`.codex/config.toml`**：为 Codex 提供仓库级 MCP 模板入口；仅保留共享命令与环境变量名，不写入私有凭证。
+- 新增 **`scripts/codex-mcp-launch.sh`**：统一仓库内 MCP 启动方式，自动定位仓库根目录，并为依赖 `chrome-auth` 的服务注入 `PYTHONPATH`。
+- 新增 **`.agents/skills/`**：落地 `spx-bug-trace`、`seatalk-troubleshoot`、`flink-alert-triage`、`release-publish` 四个 repo-scoped skills，并将重细节拆到各自 `references/`。
+
+**文档**
+
+- **`docs/guides/CODEX.md`**：补充 Codex 使用入口、MCP 配置方式与 skill 结构说明。
+- **`docs/guides/CURSOR_TO_CODEX_MIGRATION.md`**：记录本次从 Cursor 切到 Codex 的实际步骤、边界和验证方式。
+- **`README.md`**：补充 Codex 配置入口与迁移文档链接。
+
+### 测试项
+
+- `npm run verify:hooks`
+- `bash ./scripts/codex-mcp-launch.sh --list`
+
+---
+
 ## v3.5.21 -- 2026-04-15 -- `feat`: Mart SLA 短链经 slaInstance/get 自动补全实例编码
 
 **提交者**: @tianyi.liang  
