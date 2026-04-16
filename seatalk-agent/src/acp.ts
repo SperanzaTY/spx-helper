@@ -377,11 +377,11 @@ function getPreferredBackend(): AgentBackend {
   if (raw === 'cursor' || raw === 'cursor-acp' || raw === 'acp') return 'cursor-acp';
   if (raw === 'codex' || raw === 'codex-app-server' || raw === 'app-server') return 'codex-app-server';
 
-  const cursorOk = checkAgentCli().ok;
-  if (cursorOk) return 'cursor-acp';
-
   const codexOk = checkCodexCli().ok;
   if (codexOk) return 'codex-app-server';
+
+  const cursorOk = checkAgentCli().ok;
+  if (cursorOk) return 'cursor-acp';
 
   return 'cursor-acp';
 }

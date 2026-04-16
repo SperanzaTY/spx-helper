@@ -6,6 +6,30 @@
 
 ---
 
+## v3.6.1 -- 2026-04-16 -- `fix`: seatalk-agent 默认优先使用 Codex backend
+
+**提交者**: @tianyi.liang  
+**Commit Type**: fix（seatalk-agent + docs）；相对 **v3.6.0** 升 PATCH 至 **v3.6.1**
+
+### 变更说明
+
+**seatalk-agent**
+
+- 调整自动后端选择顺序为 **Codex first**：本机可用 `codex` CLI 时，默认走 **`codex-app-server`**。
+- 仅在未安装 `codex` CLI，但本机可用 Cursor `agent` CLI 时，才回退到 **`cursor-acp`**。
+
+**文档**
+
+- 更新 **`docs/guides/CODEX.md`** 与 **`docs/guides/SEATALK_AGENT.md`**，同步默认后端优先级说明。
+
+**版本号**：`3.6.0` → `3.6.1`（manifest、根 package.json、seatalk-agent/package.json）
+
+### 测试项
+
+- `cd seatalk-agent && npx tsc --noEmit`
+- `npm run verify:hooks`
+
+
 ## v3.6.0 -- 2026-04-15 -- `feat`: SeaTalk Agent 接入 Codex app-server 并补齐 Codex 运行时配置
 
 **提交者**: @tianyi.liang  
