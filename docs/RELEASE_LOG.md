@@ -6,6 +6,22 @@
 
 ---
 
+## v3.6.2 -- 2026-04-17 -- `docs`: 同步 v3.6.2 发版说明文档
+
+**提交者**: @tianyi.liang  
+**Commit Type**: docs（release guides）；版本保持 **v3.6.2** 不变
+
+### 变更说明
+
+**文档**
+
+- 更新 **`docs/guides/CHROME_EXTENSION.md`**，同步当前版本号到 **v3.6.2**。
+- 更新 **`docs/guides/MCP_TOOLS.md`**，补充 `presto-query` 的 **`idc`** 参数说明。
+
+### 测试项
+
+- `npm run verify:hooks`
+
 ## v3.6.2 -- 2026-04-17 -- `fix`: presto-query 改用 `idc` 参数切换 SG/US 集群
 
 **提交者**: @tianyi.liang  
