@@ -6,6 +6,32 @@
 
 ---
 
+## v3.6.2 -- 2026-04-17 -- `fix`: presto-query 改用 `idc` 参数切换 SG/US 集群
+
+**提交者**: @tianyi.liang  
+**Commit Type**: fix（presto-query）；相对 **v3.6.1** 升 PATCH 至 **v3.6.2**
+
+### 变更说明
+
+**presto-query**
+
+- **`query_presto`** MCP 参数由 **`region`** 改为 **`idc`**，避免与业务 region 概念混淆。
+- 支持传入 **`sg`** / **`us`** 查询不同 Presto 集群，默认 **`sg`**。
+- 新增 IDC 参数规范化与校验，非法值会直接返回参数错误。
+- 查询结果中补充 **`IDC`** 字段，便于确认本次命中的集群。
+- 兼容环境变量 **`PRESTO_IDC`**，并保留 **`PRESTO_REGION`** 作为兜底读取。
+
+**文档**
+
+- 更新 **`mcp-tools/presto-query/README.md`**，同步 MCP 参数名与默认 IDC 说明。
+
+**版本号**：`3.6.1` → `3.6.2`（manifest、根 package.json、seatalk-agent/package.json）
+
+### 测试项
+
+- `python3 -m py_compile mcp-tools/presto-query/presto_mcp_server.py`
+- `npm run verify:hooks`
+
 ## v3.6.1 -- 2026-04-16 -- `fix`: seatalk-agent 默认优先使用 Codex backend
 
 **提交者**: @tianyi.liang  

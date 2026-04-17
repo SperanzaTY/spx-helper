@@ -86,7 +86,7 @@ python3 query_presto.py --help
 
 **文件:** `presto_query_tool.py`
 
-**用法概要:** 构造 `PrestoQueryTool(personal_token=..., username=...)` 后调用 `execute(sql, queue=..., region=..., ...)`；返回字典含 `success`、`columns`、`rows`、`error` 等。Token 与用户名由调用方从环境变量或密钥系统读取，**勿写入仓库**。
+**用法概要:** 构造 `PrestoQueryTool(personal_token=..., username=...)` 后调用 `execute(sql, queue=..., idc=..., ...)`；返回字典含 `success`、`columns`、`rows`、`error` 等。`idc` 支持传 `sg` / `us`，默认 `sg`。Token 与用户名由调用方从环境变量或密钥系统读取，**勿写入仓库**。
 
 ## 🚀 快速开始
 
@@ -127,6 +127,7 @@ python3 query_presto.py "你的SQL查询"
 | 参数 / 环境变量 | 说明 |
 |-----------------|------|
 | `cell_max_len` | **默认 0** = 表格展示**不截断**；设为 `50`–`120` 可缩短 MCP 返回体积。 |
+| `idc` | 支持传 `sg` 或 `us`，用于切换查询的 Presto 集群；默认 `sg`。 |
 | `write_full_result_to` | 传入相对或绝对路径（如 `docs/investigations/presto_lineage.json`），将 **完整** 结果写入 UTF-8 JSON（`columns` + `rows` + `jobId`），对话中仅保留短预览表。后续用脚本读文件合并或写 Google Sheet。 |
 | `PRESTO_MCP_OUTPUT_DIR` | 可选；`write_full_result_to` 为**相对路径**时的基准目录（未设则用 MCP 进程当前工作目录，一般为 Cursor 工作区根）。 |
 
@@ -197,7 +198,7 @@ pip3 install mcp
 - **queue**: Presto队列
   - `szsc-adhoc` - Ad-hoc查询（默认）
   - `szsc-scheduled` - 定时任务
-- **region**: IDC集群
+- **idc**: IDC集群
   - `SG` - 新加坡（默认）
   - `US` - 美国
 

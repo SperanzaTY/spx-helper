@@ -33,7 +33,7 @@ from mcp.server.fastmcp import FastMCP
 PERSONAL_TOKEN = os.environ.get('PRESTO_PERSONAL_TOKEN', '')
 DEFAULT_USERNAME = os.environ.get('PRESTO_USERNAME', '')
 DEFAULT_QUEUE = os.environ.get('PRESTO_QUEUE', 'szsc-adhoc')
-DEFAULT_REGION = os.environ.get('PRESTO_REGION', 'SG')
+DEFAULT_IDC = os.environ.get('PRESTO_IDC') or os.environ.get('PRESTO_REGION', 'sg')
 
 if not PERSONAL_TOKEN:
     print("错误: 未设置 PRESTO_PERSONAL_TOKEN 环境变量", file=sys.stderr)
@@ -78,6 +78,14 @@ def _classify_sql(sql: str) -> Tuple[str, Optional[str]]:
                 return "DDL", stmt_type
             return "METADATA", stmt_type
     return "SELECT", None
+
+
+def _normalize_idc(idc: str) -> str:
+    """将用户输入的 IDC 标识规范化为 DataSuite API 所需的值。"""
+    normalized = (idc or DEFAULT_IDC or 'sg').strip().lower()
+    if normalized not in {'sg', 'us'}:
+        raise ValueError("idc 仅支持 `sg` 或 `us`，默认 `sg`")
+    return normalized.upper()
 
 
 def _http_post(url: str, headers: dict, payload: dict, timeout: int = 10) -> dict:
@@ -182,7 +190,7 @@ async def query_presto(
     sql: str,
     username: str = DEFAULT_USERNAME,
     queue: str = DEFAULT_QUEUE,
-    region: str = DEFAULT_REGION,
+    idc: str = DEFAULT_IDC,
     max_rows: int = 100,
     cell_max_len: int = 0,
     write_full_result_to: Optional[str] = None,
@@ -209,7 +217,7 @@ async def query_presto(
         sql: 要执行的 SQL 查询语句（必须是只读的 SELECT 语句）
         username: 用户名（默认使用配置的用户名）
         queue: Presto 队列名称，szsc-adhoc 或 szsc-scheduled（默认 szsc-adhoc）
-        region: IDC 集群，SG 或 US（默认 SG）
+        idc: IDC 集群，支持传 `sg` 或 `us`（默认 `sg`）
         max_rows: 最多返回行数（默认 100，最大 2000）
         cell_max_len: 表格展示时每个单元格最大字符数；**0 表示不截断**（适合 sink/source 长 JSON）；
             设为 50–120 可缩短 MCP 文本体积。默认 0。
@@ -236,6 +244,11 @@ async def query_presto(
         )
 
     end_user = username if '@' in username else f"{username}@shopee.com"
+    try:
+        normalized_idc = _normalize_idc(idc)
+    except ValueError as e:
+        return f"❌ 参数错误: {e}"
+
     headers = {
         'Authorization': PERSONAL_TOKEN,
         'X-End-User': end_user,
@@ -249,7 +262,7 @@ async def query_presto(
             _http_post,
             f"{BASE_URL}/query/presto",
             headers,
-            {'sql': sql.strip(), 'prestoQueue': queue, 'idcRegion': region, 'priority': '3'}
+            {'sql': sql.strip(), 'prestoQueue': queue, 'idcRegion': normalized_idc, 'priority': '3'}
         )
         job_id = data.get('jobId')
         if not job_id:
@@ -347,6 +360,7 @@ async def query_presto(
 
         output = f"✅ 查询成功\n\n"
         output += f"Job ID: {job_id}\n"
+        output += f"IDC: {normalized_idc.lower()}\n"
         if sql_stmt_type:
             output += f"SQL 类型: {sql_stmt_type}\n"
         output += f"查询进度: {progress_line}\n"
