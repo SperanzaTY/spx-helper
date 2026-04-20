@@ -6,6 +6,30 @@
 
 ---
 
+## v3.6.6 -- 2026-04-20 -- `docs`: 同步 spx-bug-trace 本地沉淀到 Codex 入口
+
+**提交者**: @tianyi.liang  
+**Commit Type**: docs（repo-scoped skill guides）；版本保持 **v3.6.6** 不变
+
+### 变更说明
+
+**Skill**
+
+- 更新 **`.agents/skills/spx-bug-trace/SKILL.md`**，新增显式约束：凡涉及本地过程文档命名、Confluence 页面创建或更新、Google Sheets 摘要写回，必须先加载对应 reference，再决定标题、路径和写入 payload。
+- 新增 **`.agents/skills/spx-bug-trace/references/sinks.md`**，把本地沉淀里实际在用的硬规则抽到仓库的 Codex 入口，包括：
+  - `docs/investigations/YYYYMMDD-<short-description>.md`
+  - Confluence 标题前缀 `FM-` / `MM-` / `LM-`
+  - `SPSC` / `parent_id=3105880558`
+  - Google Sheets `app问题整理` / `坑点` 的列映射与 `cursor@spx-helper.iam.gserviceaccount.com` 权限要求
+
+**文档**
+
+- 更新 **`docs/guides/SKILL.md`**，同步说明 `spx-bug-trace` 的 repo-scoped 入口现在已把 naming / Confluence / GSheet 写回规则抽成专门 reference。
+
+### 测试项
+
+- `npm run verify:hooks`
+
 ## v3.6.6 -- 2026-04-20 -- `docs`: 收紧 Codex skill 迁移完成度口径
 
 **提交者**: @tianyi.liang  

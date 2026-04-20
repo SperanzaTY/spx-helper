@@ -2,7 +2,10 @@
 
 本次不升级版本号，继续保持 v3.6.6。
 
-这次主要收紧了 Codex skill 迁移完成度的说明口径：
-- `.agents/skills/` 表示 Codex repo-scoped 入口已建立
-- 这不自动等于和 Cursor 全量 skill 完全等价
-- `spx-bug-trace` 目前仍以 `~/.cursor/skills/spx-bug-trace/SKILL.md` 作为更完整的上游规则来源，尤其是 Confluence 标题命名、Google Sheets 沉淀、过程文档命名与写入位置等硬规则
+这次同步了 `spx-bug-trace` 的本地沉淀到仓库里的 Codex 入口：
+- repo-scoped skill 新增 `references/sinks.md`
+- 明确本地过程文档命名规则：`docs/investigations/YYYYMMDD-<short-description>.md`
+- 明确 Confluence 标题前缀必须使用 `FM-` / `MM-` / `LM-`
+- 明确 Google Sheets `app问题整理` / `坑点` 的写回约束与 service account 要求
+
+这样 Codex 读精简版 `spx-bug-trace` 时，也能直接拿到这些命名和沉淀硬规则。

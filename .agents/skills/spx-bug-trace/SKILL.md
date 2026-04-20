@@ -32,6 +32,7 @@ Use this skill for business-facing data investigations. The goal is to move from
 - For non-trivial investigations, the final documentation must be a process record, not a conclusion note.
 - Keep the concrete SQL, tool calls, code paths, and key negative checks that support the conclusion.
 - If the report is intended for Confluence, first finish the detailed local markdown under the target repo, then sync the same content online.
+- If the task includes naming a local investigation file, creating or updating a Confluence page, or writing a Google Sheet summary, load `references/sinks.md` before choosing the title, path, or sheet payload.
 
 ## Load References As Needed
 
@@ -39,3 +40,4 @@ Use this skill for business-facing data investigations. The goal is to move from
 - For MCP usage patterns and failure handling: [references/tools.md](references/tools.md)
 - For common table relationships and mapping hints: [references/table-mapping.md](references/table-mapping.md)
 - For report structure and write-up shape: [references/report-template.md](references/report-template.md)
+- For local doc naming, Confluence title rules, and Google Sheets writeback: [references/sinks.md](references/sinks.md)
