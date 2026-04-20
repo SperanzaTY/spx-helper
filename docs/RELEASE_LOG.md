@@ -6,6 +6,31 @@
 
 ---
 
+## v3.6.6 -- 2026-04-20 -- `feat`: 补强 Codex skill 可用性说明与 SPX 排查文档约束
+
+**提交者**: @tianyi.liang  
+**Commit Type**: feat（repo-scoped skill + docs）；相对 **v3.6.5** 升 PATCH 至 **v3.6.6**
+
+### 变更说明
+
+**Skill**
+
+- 强化 repo-scoped **`spx-bug-trace`**：当 realtime CK 结果表缺少单个实体、而 upstream source fact 或 DIM 已有该实体时，明确要求优先检查 owning **Flink app** 的实例状态、重启次数、异常与历史失败，不继续停留在线上 SQL 猜测。
+- 强化 **`spx-bug-trace`** 的交付要求：非简单问题的最终结论必须落成 **过程文档**，保留关键 SQL、MCP 调用、空结果检查、相关代码路径，以及同步到 Confluence 前的本地 Markdown 记录。
+
+**文档**
+
+- 更新 **`AGENTS.md`**、**`README.md`**、**`docs/guides/CODEX.md`**、**`docs/guides/CURSOR_TO_CODEX_MIGRATION.md`**，明确 **`.cursor/skills/*` / `~/.cursor/skills/*` 的存在不等于当前 Codex 会话可直接使用**，仓库侧以 **`.agents/skills/`** 为 repo-scoped 入口，机器级通用 skill 可安装到 **`~/.codex/skills/`**。
+- 更新 **`docs/guides/SKILL.md`**，同步 `spx-bug-trace` 的新排查约束和 Codex / Cursor skill 边界。
+- 更新 **`docs/guides/SEATALK_AGENT.md`**，将安装说明改为 **Codex CLI 优先**，保留 `cursor-acp` 作为兼容旧环境的回退后端。
+- 更新 **`docs/guides/CHROME_EXTENSION.md`**，同步当前版本号到 **v3.6.6**。
+
+**版本号**：`3.6.5` → `3.6.6`（manifest、根 package.json、seatalk-agent/package.json）
+
+### 测试项
+
+- `npm run verify:hooks`
+
 ## v3.6.4 -- 2026-04-20 -- `docs`: 同步 v3.6.4 Chrome 扩展版本说明
 
 ## v3.6.5 -- 2026-04-20 -- `docs`: 同步 v3.6.5 Chrome 扩展版本说明

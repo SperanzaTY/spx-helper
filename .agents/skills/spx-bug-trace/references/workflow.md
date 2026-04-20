@@ -30,9 +30,14 @@ Use this deeper workflow when the issue is non-trivial.
 - Use `query_ck` or `query_ck_bundle` for ClickHouse realtime tables.
 - Use `search_flink_apps`, `diagnose_flink_app`, and related Flink tools if freshness is broken.
 - Use `search_tasks`, `get_instance_detail`, and related Scheduler tools for batch pipelines.
+- If a CK realtime DIM or ADS table is missing a single entity, do not stay in SQL lineage mode after confirming the source fact or source DIM already has that entity.
+- For standalone realtime apps, check `search_flink_apps` first and confirm whether the owner is Scheduler or an independent Flink application.
+- If `scheduleStatus = NO` or `taskCode = null`, treat the problem as a Flink application issue and inspect current instance status, restart count, recent exceptions, and historical instance failures.
+- If the current instance is only barely alive but historical instances are failing repeatedly, classify the issue as pipeline instability rather than single-row business filtering.
 
 ## Phase 4: Close The Loop
 
 - State whether the issue is data missing, data delayed, logic changed, source mismatch, or expected behavior.
 - Include the minimal evidence needed to justify the conclusion.
 - If remediation is outside read-only scope, say who should act and what they should inspect next.
+- When writing the final case document, preserve the replay path: the exact SQL, the MCP tools used, the key empty-result checks, and the repo code locations that were necessary to close the loop.

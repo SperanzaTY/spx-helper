@@ -20,7 +20,8 @@ Use this skill for business-facing data investigations. The goal is to move from
 2. If the problem starts from an API, use `api-trace` first. If it starts from a table or pipeline, go straight to `presto-query`, `ck-query`, `flink-query`, or `scheduler-query`.
 3. Validate data with live queries before drawing conclusions. Prefer one small confirming query per hypothesis.
 4. If the issue is caused by pipeline health, switch to Flink or Scheduler diagnosis instead of staying in lineage mode.
-5. End with a concise conclusion: what is wrong, what evidence proves it, what the root cause is, and what the next action should be.
+5. If a realtime CK result table is missing one entity but the upstream source fact or DIM already contains that entity, treat this as a realtime task health problem first and check the owning Flink app before continuing SQL guesswork.
+6. End with a concise conclusion: what is wrong, what evidence proves it, what the root cause is, and what the next action should be.
 
 ## Operating Rules
 
@@ -28,6 +29,9 @@ Use this skill for business-facing data investigations. The goal is to move from
 - Prefer MCP facts over spreadsheet notes or memory.
 - Treat Google Sheets and Confluence as supporting context, not the primary source of truth.
 - If code behavior matters, inspect the relevant repo before assuming the logic.
+- For non-trivial investigations, the final documentation must be a process record, not a conclusion note.
+- Keep the concrete SQL, tool calls, code paths, and key negative checks that support the conclusion.
+- If the report is intended for Confluence, first finish the detailed local markdown under the target repo, then sync the same content online.
 
 ## Load References As Needed
 

@@ -41,16 +41,19 @@ export SPX_AGENT_BACKEND=codex
 
 - macOS
 - Node.js v22+（推荐用 nvm 管理）
-- 二选一：
-  - [Cursor IDE](https://www.cursor.com/) 已安装并登录，且具备 **Cursor Agent CLI**（`~/.local/bin/agent`）
-  - 已安装并登录 **Codex CLI**（`codex --version` 可用）
+- 已安装并登录 **Codex CLI**（`codex --version` 可用）
 - SeaTalk 桌面客户端
+
+> 新同事默认按 Codex 路径安装。`cursor-acp` 仅保留为兼容旧环境的回退后端，不再作为推荐安装方案。
 
 ### 一键安装
 
 ```bash
-# 1. 安装 Cursor Agent CLI（必须！没有它 Agent 无法连接 Cursor）
-curl https://cursor.com/install -fsSL | bash
+# 1. 安装并登录 Codex CLI
+# 参考：https://developers.openai.com/codex/cli/
+# 安装完成后确认：
+codex --version
+codex login
 
 # 2. 克隆项目（GitLab 为主仓库，推荐优先使用）
 git clone https://git.garena.com/tianyi.liang/spx-helper.git
@@ -65,8 +68,11 @@ bash install.sh
 ```
 
 安装完成后，**重新打开终端**（让 shell 配置生效），输入 `seatalk` 即可启动。
+如果要确认当前会默认连到 Codex，可执行：
 
-> **易错提醒**：步骤 1（安装 Cursor Agent CLI）是最容易遗漏的。如果跳过，`npm start` 时会报 `spawn agent ENOENT` 错误。
+```bash
+SPX_AGENT_BACKEND=codex seatalk
+```
 
 安装脚本会配置：
 
@@ -97,7 +103,7 @@ seatalk
 1. 以 CDP 模式启动 SeaTalk 客户端
 2. 连接 SeaTalk 页面
 3. 注入 AI 侧边栏
-4. 连接 Cursor Agent
+4. 连接 AI Agent（默认优先 Codex）
 
 看到以下日志说明启动成功：
 
@@ -107,7 +113,7 @@ seatalk
 [agent] [cdp-proxy] listening on 127.0.0.1:19222
 [agent] SPA ready
 [agent] injection complete!
-[agent] ACP agent connected
+[agent] AI agent connected (backend=codex-app-server, resumed=...)
 ```
 
 ### 方式二：直接打开 SeaTalk + npm start

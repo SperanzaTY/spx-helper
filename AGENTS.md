@@ -34,4 +34,6 @@ SPX Helper is a productivity toolkit for Shopee data engineers. The repository h
 
 - Cursor-era skills live in `.cursor/skills/`.
 - Codex repo-scoped skills should live in `.agents/skills/`.
+- `.cursor/skills/*` or `~/.cursor/skills/*` existing on disk does not make them automatically usable in a Codex session.
+- For Codex, treat Cursor skills as migration source material; to make one directly usable, add a repo-scoped entrypoint under `.agents/skills/` or install it into `~/.codex/skills/`.
 - Keep Codex skill entrypoints concise and point to existing project knowledge where needed instead of duplicating large workflows.

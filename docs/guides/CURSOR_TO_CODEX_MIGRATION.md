@@ -237,6 +237,12 @@ Cursor skill 往往是：
 - `SKILL.md` 只写触发条件、核心流程、关键规则
 - 具体细节放到 `references/`
 
+另外要避免一个常见误判：
+
+- 在磁盘上找到 `.cursor/skills/<skill>/` 或 `~/.cursor/skills/<skill>/`，不等于这个 skill 已经能被当前 Codex 会话直接使用
+- Codex 会话里真正可直接用的 skill，要看会话实际暴露的列表；本仓库侧应优先迁到 `.agents/skills/`
+- 因此迁移验收不能只看“文件存在”，还要看“Codex 当前会话是否真的挂进来了”
+
 ### 3. 迁移时保留什么，删掉什么
 
 建议保留：
@@ -261,6 +267,12 @@ Cursor skill 往往是：
 - [/Users/tianyi.liang/Cursor/SPX_Helper/.agents/skills/seatalk-troubleshoot](/Users/tianyi.liang/Cursor/SPX_Helper/.agents/skills/seatalk-troubleshoot)
 - [/Users/tianyi.liang/Cursor/SPX_Helper/.agents/skills/flink-alert-triage](/Users/tianyi.liang/Cursor/SPX_Helper/.agents/skills/flink-alert-triage)
 - [/Users/tianyi.liang/Cursor/SPX_Helper/.agents/skills/release-publish](/Users/tianyi.liang/Cursor/SPX_Helper/.agents/skills/release-publish)
+
+补充说明：
+
+- `.cursor/skills/` 保留为 Cursor 时代原始工作流和长文档知识库
+- `.agents/skills/` 才是本仓库给 Codex 暴露 repo-scoped skill 的正式入口
+- 如果要做机器级通用 Codex skill，则应安装到 `~/.codex/skills/`
 
 ## 五、这次迁移的最终文件清单
 
@@ -335,6 +347,7 @@ Codex 更适合：
 - [ ] 每个 Codex skill 都有 frontmatter
 - [ ] 长技能材料已拆到 `references/`
 - [ ] README 或使用文档已补充 Codex 入口
+- [ ] 关键 skill 已在当前 Codex 会话中实际显示为可用，而不只是存在于 `.cursor/skills/`
 
 ## 相关文档
 

@@ -18,6 +18,12 @@
 - MCP 直接指向本地仓库源码，调试 MCP 时不需要等 release
 - Codex 技能和 Cursor 时代的沉淀可以并存，迁移成本较低
 
+需要单独强调一点：
+
+- Codex 不会因为磁盘上存在 `.cursor/skills/` 或 `~/.cursor/skills/` 就自动把它们注册成当前会话可用 skill
+- 当前会话里能直接触发的 skill，以 Codex 实际暴露出来的列表为准；本仓库侧主要看 `.agents/skills/`
+- `~/.cursor/skills/` / `.cursor/skills/` 更适合作为迁移来源和知识库，而不是 Codex 的自动加载入口
+
 另外，`seatalk-agent/` 现在也支持直接对接 Codex CLI 的 `app-server` 模式，不再只能依赖 Cursor ACP。
 
 ## 当前接入内容
@@ -70,6 +76,15 @@ Codex repo-scoped skills 位于 `.agents/skills/`，当前已迁移：
 - `SKILL.md` 只保留触发条件、主流程和关键约束
 - 深入材料放在各 skill 自己的 `references/` 下按需加载
 - 原先 `.cursor/skills/` 中的长工作流被整理成更适合 Codex 上下文预算的版本
+
+关于“当前 Codex 会话能不能直接用”：
+
+- 先看当前会话暴露出来的 skill 列表
+- 在本仓库里，repo-scoped 入口应来自 `.agents/skills/`
+- 仅仅存在于 `.cursor/skills/` 或 `~/.cursor/skills/` 的 skill，不代表 Codex 会自动继承
+- 如果要让某个 Cursor skill 变成 Codex 可直接使用的 skill，做法是：
+  1. 迁移一个精简入口到 `.agents/skills/<skill>/`
+  2. 或安装到本机 `~/.codex/skills/`
 
 ### SeaTalk Agent
 
@@ -175,6 +190,12 @@ bash ./scripts/codex-mcp-launch.sh --list
 - `AGENTS.md`
 - `.codex/config.toml`
 - `.agents/skills/`
+
+这意味着：
+
+- `.cursor/skills/` 仍然应该保留，方便团队复用和继续沉淀 Cursor 时代工作流
+- 但它们不会自动出现在 Codex 当前会话的 skill 列表里
+- 如果某个 skill 对 Codex 很关键，应确认它已经迁到 `.agents/skills/`，而不是只存在于 `.cursor/skills/`
 
 因此后续如果团队全面切换到 Codex，建议新增规则和工作流优先维护在 Codex 这三处，再视情况回写到 Cursor 目录。
 

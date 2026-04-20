@@ -43,6 +43,8 @@ Skill（指令层）     →  定义"怎么做"     → .cursor/skills/<name>/SK
 
 **v3.6.4**：新增 repo-scoped skill **`mcp-capability-build`**，沉淀面向本仓库 MCP 框架的新能力建设方法论：先做现有 MCP 与 `chrome-auth` 缺口审计，再用页面/CDP 或真实接口证实后端能力，明确 Cookie 来源与静默刷新路径，区分“已证实”和“推断”；若用户只给页面/链接，先产出候选能力清单并引导用户选择，再进入开发、真环境 smoke 和正式发布流程。
 
+**v3.6.6**：`spx-bug-trace` 的 repo-scoped 版本补强两类约束：一是 **实时 CK 缺单实体** 在确认 source fact / DIM 已有数据后，应优先切到 **Flink app 健康度排查**，不要继续停留在线上 SQL 猜测；二是 **非简单问题的最终产物必须是过程文档**，保留关键 SQL、MCP 调用、空结果检查、代码路径，以及准备同步到 Confluence 前的本地 Markdown 过程记录。与此同时，Codex 侧文档补充了 **`.cursor/skills` 不会自动成为当前 Codex 会话可用 skill**、repo-scoped 入口以 `.agents/skills/` 为准，以及需要时安装到 `~/.codex/skills/` 的边界说明。
+
 **双副本同步**：`flink-alert-triage` 在仓库中为 `.cursor/skills/flink-alert-triage/SKILL.md`，与开发者本机主副本 `~/.cursor/skills/flink-alert-triage/SKILL.md` 内容应对齐；更新 skill 后请 `cp` 同步另一侧。  
 Alarm Bot 用的 **`alarm-bot-prompt.md`** 同目录存放，修改后也请同步到 `~/.cursor/skills/flink-alert-triage/alarm-bot-prompt.md`，便于本机与仓库一致。
 

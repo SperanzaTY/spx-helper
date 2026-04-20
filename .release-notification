@@ -1,12 +1,12 @@
-📦 SPX Helper v3.6.5 已发布
+📦 SPX Helper v3.6.6 已发布
 
-本次更新新增 repo-scoped skill `mcp-capability-build`，专门用于在 SPX Helper 里构建新的 MCP 能力。
+本次更新补了两块和 Codex / skill 使用体验直接相关的内容：
+- `spx-bug-trace` 现在更明确要求：如果 realtime CK 结果表只缺单个实体，而 source fact / DIM 已经有数据，要优先排 Flink app 健康度，不继续停留在 SQL 猜测
+- 非简单问题的最终产物要保留过程文档：关键 SQL、MCP 调用、空结果检查、代码路径，以及同步到 Confluence 前的本地 Markdown 记录
 
-这套方法论现在明确覆盖：
-- 用户只给页面或链接时，先做 capability mining，挖掘可实现点
-- 用 CDP 或真实接口证实页面能力，而不是凭页面文案猜接口
-- 复用 chrome-auth，包括 cookie_db + cdp_cookie、静默 SSO 刷新、401/403 重试与认证诊断
-- 探查后先给用户候选能力清单，再引导选择优先级
-- 继续完成实现、真环境 smoke，以及正式 release/publish
+同时，Codex 侧文档补清了 skill 可用性边界：
+- `.cursor/skills/*` 或 `~/.cursor/skills/*` 在磁盘上存在，不等于当前 Codex 会话会自动挂进来
+- 本仓库下直接给 Codex 用的 repo-scoped skill 入口是 `.agents/skills/`
+- 机器级通用 skill 可以安装到 `~/.codex/skills/`
 
-相关文档已同步到 docs/guides/SKILL.md。
+另外，SeaTalk Agent 安装说明已改为 Codex CLI 优先。
