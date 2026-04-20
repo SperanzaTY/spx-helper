@@ -96,6 +96,10 @@ pip install -e .
 | `get_partition_columns(table_ref, engine?)` | 获取表的分区字段列表 |
 | `get_table_usage(table_ref, engine?)` | 获取表的使用统计（查询频次、热度） |
 | `get_table_lineage(table_ref, engine?)` | 获取表的数据血缘关系 |
+| `get_lineage_tasks(table_ref, direction?, engine?, idc_region?, page_size?, active_only?)` | 获取上下游任务列表，适合排查“谁在产出 / 谁在消费 / 最近是否活跃” |
+| `get_column_node_info(table_ref, column_name, engine?, idc_region?)` | 获取字段级节点信息（描述、类型、计算逻辑、L30D query、技术 PIC） |
+| `get_column_lineage(table_ref, column_name, engine?, idc_region?, upstream_level?, downstream_level?)` | 获取字段级血缘原始结果（上游/下游） |
+| `get_downstream_applications(table_ref, app_type?, engine?, idc_region?)` | 获取 Downstream Application（Data Service / OneBI Dataset / DataGo / Dashboard） |
 | `get_table_score(table_ref, score_type?, engine?)` | 获取表的质量评分（completeness/popularity） |
 | `get_table_sla(table_ref, engine?)` | 获取表关联的 SLA 信息 |
 | `list_schemas(engine?)` | 列出所有 schema（数据库） |
@@ -137,6 +141,10 @@ DataMap MCP 使用三组 API：
 
 - "查一下 `spx_mart.dwd_spx_spsso_delivery_trajectory_di_br` 这个表的信息"
 - "这个表的血缘关系是什么？上下游有哪些表？"
+- "这个表的 upstream task 是谁？最近 32 天活跃吗？"
+- "查一下 staff_id 这个字段的节点信息和查询热度"
+- "帮我看这个字段有没有字段级血缘"
+- "这个表有哪些 Downstream Application？OneBI dataset 有哪些？"
 - "搜索包含 fleet_order 的表"
 - "更新 `spx_datamart.dwd_spx_spsso_order_di_id` 的表描述为 'SPX order base info'"
 - "更新 order_id 列的描述为 'unique order identifier'"
@@ -149,6 +157,14 @@ DataMap MCP 使用三组 API：
 - 所有读取工具新增 `idc_region` 参数：传 `"USEast"` 可查询 USEast 区域的表元数据（如 BR 表）
 - `update_datamap` 的 dry_run 预览也使用正确 IDC 的 qualifiedName 读取当前值
 - 默认空值 = SG，完全向后兼容
+
+### v3.6.4
+
+- 新增 `get_lineage_tasks`：真实调用 `/lineageV2/taskInfo`，返回 upstream/downstream 任务、owner、project、env、活跃状态、详情页/code 链接
+- 新增 `get_column_node_info`：真实调用 `/lineage/getColumnNodeInfo`，返回字段描述、类型、计算逻辑、L30D query、技术 PIC
+- 新增 `get_column_lineage`：真实调用 `/lineageV2/filter/column`，返回字段级 upstream/downstream 原始结果
+- 新增 `get_downstream_applications`：真实调用 `/common/downStreamApplication`，支持 Data Service / OneBI Dataset / DataGo / Dashboard
+- `get_table_lineage` 现在使用实际解析后的 qualifiedName，并保留更多实体/任务字段
 
 ### v3.5.2
 

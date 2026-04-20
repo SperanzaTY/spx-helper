@@ -239,6 +239,108 @@ def _parse_table_ref(table_ref: str) -> tuple:
     return "spx_mart", table_ref
 
 
+def _resolve_table_qn(database: str, table: str, engine: str = "hive", idc: str = "") -> str:
+    """Resolve the actual qualifiedName, including IDC fallback via previewSearch."""
+    qn = _qualified_name(database, table, engine=engine.lower(), idc=idc)
+    resolved = _search_resolve_qn(qn)
+    return resolved or qn
+
+
+def _resolve_column_qn(database: str, table: str, column_name: str, engine: str = "HIVE", idc: str = "") -> str:
+    """Resolve a column qualifiedName via columnDetail when possible."""
+    table_qn = _resolve_table_qn(database, table, engine=engine.lower(), idc=idc)
+    try:
+        data = _request(
+            "GET",
+            f"/dataWarehouse/{engine}/columnDetail",
+            params={"qualifiedName": table_qn, "columnName": column_name},
+        )
+        if isinstance(data, dict) and data.get("qualifiedName"):
+            return data["qualifiedName"]
+    except Exception:
+        pass
+    return f"{table_qn}@{column_name}"
+
+
+def _table_type_name(engine: str) -> str:
+    return {
+        "HIVE": "HIVE_TABLE",
+        "CLICKHOUSE": "CLICKHOUSE_TABLE",
+        "STARROCKS": "STARROCKS_TABLE",
+    }.get(engine.upper(), f"{engine.upper()}_TABLE")
+
+
+def _column_type_name(engine: str) -> str:
+    return {
+        "HIVE": "HIVE_COLUMN",
+        "CLICKHOUSE": "CLICKHOUSE_COLUMN",
+        "STARROCKS": "STARROCKS_COLUMN",
+    }.get(engine.upper(), f"{engine.upper()}_COLUMN")
+
+
+def _flatten_lineage_edges(raw: Any) -> List[dict]:
+    flat: List[dict] = []
+    if not isinstance(raw, list):
+        return flat
+    for item in raw:
+        if isinstance(item, list):
+            flat.extend(edge for edge in item if isinstance(edge, dict))
+        elif isinstance(item, dict):
+            flat.append(item)
+    return flat
+
+
+def _entity_brief(entity: dict) -> dict:
+    return {
+        "qualifiedName": entity.get("qualifiedName", ""),
+        "displayName": entity.get("displayName", ""),
+        "entityName": entity.get("entityName", ""),
+        "schema": entity.get("schema", ""),
+        "serviceType": entity.get("serviceType", ""),
+        "typeName": entity.get("typeName", ""),
+        "status": entity.get("status", ""),
+        "idcRegion": entity.get("idcRegion", ""),
+        "exists": entity.get("exists"),
+        "visibility": entity.get("visibility"),
+        "access": entity.get("access"),
+        "inChargeOfTable": entity.get("inChargeOfTable"),
+        "active32d": entity.get("active32d"),
+        "taskExecutionCount": entity.get("taskExecutionCount"),
+        "lastedTaskUpdateTime": entity.get("lastedTaskUpdateTime"),
+    }
+
+
+def _format_lineage_edge(edge: dict, entity_map: Dict[str, dict]) -> dict:
+    src = edge.get("src", "")
+    dst = edge.get("dst", "")
+    task = edge.get("task", {}) if isinstance(edge.get("task"), dict) else {}
+    src_name = entity_map.get(src, {}).get("displayName", src.split("@")[-1] if "@" in src else src)
+    dst_name = entity_map.get(dst, {}).get("displayName", dst.split("@")[-1] if "@" in dst else dst)
+    return {
+        "source": src,
+        "sourceDisplayName": src_name,
+        "target": dst,
+        "targetDisplayName": dst_name,
+        "sourceServiceType": entity_map.get(src, {}).get("serviceType", ""),
+        "targetServiceType": entity_map.get(dst, {}).get("serviceType", ""),
+        "sourceTypeName": entity_map.get(src, {}).get("typeName", ""),
+        "targetTypeName": entity_map.get(dst, {}).get("typeName", ""),
+        "active32d": edge.get("active32d"),
+        "task": {
+            "taskQualifiedName": task.get("taskQualifiedName", ""),
+            "taskCode": task.get("taskCode", ""),
+            "env": task.get("env", ""),
+            "project": task.get("project", ""),
+            "sourceSystem": task.get("sourceSystem", ""),
+            "adhoc": task.get("adhoc"),
+            "active32d": task.get("active32d"),
+            "detailUrl": f"https://datasuite.shopee.io{task['urlPath']}" if task.get("urlPath") else "",
+            "codeUrl": f"https://datasuite.shopee.io{task['codePath']}" if task.get("codePath") else "",
+            "systemPath": task.get("systemPath", ""),
+        },
+    }
+
+
 # ──────────────────────────── MCP Tools ────────────────────────────
 
 mcp = FastMCP("DataMap MCP Server")
@@ -436,7 +538,7 @@ def get_table_lineage(table_ref: str, engine: str = "HIVE", idc_region: str = ""
     """
     try:
         database, table = _parse_table_ref(table_ref)
-        qn = _qualified_name(database, table, idc=idc_region)
+        qn = _resolve_table_qn(database, table, engine=engine, idc=idc_region)
         data = _request("GET", "/lineage/v2", params={"qualifiedName": qn})
 
         if isinstance(data, dict):
@@ -448,65 +550,249 @@ def get_table_lineage(table_ref: str, engine: str = "HIVE", idc_region: str = ""
             current = None
             for e in entities:
                 eqn = e.get("qualifiedName", "")
-                entry = {
-                    "qualifiedName": eqn,
-                    "displayName": e.get("displayName", ""),
-                    "schema": e.get("schema", ""),
-                    "serviceType": e.get("serviceType", ""),
-                    "typeName": e.get("typeName", ""),
-                    "status": e.get("status", ""),
-                }
+                entry = _entity_brief(e)
                 entity_map[eqn] = entry
                 if eqn == qn:
                     current = entry
 
-            def _flatten_edges(raw: list) -> list:
-                """API returns nested lists: [[edge, edge], [edge]] — flatten them."""
-                flat: list = []
-                for item in raw:
-                    if isinstance(item, list):
-                        flat.extend(item)
-                    elif isinstance(item, dict):
-                        flat.append(item)
-                return flat
-
-            def _format_edges(edges: list) -> list:
-                formatted = []
-                for edge in edges:
-                    src = edge.get("src", "")
-                    dst = edge.get("dst", "")
-                    task = edge.get("task", {})
-                    src_name = entity_map.get(src, {}).get("displayName", src.split("@")[-1] if "@" in src else src)
-                    dst_name = entity_map.get(dst, {}).get("displayName", dst.split("@")[-1] if "@" in dst else dst)
-                    formatted.append({
-                        "source": src, "sourceDisplayName": src_name,
-                        "target": dst, "targetDisplayName": dst_name,
-                        "taskCode": task.get("taskCode", ""),
-                        "sourceSystem": task.get("sourceSystem", ""),
-                        "schedulerUrl": f"https://datasuite.shopee.io{task['urlPath']}" if task.get("urlPath") else "",
-                    })
-                return formatted
-
-            upstream_flat = _flatten_edges(raw_upstream)
-            downstream_flat = _flatten_edges(raw_downstream)
+            upstream_flat = _flatten_lineage_edges(raw_upstream)
+            downstream_flat = _flatten_lineage_edges(raw_downstream)
 
             upstream_src_qns = {e.get("src", "") for e in upstream_flat}
             downstream_dst_qns = {e.get("dst", "") for e in downstream_flat}
 
             result = {
                 "table": f"{database}.{table}",
+                "qualifiedName": qn,
                 "current": current,
                 "upstream_count": len(upstream_flat),
-                "upstream_edges": _format_edges(upstream_flat),
+                "upstream_edges": [_format_lineage_edge(edge, entity_map) for edge in upstream_flat],
                 "upstream_tables": [entity_map[q] for q in upstream_src_qns if q in entity_map],
                 "downstream_count": len(downstream_flat),
-                "downstream_edges": _format_edges(downstream_flat),
+                "downstream_edges": [_format_lineage_edge(edge, entity_map) for edge in downstream_flat],
                 "downstream_tables": [entity_map[q] for q in downstream_dst_qns if q in entity_map],
                 "total_entities": len(entities),
             }
         else:
             result = {"table": f"{database}.{table}", "data": data}
 
+        return json.dumps(result, ensure_ascii=False, indent=2)
+    except Exception as e:
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+
+@mcp.tool()
+def get_lineage_tasks(
+    table_ref: str,
+    direction: str = "downstream",
+    engine: str = "HIVE",
+    idc_region: str = "",
+    page_size: int = 100,
+    active_only: bool = False,
+) -> str:
+    """
+    获取表的上下游任务列表，适合排查“谁在产出这个表 / 谁在消费这个表 / 最近是否活跃”。
+
+    参数:
+        table_ref: 表名
+        direction: "upstream" 或 "downstream"，默认 downstream
+        engine: 引擎类型，默认 "HIVE"
+        idc_region: IDC 区域，默认空=SG
+        page_size: 返回的任务数量上限，默认 100
+        active_only: 仅保留 32 天内活跃任务
+    """
+    try:
+        database, table = _parse_table_ref(table_ref)
+        qn = _resolve_table_qn(database, table, engine=engine, idc=idc_region)
+        is_downstream = direction.lower() != "upstream"
+        data = _request_raw(
+            "POST",
+            "/lineageV2/taskInfo",
+            json_body={"qualifiedName": qn, "downstream": is_downstream},
+        )
+        entities = data.get("entities", []) if isinstance(data, dict) else []
+        tasks = []
+        for item in entities:
+            if active_only and not item.get("isActive32d"):
+                continue
+            tasks.append({
+                "taskCode": item.get("taskCode", ""),
+                "taskQualifiedName": item.get("taskQualifiedName", ""),
+                "owner": item.get("owner", ""),
+                "team": item.get("team", ""),
+                "project": item.get("project", ""),
+                "env": item.get("env", ""),
+                "taskType": item.get("taskType", ""),
+                "status": item.get("status", ""),
+                "filterTaskStatus": item.get("filterTaskStatus", ""),
+                "sourceSystem": item.get("sourceSystem", ""),
+                "isActive32d": item.get("isActive32d"),
+                "isFrozen": item.get("isFrozen"),
+                "taskPriority": item.get("taskPriority"),
+                "slaPriority": item.get("slaPriority"),
+                "detailUrl": f"https://datasuite.shopee.io{item['urlPath']}" if item.get("urlPath") else "",
+                "codeUrl": f"https://datasuite.shopee.io{item['codePath']}" if item.get("codePath") else "",
+            })
+        result = {
+            "table": f"{database}.{table}",
+            "qualifiedName": qn,
+            "direction": "downstream" if is_downstream else "upstream",
+            "total": data.get("total", len(tasks)) if isinstance(data, dict) else len(tasks),
+            "returned": min(len(tasks), page_size),
+            "tasks": tasks[:page_size],
+        }
+        return json.dumps(result, ensure_ascii=False, indent=2)
+    except Exception as e:
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+
+@mcp.tool()
+def get_column_node_info(
+    table_ref: str,
+    column_name: str,
+    engine: str = "HIVE",
+    idc_region: str = "",
+) -> str:
+    """
+    获取字段级节点信息（描述、类型、计算逻辑、L30D 查询次数、技术 PIC）。
+    """
+    try:
+        database, table = _parse_table_ref(table_ref)
+        table_qn = _resolve_table_qn(database, table, engine=engine, idc=idc_region)
+        column_qn = _resolve_column_qn(database, table, column_name, engine=engine, idc=idc_region)
+        data = _request_raw(
+            "GET",
+            "/lineage/getColumnNodeInfo",
+            params={
+                "qualifiedName": column_qn,
+                "typeName": _column_type_name(engine),
+                "serviceType": engine.upper(),
+            },
+        )
+        result = {
+            "table": f"{database}.{table}",
+            "column": column_name,
+            "tableQualifiedName": table_qn,
+            "columnQualifiedName": column_qn,
+            "data": data,
+        }
+        return json.dumps(result, ensure_ascii=False, indent=2)
+    except Exception as e:
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+
+@mcp.tool()
+def get_column_lineage(
+    table_ref: str,
+    column_name: str,
+    engine: str = "HIVE",
+    idc_region: str = "",
+    upstream_level: int = 1,
+    downstream_level: int = 1,
+) -> str:
+    """
+    获取字段级血缘图原始结果。若该字段暂无字段级边，stream/columnMap 可能为空。
+    """
+    try:
+        database, table = _parse_table_ref(table_ref)
+        table_qn = _resolve_table_qn(database, table, engine=engine, idc=idc_region)
+        column_qn = _resolve_column_qn(database, table, column_name, engine=engine, idc=idc_region)
+        base_body = {
+            "qualifiedName": column_qn,
+            "serviceType": engine.upper(),
+            "assetFilter": {},
+            "taskFilter": {},
+            "queryCount": False,
+        }
+        upstream = _request_raw(
+            "POST",
+            "/lineageV2/filter/column",
+            json_body={**base_body, "downstream": False, "level": upstream_level},
+        )
+        downstream = _request_raw(
+            "POST",
+            "/lineageV2/filter/column",
+            json_body={**base_body, "downstream": True, "level": downstream_level},
+        )
+        result = {
+            "table": f"{database}.{table}",
+            "column": column_name,
+            "tableQualifiedName": table_qn,
+            "columnQualifiedName": column_qn,
+            "request": {
+                "serviceType": engine.upper(),
+                "assetFilter": {},
+                "taskFilter": {},
+                "queryCount": False,
+                "upstream_level": upstream_level,
+                "downstream_level": downstream_level,
+            },
+            "upstream": upstream,
+            "downstream": downstream,
+        }
+        return json.dumps(result, ensure_ascii=False, indent=2)
+    except Exception as e:
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+
+@mcp.tool()
+def get_downstream_applications(
+    table_ref: str,
+    app_type: str = "all",
+    engine: str = "HIVE",
+    idc_region: str = "",
+) -> str:
+    """
+    获取表的 Downstream Application，覆盖 OneBI Dataset、DataGo Data Model、Dashboard、Data Service API。
+    """
+    try:
+        database, table = _parse_table_ref(table_ref)
+        qn = _resolve_table_qn(database, table, engine=engine, idc=idc_region)
+        app_type_map = {
+            "all": ["DataServiceApi", "DashboardDataset", "DataGoDataModel", "Dashboard"],
+            "dataservice": ["DataServiceApi"],
+            "dataserviceapi": ["DataServiceApi"],
+            "dataset": ["DashboardDataset"],
+            "dashboarddataset": ["DashboardDataset"],
+            "datago": ["DataGoDataModel"],
+            "datagodatamodel": ["DataGoDataModel"],
+            "dashboard": ["Dashboard"],
+        }
+        selected = app_type_map.get(app_type.lower(), [app_type])
+
+        grouped: Dict[str, List[dict]] = {}
+        for application_type in selected:
+            data = _request_raw(
+                "GET",
+                "/common/downStreamApplication",
+                params={
+                    "qualifiedName": qn,
+                    "applicationType": application_type,
+                    "serviceType": engine.upper(),
+                },
+            )
+            items = data if isinstance(data, list) else []
+            grouped[application_type] = [
+                {
+                    "qualifiedName": item.get("qualifiedName", ""),
+                    "typeName": item.get("typeName", ""),
+                    "id": item.get("id", ""),
+                    "name": item.get("name", ""),
+                    "projectCode": item.get("projectCode", ""),
+                    "owner": item.get("owner", ""),
+                    "url": item.get("url", ""),
+                }
+                for item in items
+            ]
+
+        result = {
+            "table": f"{database}.{table}",
+            "qualifiedName": qn,
+            "serviceType": engine.upper(),
+            "application_types": selected,
+            "counts": {k: len(v) for k, v in grouped.items()},
+            "applications": grouped,
+        }
         return json.dumps(result, ensure_ascii=False, indent=2)
     except Exception as e:
         return json.dumps({"error": str(e)}, ensure_ascii=False)
