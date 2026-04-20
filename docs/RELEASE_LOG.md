@@ -6,6 +6,21 @@
 
 ---
 
+## v3.6.4 -- 2026-04-20 -- `docs`: 同步 v3.6.4 Chrome 扩展版本说明
+
+**提交者**: @tianyi.liang  
+**Commit Type**: docs（release guides）；版本保持 **v3.6.4** 不变
+
+### 变更说明
+
+**文档**
+
+- 更新 **`docs/guides/CHROME_EXTENSION.md`**，同步当前版本号到 **v3.6.4**。
+
+### 测试项
+
+- `npm run verify:hooks`
+
 ## v3.6.4 -- 2026-04-20 -- `feat`: DataMap MCP 补齐任务级、字段级和下游应用探查能力
 
 **提交者**: @tianyi.liang  
