@@ -6,6 +6,23 @@
 
 ---
 
+## v3.6.6 -- 2026-04-20 -- `docs`: 收紧 Codex skill 迁移完成度口径
+
+**提交者**: @tianyi.liang  
+**Commit Type**: docs（migration guides）；版本保持 **v3.6.6** 不变
+
+### 变更说明
+
+**文档**
+
+- 更新 **`docs/guides/CODEX.md`**，将 `.agents/skills/` 的表述从“已迁移”收紧为“已建立 repo-scoped 入口”，避免默认暗示与 Cursor 全量 skill 完全等价。
+- 更新 **`docs/guides/CURSOR_TO_CODEX_MIGRATION.md`**，明确 “Codex 入口已建立” 与 “关键规则已完全补齐” 是两件事，并把与 `.cursor/skills/` 上游规则核对加入迁移验收清单。
+- 更新 **`docs/guides/SKILL.md`**，为 `spx-bug-trace` 补充当前迁移状态说明：Codex 入口可触发，但涉及 Confluence 标题命名、Google Sheets 沉淀、过程文档命名与写入位置等硬规则时，当前仍以 Cursor 全量版为更完整上游来源。
+
+### 测试项
+
+- `npm run verify:hooks`
+
 ## v3.6.6 -- 2026-04-20 -- `feat`: 补强 Codex skill 可用性说明与 SPX 排查文档约束
 
 **提交者**: @tianyi.liang  

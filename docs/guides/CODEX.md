@@ -64,18 +64,24 @@
 
 ### Skills
 
-Codex repo-scoped skills 位于 `.agents/skills/`，当前已迁移：
+Codex repo-scoped skills 位于 `.agents/skills/`，当前已建立入口：
 
 - `spx-bug-trace`
 - `seatalk-troubleshoot`
 - `flink-alert-triage`
 - `release-publish`
 
-这批 skill 现在采用更接近 Codex 原生的结构：
+这批 skill 当前采用更接近 Codex 原生的结构：
 
 - `SKILL.md` 只保留触发条件、主流程和关键约束
 - 深入材料放在各 skill 自己的 `references/` 下按需加载
-- 原先 `.cursor/skills/` 中的长工作流被整理成更适合 Codex 上下文预算的版本
+- 原先 `.cursor/skills/` 中的长工作流会按需整理成更适合 Codex 上下文预算的版本
+
+需要注意：
+
+- “已建立 repo-scoped 入口” 不等于 “已经与 Cursor 全量 skill 完全等价”
+- 目前 `spx-bug-trace` 在 `.agents/skills/` 中是可触发的 Codex 精简入口，但不应默认视为与 `~/.cursor/skills/spx-bug-trace/SKILL.md` 完全等价
+- 涉及命名规范、Confluence / Google Sheets 沉淀、长流程排查约束等硬规则时，应先核对 Cursor 全量版，或先把这些规则补齐到 Codex 入口再以 Codex 版为准
 
 关于“当前 Codex 会话能不能直接用”：
 
@@ -196,6 +202,7 @@ bash ./scripts/codex-mcp-launch.sh --list
 - `.cursor/skills/` 仍然应该保留，方便团队复用和继续沉淀 Cursor 时代工作流
 - 但它们不会自动出现在 Codex 当前会话的 skill 列表里
 - 如果某个 skill 对 Codex 很关键，应确认它已经迁到 `.agents/skills/`，而不是只存在于 `.cursor/skills/`
+- 对于 `spx-bug-trace` 这类仍在补齐中的 skill，`.cursor/skills/` 仍可能保留更完整的业务规则，不能因为 `.agents/skills/` 已存在就默认认为两者完全一致
 
 因此后续如果团队全面切换到 Codex，建议新增规则和工作流优先维护在 Codex 这三处，再视情况回写到 Cursor 目录。
 

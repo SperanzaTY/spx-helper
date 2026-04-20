@@ -216,7 +216,7 @@ Cursor skill 往往是：
 
 ### 2. Codex skill 采用“瘦入口 + 按需 references”
 
-本次在 `.agents/skills/` 中迁移了四个高价值 skill：
+本次在 `.agents/skills/` 中为四个高价值 skill 建立了 Codex repo-scoped 入口：
 
 - `spx-bug-trace`
 - `seatalk-troubleshoot`
@@ -236,6 +236,12 @@ Cursor skill 往往是：
 
 - `SKILL.md` 只写触发条件、核心流程、关键规则
 - 具体细节放到 `references/`
+
+这里要把口径说严谨：
+
+- “已经有 `.agents/skills/<skill>/`” 只表示 Codex 可触发入口已经建立
+- 它不自动代表该 skill 已经与 Cursor 全量版在所有关键规则上完全等价
+- `spx-bug-trace` 目前就是一个明确例子：Codex 精简入口可用，但某些命名和沉淀规则仍需要继续向 Cursor 全量版补齐
 
 另外要避免一个常见误判：
 
@@ -273,6 +279,7 @@ Cursor skill 往往是：
 - `.cursor/skills/` 保留为 Cursor 时代原始工作流和长文档知识库
 - `.agents/skills/` 才是本仓库给 Codex 暴露 repo-scoped skill 的正式入口
 - 如果要做机器级通用 Codex skill，则应安装到 `~/.codex/skills/`
+- 因此本节列出的“实际产物”应理解为“Codex 入口已建立”，而不是“与 Cursor 全量版规则已经完全对齐”
 
 ## 五、这次迁移的最终文件清单
 
@@ -348,6 +355,7 @@ Codex 更适合：
 - [ ] 长技能材料已拆到 `references/`
 - [ ] README 或使用文档已补充 Codex 入口
 - [ ] 关键 skill 已在当前 Codex 会话中实际显示为可用，而不只是存在于 `.cursor/skills/`
+- [ ] 关键 skill 的硬规则已与 `.cursor/skills/` 上游版本核对，尤其是命名、沉淀位置、报告格式和外部系统写入规范
 
 ## 相关文档
 

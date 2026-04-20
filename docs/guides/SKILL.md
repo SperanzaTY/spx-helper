@@ -33,6 +33,8 @@ Skill（指令层）     →  定义"怎么做"     → .cursor/skills/<name>/SK
 
 **spx-bug-trace 内 Confluence 文稿目录**：`.cursor/skills/spx-bug-trace/confluence/`（可全文复制到 Confluence 的 Markdown，见目录内 `README.md`）。
 
+**当前迁移状态说明**：`spx-bug-trace` 已有 Codex repo-scoped 入口 `.agents/skills/spx-bug-trace/`，可供 Codex 会话触发；但现阶段不应默认视为与 Cursor 全量版 `~/.cursor/skills/spx-bug-trace/SKILL.md` 完全等价。涉及 **Confluence 标题命名、Google Sheets 沉淀、过程文档命名与写入位置** 等硬规则时，以 Cursor 全量版为更完整的上游规则来源，直到 Codex 入口补齐这些约束。
+
 **v3.5.16 起仓库内 Skill 要点**：`flink-alert-triage` 增补 Phase 2.0c（L2 须在对话内用 MCP 拉数闭环、禁止以「自行看面板」替代结论）、DataSuite 可调项与 MCP 字段对照、`query_ck_bundle` 与换实例指标混窗等；`spx-bug-trace` 增补 CK 读/写集群与 `UNKNOWN_TABLE` 处理、FM 表口径与常见坑表修正、过程文档与示例路径说明。
 
 **v3.5.19**：`spx-bug-trace` 增补 **「MCP 失败时的结论约束」**（须引用工具错误、参数名 `sql`、Scheduler 单条 Presto 绑定等）；与 [MCP 工具指南 — Agent triage](MCP_TOOLS.md#agent-triage-mcp-and-query-failures) 联动。

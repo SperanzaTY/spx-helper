@@ -1,12 +1,8 @@
-📦 SPX Helper v3.6.6 已发布
+📦 SPX Helper v3.6.6 文档已更新
 
-本次更新补了两块和 Codex / skill 使用体验直接相关的内容：
-- `spx-bug-trace` 现在更明确要求：如果 realtime CK 结果表只缺单个实体，而 source fact / DIM 已经有数据，要优先排 Flink app 健康度，不继续停留在 SQL 猜测
-- 非简单问题的最终产物要保留过程文档：关键 SQL、MCP 调用、空结果检查、代码路径，以及同步到 Confluence 前的本地 Markdown 记录
+本次不升级版本号，继续保持 v3.6.6。
 
-同时，Codex 侧文档补清了 skill 可用性边界：
-- `.cursor/skills/*` 或 `~/.cursor/skills/*` 在磁盘上存在，不等于当前 Codex 会话会自动挂进来
-- 本仓库下直接给 Codex 用的 repo-scoped skill 入口是 `.agents/skills/`
-- 机器级通用 skill 可以安装到 `~/.codex/skills/`
-
-另外，SeaTalk Agent 安装说明已改为 Codex CLI 优先。
+这次主要收紧了 Codex skill 迁移完成度的说明口径：
+- `.agents/skills/` 表示 Codex repo-scoped 入口已建立
+- 这不自动等于和 Cursor 全量 skill 完全等价
+- `spx-bug-trace` 目前仍以 `~/.cursor/skills/spx-bug-trace/SKILL.md` 作为更完整的上游规则来源，尤其是 Confluence 标题命名、Google Sheets 沉淀、过程文档命名与写入位置等硬规则
