@@ -27,6 +27,7 @@ Skill（指令层）     →  定义"怎么做"     → .cursor/skills/<name>/SK
 | **flink-alert-triage** | Flink 告警自动分诊（L1/L2/L3）；**一眼版式**：首行 `【一眼】` 可执行句，再「怎么改资源/调参」；RUNNING 稳定用「可先自决」勿单独「需人工」；L1≤12 行 | flink-query, ck-query, seatalk-reader |
 | **seatalk-troubleshoot** | SeaTalk Agent 故障排查（10 阶段系统化排查：进程 → 多进程冲突 → CDP → 注入 → ACP → Remote → 功能 → UI → Agent 重启 → 日志） | 无外部依赖 |
 | **release-publish** | 发版流程规范（含 `npm run verify:hooks` → 版本号 → 日志 → 文档联动 → CDP 验证 → 群通知 → `npm run push:release`：GitLab 成功后再同步 GitHub 并投递通知） | 无外部依赖 |
+| **mcp-capability-build** | 面向 SPX Helper 框架的 MCP 新能力建设流程：先审现状，再用 CDP/真实接口证实页面能力，并复用 `chrome-auth` 的 Cookie 读取、静默 SSO 刷新、401 诊断与真环境 smoke；适合 DataMap/Datastudio/Scheduler/Flink 这类 DataSuite 能力下沉到 MCP | `chrome-auth` 体系、目标站点登录态、必要时 Chrome CDP |
 
 排查 ClickHouse 时若 Cursor Agent 调 `query_ck` 参数为空，可改用 MCP 工具 **`query_ck_bundle`**（单参 JSON 字符串），详见 `mcp-tools/ck-query/README.md` 与 `spx-bug-trace` 的 `tools-reference.md`。
 
@@ -39,6 +40,8 @@ Skill（指令层）     →  定义"怎么做"     → .cursor/skills/<name>/SK
 **v3.5.21**：`scheduler-query` Mart SLA 短链经 **`slaInstance/get`** 与 **`fetch_mart_sla_instances_from_shortlink`** 补全实例编码；**`triage_mart_sla_alert`** 的 **`sla_shortlink_fetch_instances`**；脚本 **`scripts/probe-datasuite-sla-cdp.js`**。详见 [MCP_TOOLS.md](MCP_TOOLS.md)。
 
 **v3.5.20**：`scheduler-query` Mart SLA（**`parse_mart_sla_alert`** / **`triage_mart_sla_alert`**、**`resolve_mart_sla_shortlink`** / ``shp.ee``、**datahub.bti**）；仓库 **Git hooks** 约束发版 manifest 版本步长。详见 [MCP_TOOLS.md](MCP_TOOLS.md)。
+
+**v3.6.4**：新增 repo-scoped skill **`mcp-capability-build`**，沉淀面向本仓库 MCP 框架的新能力建设方法论：先做现有 MCP 与 `chrome-auth` 缺口审计，再用页面/CDP 或真实接口证实后端能力，明确 Cookie 来源与静默刷新路径，区分“已证实”和“推断”；若用户只给页面/链接，先产出候选能力清单并引导用户选择，再进入开发、真环境 smoke 和正式发布流程。
 
 **双副本同步**：`flink-alert-triage` 在仓库中为 `.cursor/skills/flink-alert-triage/SKILL.md`，与开发者本机主副本 `~/.cursor/skills/flink-alert-triage/SKILL.md` 内容应对齐；更新 skill 后请 `cp` 同步另一侧。  
 Alarm Bot 用的 **`alarm-bot-prompt.md`** 同目录存放，修改后也请同步到 `~/.cursor/skills/flink-alert-triage/alarm-bot-prompt.md`，便于本机与仓库一致。
