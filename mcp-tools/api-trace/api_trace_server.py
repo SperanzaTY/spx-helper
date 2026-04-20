@@ -87,8 +87,13 @@ def _http_get(url, headers, timeout=10):
     return resp.json()
 
 
+def _format_sql_block(sql: str) -> str:
+    return f"```sql\n{sql.strip()}\n```"
+
+
 async def run_presto(sql: str, max_rows: int = 100) -> dict:
     """通过 Presto 执行 SQL，返回结构化结果"""
+    sql = sql.strip()
     end_user = DEFAULT_USERNAME if '@' in DEFAULT_USERNAME else f"{DEFAULT_USERNAME}@shopee.com"
     headers = {
         'Authorization': PERSONAL_TOKEN,
@@ -101,35 +106,35 @@ async def run_presto(sql: str, max_rows: int = 100) -> dict:
             _http_post,
             f"{BASE_URL}/query/presto",
             headers,
-            {'sql': sql.strip(), 'prestoQueue': 'szsc-adhoc', 'idcRegion': 'SG', 'priority': '3'}
+            {'sql': sql, 'prestoQueue': 'szsc-adhoc', 'idcRegion': 'SG', 'priority': '3'}
         )
         job_id = data.get('jobId')
         if not job_id:
-            return {'success': False, 'error': f"提交失败: {data.get('errorMsg', 'Unknown')}"}
+            return {'success': False, 'error': f"提交失败: {data.get('errorMsg', 'Unknown')}", 'sql': sql}
 
         start = time.time()
         while True:
             if time.time() - start > 120:
-                return {'success': False, 'error': '查询超时（120秒）'}
+                return {'success': False, 'error': '查询超时（120秒）', 'sql': sql}
 
             status = await asyncio.to_thread(_http_get, f"{BASE_URL}/status/{job_id}", headers)
             s = status.get('status')
             if s == 'FINISH':
                 break
             elif s == 'FAILED':
-                return {'success': False, 'error': f"查询失败: {status.get('errorMessage', '')}"}
+                return {'success': False, 'error': f"查询失败: {status.get('errorMessage', '')}", 'sql': sql}
             await asyncio.sleep(2)
 
         result = await asyncio.to_thread(_http_get, f"{BASE_URL}/result/{job_id}", headers)
         if 'resultSchema' not in result:
-            return {'success': False, 'error': '获取结果失败'}
+            return {'success': False, 'error': '获取结果失败', 'sql': sql}
 
         columns = [c['columnName'] for c in result.get('resultSchema', [])]
         rows = [row.get('values', {}) for row in result.get('rows', [])[:max_rows]]
-        return {'success': True, 'columns': columns, 'rows': rows, 'total': len(result.get('rows', []))}
+        return {'success': True, 'columns': columns, 'rows': rows, 'total': len(result.get('rows', [])), 'sql': sql}
 
     except Exception as e:
-        return {'success': False, 'error': str(e)}
+        return {'success': False, 'error': str(e), 'sql': sql}
 
 
 # ==================== 血缘解析工具函数 ====================
@@ -231,6 +236,7 @@ async def api_trace(
     # ===== Step 1：查询 API 血缘信息 =====
     output.append("## Step 1：查询 API 血缘信息")
     output.append(f"查询表：`{LINEAGE_TABLE}`\n")
+    output.append("执行 SQL：")
 
     lineage_sql = f"""
 SELECT
@@ -264,11 +270,15 @@ WHERE rn = 1
 ORDER BY api_id ASC
 LIMIT 5
 """
+    output.append(_format_sql_block(lineage_sql))
     lineage_result = await run_presto(lineage_sql, max_rows=5)
 
     if not lineage_result['success']:
         # 血缘表名可能不对，返回错误和建议
         output.append(f"⚠️ 血缘查询失败：{lineage_result['error']}")
+        if lineage_result.get('sql'):
+            output.append("\n失败 SQL：")
+            output.append(_format_sql_block(lineage_result['sql']))
         output.append(f"\n**提示**：血缘表名 `{LINEAGE_TABLE}` 可能需要调整，")
         output.append("可通过环境变量 `LINEAGE_PRESTO_TABLE` 配置正确的表名。")
         output.append("\n**备用方案**：请手动提供 biz_sql，或通过浏览器扩展查看 API 血缘后粘贴 SQL。")
@@ -472,7 +482,14 @@ LIMIT 3
     result = await run_presto(lineage_sql, max_rows=3)
 
     if not result['success']:
-        return f"❌ 查询失败：{result['error']}\n\n血缘表：`{LINEAGE_TABLE}`"
+        out = [
+            f"❌ 查询失败：{result['error']}",
+            f"\n血缘表：`{LINEAGE_TABLE}`",
+        ]
+        if result.get('sql'):
+            out.append("\n执行 SQL：")
+            out.append(_format_sql_block(result['sql']))
+        return "\n".join(out)
 
     if not result['rows']:
         return f"未找到 `{api_id}` 的血缘记录（live 环境）"
@@ -492,6 +509,8 @@ LIMIT 3
         f"- 版本：{row.get('api_version')}",
         f"- ds_id：{ds_id_val}（接口查读集群，我们直查写集群；{ds_note}）",
     ]
+    out.append("\n**执行 SQL**：")
+    out.append(_format_sql_block(lineage_sql))
     if has_dynamic:
         out.append("- ⚠️ 含 **Dynamic WHERE**（动态条件 SQL）")
     if mgmt_tables:

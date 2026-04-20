@@ -248,6 +248,10 @@ def format_result_as_table(columns: list, rows: list) -> str:
     return "\n".join(lines)
 
 
+def _format_sql_block(sql: str) -> str:
+    return f"执行 SQL:\n```sql\n{sql.strip()}\n```"
+
+
 async def _run_query_ck_impl(
     sql: str,
     env: str,
@@ -255,6 +259,9 @@ async def _run_query_ck_impl(
     database: Optional[str],
     max_rows: int,
 ) -> str:
+    sql = str(sql).strip()
+    sql_block = _format_sql_block(sql)
+
     if not str(sql).strip() or not str(env).strip():
         return (
             "ERROR: sql and env are REQUIRED but were empty.\n"
@@ -281,13 +288,14 @@ async def _run_query_ck_impl(
     env_label = f"{env.upper()} {cluster_key}"
 
     if not result['success']:
-        return f"❌ 执行失败（{env_label}）\n\n错误: {result['error']}"
+        return f"❌ 执行失败（{env_label}）\n\n{sql_block}\n\n错误: {result['error']}"
 
     if result.get('is_write'):
-        return f"✅ 执行成功（{env_label}）\n\n{result.get('message', '操作已完成')}"
+        return f"✅ 执行成功（{env_label}）\n\n{sql_block}\n\n{result.get('message', '操作已完成')}"
 
     table = format_result_as_table(result['columns'], result['rows'])
     output = f"✅ 查询成功（{env_label}）\n\n"
+    output += f"{sql_block}\n"
     output += f"总行数: {result['total_rows']}，显示: {result['displayed_rows']}\n"
     if result['truncated']:
         output += f"⚠️ 已截断（前 {max_rows} 行）\n"

@@ -251,6 +251,10 @@ def _format_spark_progress(progress: dict) -> str:
     return " | ".join(parts)
 
 
+def _format_sql_block(sql: str) -> str:
+    return f"执行 SQL:\n```sql\n{sql.strip()}\n```"
+
+
 # ---------- 核心执行流程 ----------
 
 def _execute_spark_sql(
@@ -410,6 +414,8 @@ async def query_spark(
         validate_syntax: True 时用 EXPLAIN 做语法验证，不取数据
         statement_timeout: Statement 执行超时秒数（默认 300，长查询可设 1800）
     """
+    sql = sql.strip()
+    sql_block = _format_sql_block(sql)
     base_url = _get_base_url(region)
     max_rows = min(max_rows, 1000)
     statement_timeout = min(max(statement_timeout, 60), 3600)
@@ -427,6 +433,7 @@ async def query_spark(
         err_out = f"❌ 执行失败（Spark / {region}）\n\n"
         if sql_stmt_type:
             err_out += f"SQL 类型: {sql_stmt_type}\n"
+        err_out += f"{sql_block}\n"
         err_out += f"错误: {result['error']}\n"
         if progress_line:
             err_out += f"执行进度: {progress_line}\n"
@@ -436,6 +443,7 @@ async def query_spark(
 
     if validate_syntax:
         out = f"✅ 语法验证通过（Spark / {region}）\n\n"
+        out += f"{sql_block}\n"
         if progress_line:
             out += f"执行进度: {progress_line}\n\n"
         out += raw_output
@@ -447,6 +455,7 @@ async def query_spark(
         out = f"✅ 执行成功（Spark / {region}）\n\n"
         if sql_stmt_type:
             out += f"SQL 类型: {sql_stmt_type}\n"
+        out += f"{sql_block}\n"
         if progress_line:
             out += f"执行进度: {progress_line}\n\n"
         out += parsed["raw_text"]
@@ -460,6 +469,7 @@ async def query_spark(
     out = f"✅ 查询成功（Spark / {region}）\n\n"
     if sql_stmt_type:
         out += f"SQL 类型: {sql_stmt_type}\n"
+    out += f"{sql_block}\n"
     if progress_line:
         out += f"执行进度: {progress_line}\n"
     out += f"总行数: {total}，显示行数: {len(rows)}\n"

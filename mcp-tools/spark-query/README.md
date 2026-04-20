@@ -2,6 +2,8 @@
 
 通过 Livy REST API 为 Cursor 提供 Spark SQL 查询能力，支持 Hive 表查询。
 
+MCP 返回会附带 **实际执行的 SQL**，便于在对话中核对本次查询语句。
+
 ## 配置
 
 ### 1. 环境变量（在 mcp.json 中）

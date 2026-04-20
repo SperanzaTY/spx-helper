@@ -6,6 +6,33 @@
 
 ---
 
+## v3.6.3 -- 2026-04-20 -- `fix`: 查询类 MCP 返回实际执行 SQL
+
+**提交者**: @tianyi.liang  
+**Commit Type**: fix（presto-query / ck-query / spark-query / api-trace）；相对 **v3.6.2** 升 PATCH 至 **v3.6.3**
+
+### 变更说明
+
+**MCP 查询工具**
+
+- **`presto-query`**：成功、失败、超时和请求异常返回统一补充 **`执行 SQL`** 代码块，便于直接核对实际发出的查询语句。
+- **`ck-query`**：`query_ck` / `query_ck_bundle` 返回中增加 **`执行 SQL`** 代码块，覆盖查询成功、执行成功和失败场景。
+- **`spark-query`**：`query_spark` 在语法校验、查询成功和失败场景中增加 **`执行 SQL`** 代码块。
+- **`api-trace`**：报告中补充实际执行的 lineage 查询 SQL；内部 `run_presto` 失败结果保留原始 SQL，便于定位后端报错时到底执行了哪条语句。
+
+**文档**
+
+- 更新 **`mcp-tools/presto-query/README.md`**、**`mcp-tools/ck-query/README.md`**、**`mcp-tools/spark-query/README.md`**、**`mcp-tools/api-trace/README.md`**，同步“返回会显示执行 SQL”的行为说明。
+- 更新 **`docs/guides/MCP_TOOLS.md`**，补充 v3.6.3 查询回显说明。
+
+**版本号**：`3.6.2` → `3.6.3`（manifest、根 package.json、seatalk-agent/package.json）
+
+### 测试项
+
+- `python3 -m py_compile mcp-tools/presto-query/presto_mcp_server.py mcp-tools/ck-query/ck_mcp_server.py mcp-tools/spark-query/spark_mcp_server.py mcp-tools/api-trace/api_trace_server.py`
+- 本地 smoke：`query_presto` / `query_ck` / `query_spark` / `api-trace.run_presto`
+- 真实验证：`ck-query` 成功返回并显示 SQL；`spark-query(validate_syntax=True)` 成功返回并显示 SQL；`presto-query` / `api-trace` 失败路径确认保留 SQL
+
 ## v3.6.2 -- 2026-04-17 -- `docs`: 同步 v3.6.2 发版说明文档
 
 **提交者**: @tianyi.liang  

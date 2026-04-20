@@ -131,6 +131,8 @@ python3 query_presto.py "你的SQL查询"
 | `write_full_result_to` | 传入相对或绝对路径（如 `docs/investigations/presto_lineage.json`），将 **完整** 结果写入 UTF-8 JSON（`columns` + `rows` + `jobId`），对话中仅保留短预览表。后续用脚本读文件合并或写 Google Sheet。 |
 | `PRESTO_MCP_OUTPUT_DIR` | 可选；`write_full_result_to` 为**相对路径**时的基准目录（未设则用 MCP 进程当前工作目录，一般为 Cursor 工作区根）。 |
 
+MCP 返回会附带 **实际执行的 SQL**，便于在对话中核对本次查询语句。
+
 **仍可能受限**：宿主对单条 MCP 消息的长度限制；超大结果务必使用 `write_full_result_to` 或命令行 `query_presto.py --output`。
 
 ## 📋 依赖安装

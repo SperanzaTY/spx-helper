@@ -1,0 +1,5 @@
+📦 SPX Helper v3.6.3 已发布。
+
+本次更新统一补齐查询类 MCP 的 SQL 回显能力：`presto-query`、`ck-query`、`spark-query`、`api-trace` 现在都会在返回里展示实际执行的 SQL，便于直接核对 AI 到底查了什么。
+
+其中 `presto-query` 还补齐了请求异常分支的 SQL 回显；`api-trace` 会在 lineage 查询步骤展示实际查血缘表的 SQL，并在失败时保留原始 SQL 便于排错。

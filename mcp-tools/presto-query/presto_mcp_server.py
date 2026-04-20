@@ -88,6 +88,11 @@ def _normalize_idc(idc: str) -> str:
     return normalized.upper()
 
 
+def _format_sql_block(sql: str) -> str:
+    """在 MCP 返回中打印实际执行的 SQL。"""
+    return f"执行 SQL:\n```sql\n{sql.strip()}\n```"
+
+
 def _http_post(url: str, headers: dict, payload: dict, timeout: int = 10) -> dict:
     """同步 POST，在线程池中执行"""
     resp = requests.post(url, headers=headers, json=payload, timeout=timeout)
@@ -225,12 +230,15 @@ async def query_presto(
            （columns + rows + jobId），便于后续脚本合并或写 Sheet；相对路径基于 PRESTO_MCP_OUTPUT_DIR 或 cwd。
             写入后回复中附带 **短预览表**（前若干行、单元格最多 96 字符），完整数据以文件为准。
     """
+    sql = sql.strip()
+    sql_block = _format_sql_block(sql)
     sql_category, sql_stmt_type = _classify_sql(sql)
 
     if sql_category == "DDL":
         return (
             f"❌ 不支持执行（Presto API）\n\n"
             f"SQL 类型: {sql_stmt_type}（DDL 语句）\n"
+            f"{sql_block}\n"
             f"DataSuite API 仅支持只读 SELECT 查询，不支持 {sql_stmt_type} 等 DDL 操作。"
         )
 
@@ -262,11 +270,14 @@ async def query_presto(
             _http_post,
             f"{BASE_URL}/query/presto",
             headers,
-            {'sql': sql.strip(), 'prestoQueue': queue, 'idcRegion': normalized_idc, 'priority': '3'}
+            {'sql': sql, 'prestoQueue': queue, 'idcRegion': normalized_idc, 'priority': '3'}
         )
         job_id = data.get('jobId')
         if not job_id:
-            err = f"❌ 提交失败: {data.get('errorMsg', data.get('message', 'Unknown error'))}"
+            err = (
+                f"❌ 提交失败: {data.get('errorMsg', data.get('message', 'Unknown error'))}\n\n"
+                f"{sql_block}"
+            )
             if sql_category == "METADATA":
                 err += f"\n\nSQL 类型: {sql_stmt_type}"
                 err += metadata_warning
@@ -279,7 +290,10 @@ async def query_presto(
         while True:
             elapsed = int(time.time() - start_time)
             if elapsed > 300:
-                out = f"❌ 查询超时 (>300秒)\n\nJob ID: {job_id}\nSQL 类型: {sql_stmt_type or sql_category}"
+                out = (
+                    f"❌ 查询超时 (>300秒)\n\nJob ID: {job_id}\nSQL 类型: {sql_stmt_type or sql_category}\n"
+                    f"{sql_block}"
+                )
                 if sql_category == "METADATA":
                     out += metadata_warning
                 return out
@@ -306,20 +320,23 @@ async def query_presto(
                     or str(status_data)
                 )
                 progress_line = _format_progress(progress_events)
-                out = f"❌ 查询失败\n\nJob ID: {job_id}\nSQL 类型: {sql_stmt_type or sql_category}\n\n查询进度: {progress_line}\n总耗时: {elapsed}s\n\n错误: {err_msg}"
+                out = (
+                    f"❌ 查询失败\n\nJob ID: {job_id}\nSQL 类型: {sql_stmt_type or sql_category}\n"
+                    f"{sql_block}\n\n查询进度: {progress_line}\n总耗时: {elapsed}s\n\n错误: {err_msg}"
+                )
                 if sql_category == "METADATA":
                     out += metadata_warning
                 return out
             elif query_status in ['RUNNING', 'PENDING', 'QUEUED']:
                 await asyncio.sleep(2)
             else:
-                return f"❌ 未知状态: {query_status}\nJob ID: {job_id}"
+                return f"❌ 未知状态: {query_status}\nJob ID: {job_id}\n{sql_block}"
 
         result_data = await asyncio.to_thread(
             _http_get, f"{BASE_URL}/result/{job_id}", headers
         )
         if 'resultSchema' not in result_data:
-            return f"❌ 获取结果失败: {result_data.get('errorMsg', 'Unknown error')}\nJob ID: {job_id}"
+            return f"❌ 获取结果失败: {result_data.get('errorMsg', 'Unknown error')}\nJob ID: {job_id}\n{sql_block}"
 
         columns = [col['columnName'] for col in result_data.get('resultSchema', [])]
         rows_raw = result_data.get('rows', [])
@@ -350,6 +367,7 @@ async def query_presto(
         if total_rows == 0 and sql_category == "METADATA":
             output = f"⚠️ 查询完成但返回 0 行（Presto）\n\n"
             output += f"Job ID: {job_id}\nSQL 类型: {sql_stmt_type}\n"
+            output += f"{sql_block}\n"
             output += f"查询进度: {progress_line}\n总耗时: {total_elapsed}s\n"
             output += (
                 f"\n诊断: {sql_stmt_type} 在 DataSuite API 中执行成功但未返回数据。"
@@ -363,6 +381,7 @@ async def query_presto(
         output += f"IDC: {normalized_idc.lower()}\n"
         if sql_stmt_type:
             output += f"SQL 类型: {sql_stmt_type}\n"
+        output += f"{sql_block}\n"
         output += f"查询进度: {progress_line}\n"
         output += f"总耗时: {total_elapsed}s\n"
         output += f"总行数: {total_rows}，显示行数: {len(rows)}\n"
@@ -378,9 +397,9 @@ async def query_presto(
         return output
 
     except requests.exceptions.RequestException as e:
-        return f"❌ 请求失败: {str(e)}"
+        return f"❌ 请求失败: {str(e)}\n\n{sql_block}"
     except Exception as e:
-        return f"❌ 执行错误: {str(e)}"
+        return f"❌ 执行错误: {str(e)}\n\n{sql_block}"
 
 
 def main():
