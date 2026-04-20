@@ -1,11 +1,12 @@
-📦 SPX Helper v3.6.4 已发布
+📦 SPX Helper v3.6.5 已发布
 
-本次更新补齐 DataMap MCP 的 4 个核心探查能力：
-- get_lineage_tasks：直接看表的 upstream/downstream 任务、owner、project、env 和 32 天活跃状态
-- get_column_node_info：查看字段描述、类型、计算逻辑、L30D query、技术 PIC
-- get_column_lineage：查看字段级 upstream/downstream 血缘
-- get_downstream_applications：查看 OneBI Dataset / DataGo / Dashboard / Data Service API 下游应用
+本次更新新增 repo-scoped skill `mcp-capability-build`，专门用于在 SPX Helper 里构建新的 MCP 能力。
 
-另外修正了 get_table_lineage 的 qualifiedName 解析，减少 IDC fallback 后 current 对不上的问题。
+这套方法论现在明确覆盖：
+- 用户只给页面或链接时，先做 capability mining，挖掘可实现点
+- 用 CDP 或真实接口证实页面能力，而不是凭页面文案猜接口
+- 复用 chrome-auth，包括 cookie_db + cdp_cookie、静默 SSO 刷新、401/403 重试与认证诊断
+- 探查后先给用户候选能力清单，再引导选择优先级
+- 继续完成实现、真环境 smoke，以及正式 release/publish
 
-文档已同步到 MCP guide 和 datamap-query README。
+相关文档已同步到 docs/guides/SKILL.md。

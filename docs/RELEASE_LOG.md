@@ -8,6 +8,48 @@
 
 ## v3.6.4 -- 2026-04-20 -- `docs`: 同步 v3.6.4 Chrome 扩展版本说明
 
+## v3.6.5 -- 2026-04-20 -- `docs`: 同步 v3.6.5 Chrome 扩展版本说明
+
+**提交者**: @tianyi.liang  
+**Commit Type**: docs（release guides）；版本保持 **v3.6.5** 不变
+
+### 变更说明
+
+**文档**
+
+- 更新 **`docs/guides/CHROME_EXTENSION.md`**，同步当前版本号到 **v3.6.5**。
+
+### 测试项
+
+- `npm run verify:hooks`
+
+## v3.6.5 -- 2026-04-20 -- `feat`: 新增 MCP capability build skill，沉淀页面探查到发布的完整闭环
+
+**提交者**: @tianyi.liang  
+**Commit Type**: feat（repo-scoped skill + docs）；相对 **v3.6.4** 升 PATCH 至 **v3.6.5**
+
+### 变更说明
+
+**Skill**
+
+- 新增 repo-scoped skill **`mcp-capability-build`**，用于面向本仓库 MCP 框架扩展新能力。
+- 方法论覆盖 **页面 / 链接输入 → capability mining → CDP / 真实接口证实 → 用户选择优先级 → MCP 设计实现 → 真环境 smoke → release/publish** 全流程。
+- 明确要求复用 **`chrome-auth`**，包括 **`cookie_db + cdp_cookie`** 合并、静默 **SSO** 刷新、`401/403` 重试与结构化认证诊断。
+- 明确区分 **`9222`** 的真实 Chrome CDP 与可能属于 SeaTalk / 嵌入 Chromium 的 **`19222`**，避免拿错浏览器会话。
+
+**文档**
+
+- 更新 **`docs/guides/SKILL.md`**，登记新 skill，并补充“用户只给页面/链接时先产出候选能力清单，再引导用户选择”的说明。
+
+**版本号**：`3.6.4` → `3.6.5`（manifest、根 package.json、seatalk-agent/package.json）
+
+### 测试项
+
+- `npm run verify:hooks`
+- 文本自检：确认 skill 与 workflow 明确覆盖 `CDP`、`chrome-auth`、`401/403`、`9222/19222`、候选能力清单、用户选择、release/publish
+
+## v3.6.4 -- 2026-04-20 -- `docs`: 同步 v3.6.4 Chrome 扩展版本说明
+
 **提交者**: @tianyi.liang  
 **Commit Type**: docs（release guides）；版本保持 **v3.6.4** 不变
 
