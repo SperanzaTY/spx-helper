@@ -6,6 +6,37 @@
 
 ---
 
+## v3.6.4 -- 2026-04-20 -- `feat`: DataMap MCP 补齐任务级、字段级和下游应用探查能力
+
+**提交者**: @tianyi.liang  
+**Commit Type**: feat（datamap-query + docs）；相对 **v3.6.3** 升 PATCH 至 **v3.6.4**
+
+### 变更说明
+
+**DataMap MCP**
+
+- 新增 **`get_lineage_tasks`**：真实调用 **`/lineageV2/taskInfo`**，返回 upstream/downstream 任务、owner、project、env、活跃状态、详情页/code 链接，便于判断“谁在产出 / 谁在消费 / 最近是否活跃”。
+- 新增 **`get_column_node_info`**：真实调用 **`/lineage/getColumnNodeInfo`**，返回字段描述、类型、计算逻辑、L30D query、技术 PIC。
+- 新增 **`get_column_lineage`**：真实调用 **`/lineageV2/filter/column`**，返回字段级 upstream/downstream 血缘原始结果。
+- 新增 **`get_downstream_applications`**：真实调用 **`/common/downStreamApplication`**，覆盖 Data Service API、OneBI Dataset、DataGo Data Model、Dashboard 下游应用探查。
+- **`get_table_lineage`** 改为使用实际解析后的 qualifiedName，并保留更多 entity / task 字段，减少 IDC fallback 后 `current` 对不上的问题。
+
+**文档**
+
+- 更新 **`docs/guides/MCP_TOOLS.md`**，补充 DataMap 新能力说明和 Google Sheets MCP 需要授权给 **`cursor@spx-helper.iam.gserviceaccount.com`** 的配置说明。
+- 更新 **`mcp-tools/datamap-query/README.md`**，同步新增工具、调用场景和 v3.6.4 变更记录。
+
+**版本号**：`3.6.3` → `3.6.4`（manifest、根 package.json、seatalk-agent/package.json）
+
+### 测试项
+
+- `npm run verify:hooks`
+- `python3 -m py_compile mcp-tools/datamap-query/datamap_mcp_server.py`
+- 真实环境 smoke：`get_lineage_tasks('spx_mart.dwd_spx_wf_staff_df_id')`
+- 真实环境 smoke：`get_column_node_info('spx_mart.dwd_spx_wf_staff_df_id', 'staff_id')`
+- 真实环境 smoke：`get_column_lineage('spx_mart.dwd_spx_wf_staff_df_id', 'staff_id')`
+- 真实环境 smoke：`get_downstream_applications('spx_mart.dwd_spx_wf_staff_df_id')`
+
 ## v3.6.3 -- 2026-04-20 -- `fix`: 查询类 MCP 返回实际执行 SQL
 
 **提交者**: @tianyi.liang  
