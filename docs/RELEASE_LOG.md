@@ -6,6 +6,31 @@
 
 ---
 
+## v3.6.7 -- 2026-04-21 -- `feat`: scheduler-query DataSuite 批量接口与 SLA 表刷新脚本
+
+**提交者**: Cursor Agent / 仓库维护者  
+**Commit Type**: feat（PATCH **3.6.6 → 3.6.7**）
+
+### 变更说明
+
+**scheduler-query（MCP）**
+
+- 新增 **`datasuite_bulk_api.py`**：Mart/SLA 常用 HTTP 路径常量与 **`api_reference_markdown()`**。
+- **`_request` / `_sla_request`**：可选 **`project_code`** → 请求头 **`x-datasuites-project-code`**。
+- 新工具：**`search_scheduler_tasks_fuzzy`**、**`list_task_instances_by_update_time`**、**`get_sla_full_configuration`**、**`query_marker_task_bindings`**、**`list_sla_bindings_for_task_instance`**。
+- **`search_tasks`** / **`get_task_instances`**：带上项目头；**`get_task_instances`** 支持显式 **`project_code`**。
+- **`README.md`**（子模块）、**`docs/guides/MCP_TOOLS.md`**：补充「DataSuite 批量运维接口」说明。
+
+**脚本**
+
+- **`scripts/refresh_datasuite_sla_sheets.py`**：刷新 Google Sheet「All-SLA」「All-BR」（chrome-auth Cookie、`latest_finish` 取最大 **`endRunTime`**、多 SLA 保留 **`slaTimeDef` 最晚**）。
+- **`scripts/_ingest_ds_cookie_to_tmp.py`**：Cookie 字符串写入 **`DATASUITE_COOKIES_JSON`**。
+
+### 测试项
+
+- `npm run verify:hooks`
+- `python3 -m py_compile mcp-tools/scheduler-query/scheduler_mcp_server.py mcp-tools/scheduler-query/datasuite_bulk_api.py`
+
 ## v3.6.6 -- 2026-04-20 -- `docs`: 同步 spx-bug-trace 本地沉淀到 Codex 入口
 
 **提交者**: @tianyi.liang  

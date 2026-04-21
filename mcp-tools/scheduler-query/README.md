@@ -149,6 +149,22 @@
 #### `get_task_violations`
 查询任务的 SLA 违规记录。
 
+### DataSuite 批量运维接口（与 Google Sheet / 刷新脚本对齐）
+
+以下接口在 **已登录 DataSuite 的 Chrome Cookie** 下与 Web 一致；需标头 `x-datasuites-project-code`（如 `spx_datamart`）的已标出。完整路径与说明见同目录 **`datasuite_bulk_api.py`**（`api_reference_markdown()` 可生成文档片段）。
+
+| 工具 | 说明 |
+|------|------|
+| `search_scheduler_tasks_fuzzy` | `GET /scheduler/api/v1/task/getList`（`search=1`、任务名、可选 `idcRegion`、项目头） |
+| `list_task_instances_by_update_time` | `GET .../taskInstance/getList`（`updateTimeOrder` 分页；**不**等于按 `endRunTime` 排序，见工具说明） |
+| `get_sla_full_configuration` | `GET /sla/sla/getAllStatus?slaCode=`（`slaTasks`、`slaTimeDef` 等） |
+| `query_marker_task_bindings` | `GET .../data-dependency/v2/withoutTag/marker/all`（`marker_name` → 列表 `task_id` 即 taskCode） |
+| `list_sla_bindings_for_task_instance` | `GET /sla/slaInstance/getSlaInstanceListByTaskInstance` |
+
+**已存在工具**中，`get_task_instances` 现支持从 `taskCode` 自动带项目头；`search_tasks` 的请求也会带上 `project_code` 对应的 `x-datasuites-project-code`。
+
+**写入类接口**（如 ``POST /sla/sla/update``）可能影响生产 SLA 配置，未封装为 MCP，仅在 `datasuite_bulk_api.py` 列作参考。
+
 ### Presto SQL 查询
 
 #### `get_presto_query_sql`

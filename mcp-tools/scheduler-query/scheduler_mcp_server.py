@@ -103,8 +103,18 @@ def _env_path(path: str, env: str = "") -> str:
     return path
 
 
-def _request(method: str, path: str, params: dict = None, json_body: dict = None, env: str = "") -> dict:
-    """发起 HTTP 请求，自动带 Cookie 和重试。env 支持 'dev'/'staging' 等非 prod 环境。"""
+def _request(
+    method: str,
+    path: str,
+    params: dict = None,
+    json_body: dict = None,
+    env: str = "",
+    project_code: str = "",
+) -> dict:
+    """发起 HTTP 请求，自动带 Cookie 和重试。env 支持 'dev'/'staging' 等非 prod 环境。
+
+    project_code 非空时设置 ``x-datasuites-project-code``（与 Web UI 一致，部分列表接口必填）。
+    """
     path = _env_path(path, env)
     url = BASE_URL + path
     cookies = _load_cookies()
@@ -113,6 +123,8 @@ def _request(method: str, path: str, params: dict = None, json_body: dict = None
     headers["referer"] = f"{BASE_URL}/scheduler{referer_env}"
     if "CSRF-TOKEN" in cookies:
         headers["x-csrf-token"] = cookies["CSRF-TOKEN"]
+    if project_code:
+        headers["x-datasuites-project-code"] = project_code
 
     for attempt in range(MAX_RETRIES + 1):
         try:
@@ -157,8 +169,17 @@ def _sla_root(env: str = "") -> str:
     return f"{BASE_URL}/sla/{mapped}"
 
 
-def _sla_request(method: str, rel_path: str, params: dict = None, env: str = "") -> dict:
-    """调用 ``datasuite.shopee.io/sla/...``（浏览器 Cookie，与 Scheduler 主 API 同源）。"""
+def _sla_request(
+    method: str,
+    rel_path: str,
+    params: dict = None,
+    env: str = "",
+    project_code: str = "",
+) -> dict:
+    """调用 ``datasuite.shopee.io/sla/...``（浏览器 Cookie，与 Scheduler 主 API 同源）。
+
+    project_code 非空时附加 ``x-datasuites-project-code``（少数 SLA 接口与项目联动时需要）。
+    """
     root = _sla_root(env)
     url = f"{root}/{rel_path.lstrip('/')}"
     cookies = _load_cookies()
@@ -166,6 +187,8 @@ def _sla_request(method: str, rel_path: str, params: dict = None, env: str = "")
     headers["referer"] = f"{BASE_URL}/scheduler/sla/"
     if "CSRF-TOKEN" in cookies:
         headers["x-csrf-token"] = cookies["CSRF-TOKEN"]
+    if project_code:
+        headers["x-datasuites-project-code"] = project_code
 
     for attempt in range(MAX_RETRIES + 1):
         try:
@@ -326,6 +349,7 @@ def get_task_instances(
     page_size: int = 20,
     biz_time_start: str = "",
     env: str = "prod",
+    project_code: str = "",
 ) -> str:
     """
     查询任务的运行实例列表（最近 N 天）。
@@ -338,12 +362,17 @@ def get_task_instances(
         biz_time_start: 业务时间起点，格式 "YYYY-MM-DD"，不传则自动取 N 天前
         page_size: 返回条数，默认 20
         env: 环境，"prod"（默认）或 "dev"
+        project_code: 请求头 ``x-datasuites-project-code``；默认取 ``task_code`` 的项目前缀（``spx_datamart.xxx`` → ``spx_datamart``）
 
     示例:
         get_task_instances("spx_mart.studio_10429983", days=14)
         get_task_instances("brbi_opslgc.studio_10541185", days=3, env="dev")
     """
     try:
+        proj_header = project_code.strip()
+        if not proj_header and "." in task_code:
+            proj_header = task_code.split(".")[0]
+
         if not biz_time_start:
             start = datetime.now() - timedelta(days=days)
             biz_time_start = start.strftime("%Y-%m-%d 00:00:00")
@@ -360,7 +389,13 @@ def get_task_instances(
             "bizTimeStart": biz_time_start,
             "bizTimeOrder": "desc",
         }
-        data = _request("GET", "/scheduler/api/v1/taskInstance/getList", params=params, env=env)
+        data = _request(
+            "GET",
+            "/scheduler/api/v1/taskInstance/getList",
+            params=params,
+            env=env,
+            project_code=proj_header,
+        )
         raw_list = data.get("data", {}).get("list", [])
         total = data.get("data", {}).get("total", 0)
 
@@ -658,7 +693,13 @@ def search_tasks(keyword: str, project_code: str = "spx_mart", page_size: int = 
             "pageNo": 1,
             "pageSize": page_size,
         }
-        data = _request("GET", "/scheduler/api/v1/task/getList", params=params, env=env)
+        data = _request(
+            "GET",
+            "/scheduler/api/v1/task/getList",
+            params=params,
+            env=env,
+            project_code=project_code,
+        )
         raw_list = data.get("data", {}).get("list", data.get("data", []))
 
         if isinstance(raw_list, dict):
@@ -682,6 +723,214 @@ def search_tasks(keyword: str, project_code: str = "spx_mart", page_size: int = 
             "tasks": tasks,
         }
         return json.dumps(result, ensure_ascii=False, indent=2)
+    except Exception as e:
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+
+@mcp.tool()
+def search_scheduler_tasks_fuzzy(
+    task_name: str,
+    project_code: str = "spx_datamart",
+    idc_region: Optional[int] = None,
+    page_no: int = 1,
+    page_size: int = 30,
+    env: str = "prod",
+) -> str:
+    """
+    模糊搜索 Scheduler 任务列表（与 Web「任务名 + search」一致）。
+
+    对应 ``GET /scheduler/api/v1/task/getList``，常用参数 ``search=1``、``taskName``；
+    可选 ``idcRegion``（0=SG、1=US 等）区分机房任务。
+
+    参数:
+        task_name: 任务名关键词或全名，如 ``dwd_spx_delivery_assignment_task_di_sg``
+        project_code: ``x-datasuites-project-code`` / 业务项目，Mart 场景多为 ``spx_datamart``
+        idc_region: 机房区域，不传则不限
+        page_no / page_size: 分页
+        env: prod / dev / staging
+
+    示例:
+        search_scheduler_tasks_fuzzy("dim_spx_city_sg", "spx_datamart")
+        search_scheduler_tasks_fuzzy("dim_spx_city_sg", idc_region=1)
+    """
+    try:
+        params: Dict[str, Any] = {
+            "taskName": task_name,
+            "pageNo": page_no,
+            "pageSize": page_size,
+            "search": 1,
+        }
+        if idc_region is not None:
+            params["idcRegion"] = idc_region
+        data = _request(
+            "GET",
+            "/scheduler/api/v1/task/getList",
+            params=params,
+            env=env,
+            project_code=project_code,
+        )
+        raw_list = data.get("data", {}).get("list", [])
+        out = []
+        for t in raw_list:
+            out.append({
+                "task_code": t.get("taskCode", ""),
+                "task_name": t.get("taskName", ""),
+                "idc_region": t.get("idcRegion"),
+                "task_owner": t.get("taskOwner", ""),
+                "schedule_period": t.get("schedulePeriodName", ""),
+            })
+        return json.dumps(
+            {
+                "task_name_query": task_name,
+                "project_code": project_code,
+                "idc_region": idc_region,
+                "total_returned": len(out),
+                "tasks": out,
+                "http_note": "原始响应见根字段 success/msg；列表在 data.list",
+                "raw_success": data.get("success"),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    except Exception as e:
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+
+@mcp.tool()
+def list_task_instances_by_update_time(
+    task_code: str,
+    page_no: int = 1,
+    page_size: int = 80,
+    update_time_order: str = "desc",
+    env: str = "prod",
+    project_code: str = "",
+) -> str:
+    """
+    按「更新时间」分页拉取任务实例（与 SLA 表脚本、最近完成时间排查一致）。
+
+    使用 ``GET /scheduler/api/v1/taskInstance/getList`` 的 ``updateTimeOrder``；
+    注意：列表顺序不必等于按 ``endRunTime`` 从新到旧，若要「最近一次成功结束时间」需在返回集中取
+    ``instanceStatus==30`` 且 ``endRunTime`` 最大的记录。
+
+    project_code 默认取 taskCode 第一段（如 ``spx_datamart``）。
+    """
+    try:
+        proj = project_code.strip()
+        if not proj and "." in task_code:
+            proj = task_code.split(".")[0]
+        params = {
+            "type": "web",
+            "search": 1,
+            "taskCode": task_code,
+            "projectExclusive": "false",
+            "pageNo": page_no,
+            "pageSize": page_size,
+            "updateTimeOrder": update_time_order,
+        }
+        data = _request(
+            "GET",
+            "/scheduler/api/v1/taskInstance/getList",
+            params=params,
+            env=env,
+            project_code=proj,
+        )
+        return json.dumps(data, ensure_ascii=False, indent=2)
+    except Exception as e:
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+
+@mcp.tool()
+def get_sla_full_configuration(
+    sla_code: str,
+    env: str = "prod",
+    project_code: str = "",
+) -> str:
+    """
+    查询 SLA 完整配置（任务列表、slaTimeDef、周期类型等）。
+
+    对应 ``GET .../sla/sla/getAllStatus?slaCode=``。
+
+    返回 JSON 中含 ``slaTasks``（关联任务）、``slaTimeDef``（如 ``15:00``）、``slaPeriodType`` 等。
+    """
+    try:
+        params = {"slaCode": sla_code}
+        data = _sla_request(
+            "GET",
+            "sla/getAllStatus",
+            params=params,
+            env=env,
+            project_code=project_code,
+        )
+        return json.dumps(data, ensure_ascii=False, indent=2)
+    except Exception as e:
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+
+@mcp.tool()
+def query_marker_task_bindings(
+    marker_name: str,
+    project_code: str = "spx_datamart",
+    marker_scope: str = "",
+    page_no: int = 1,
+    page_size: int = 10,
+    create_time_order: str = "desc",
+    env: str = "prod",
+) -> str:
+    """
+    根据 Hive/表级 marker 名称查询绑定的 Scheduler 任务（返回 ``task_id`` 即 taskCode）。
+
+    对应 ``GET /scheduler/api/v1/data-dependency/v2/withoutTag/marker/all``，
+    常用 ``type=web``、``marker_name=spx_mart.xxx`` 或 ``spx_datamart.xxx``。
+
+    marker_scope 可选（如 External）；不传则由后端默认。
+    """
+    try:
+        params: Dict[str, Any] = {
+            "type": "web",
+            "marker_name": marker_name,
+            "page_no": page_no,
+            "page_size": page_size,
+            "create_time_order": create_time_order,
+        }
+        if marker_scope:
+            params["marker_scope"] = marker_scope
+        data = _request(
+            "GET",
+            "/scheduler/api/v1/data-dependency/v2/withoutTag/marker/all",
+            params=params,
+            env=env,
+            project_code=project_code,
+        )
+        return json.dumps(data, ensure_ascii=False, indent=2)
+    except Exception as e:
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+
+@mcp.tool()
+def list_sla_bindings_for_task_instance(
+    task_code: str,
+    task_instance_code: str,
+    env: str = "prod",
+    project_code: str = "spx_datamart",
+) -> str:
+    """
+    查询某次任务实例关联的 SLA 实例列表。
+
+    对应 ``GET .../sla/slaInstance/getSlaInstanceListByTaskInstance``。
+    """
+    try:
+        params = {
+            "taskCode": task_code,
+            "taskInstanceCode": task_instance_code,
+        }
+        data = _sla_request(
+            "GET",
+            "slaInstance/getSlaInstanceListByTaskInstance",
+            params=params,
+            env=env,
+            project_code=project_code,
+        )
+        return json.dumps(data, ensure_ascii=False, indent=2)
     except Exception as e:
         return json.dumps({"error": str(e)}, ensure_ascii=False)
 
