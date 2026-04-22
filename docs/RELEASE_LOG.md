@@ -6,6 +6,22 @@
 
 ---
 
+## v3.6.8 -- 2026-04-22 -- `docs`: 同步 Chrome 扩展指南到 3.6.8
+
+**提交者**: Cursor Agent / 仓库维护者  
+**Commit Type**: docs（guide sync）；版本保持 **v3.6.8** 不变
+
+### 变更说明
+
+**文档**
+
+- 更新 **`docs/guides/CHROME_EXTENSION.md`**，将顶部版本说明、当前版本字段和版本记录同步到 **v3.6.8**。
+- 本次仅同步扩展版本文案，Chrome 扩展功能代码无变更。
+
+### 测试项
+
+- `npm run verify:hooks`
+
 ## v3.6.8 -- 2026-04-22 -- `feat`: presto-query 支持可配置请求超时
 
 **提交者**: Cursor Agent / 仓库维护者  
