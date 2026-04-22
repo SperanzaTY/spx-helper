@@ -103,7 +103,8 @@ while true; do
     continue
   fi
   echo "[$(date)] agent exited with code $EXIT_CODE" >> "$LOG_DIR/agent.log"
-  break
+  echo "[$(date)] agent exited unexpectedly, restarting in 3s..." >> "$LOG_DIR/agent.log"
+  sleep 3
 done
 WRAPPER_EOF
 

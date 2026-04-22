@@ -24,5 +24,6 @@ while true; do
     continue
   fi
   echo "[launch] agent exited with code ${EXIT_CODE}"
-  break
+  echo "[launch] agent exited unexpectedly, restarting in 3s..."
+  sleep 3
 done

@@ -73,6 +73,7 @@
   var STORE_KEY = '__cursorConversations';
   var WS_KEY = '__cursorLastWorkspace';
   var WS_RECENT_KEY = '__cursorRecentWorkspaces';
+  var WS_HIDDEN_KEY = '__cursorHiddenWorkspaces';
   var MAX_RECENT_WS = 10;
   var messages = [];
   var conversations = loadConvs(), currentIdx = -1;
@@ -91,6 +92,9 @@
   var _usageCtxSize = 0, _usageCtxUsed = 0, _usageTurnTotal = 0;
   var modeSelect = null, modelSelect = null, ctxBar = null, ctxLabel = null;
   var wsLabel = null;
+  var wsPicker = null, wsPickerList = null, wsPickerInput = null;
+  var workspaceSwitchPending = false;
+  var workspaceSwitchUiPrepared = false;
   var turnView = null, turnEl = null, turnFullText = '', turnFullThinking = '';
   var turnPlan = null;
   var turnPlanEl = null;
@@ -614,6 +618,8 @@
     '.cursor-ws-picker-item .ws-info { flex:1; overflow:hidden; }',
     '.cursor-ws-picker-item .ws-name { font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }',
     '.cursor-ws-picker-item .ws-path { font-size:10px; color:var(--cp-text-dim2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }',
+    '.cursor-ws-picker-item .ws-remove { width:20px; height:20px; border:none; background:none; color:var(--cp-text-dim2); border-radius:4px; cursor:pointer; flex-shrink:0; display:flex; align-items:center; justify-content:center; opacity:.7; transition:background .12s,color .12s,opacity .12s; }',
+    '.cursor-ws-picker-item .ws-remove:hover { background:rgba(212,68,68,.12); color:#d66; opacity:1; }',
     '.cursor-ws-picker-section { font-size:10px; font-weight:600; color:var(--cp-text-dim2); padding:8px 12px 4px; text-transform:uppercase; letter-spacing:.5px; border-bottom:1px solid var(--cp-border); margin-bottom:2px; }',
 
     // Cursor icon injected into SeaTalk native quick-operation-menu
@@ -1347,32 +1353,21 @@
         updateModelBadge();
       } else if (d.type === 'workspace') {
         if (d.workspaces) cachedWorkspaceList = d.workspaces;
-        // Read saved workspace BEFORE overwriting localStorage
-        var savedWs = null;
-        try { savedWs = localStorage.getItem(WS_KEY); } catch (_) {}
-        if (d.isDefault && savedWs && savedWs !== (d.path || '')) {
-          cachedWorkspace = savedWs;
-          updateWsLabel();
-          saveRecentWorkspace(savedWs);
-          sendToAgent({ type: 'set_workspace', path: savedWs }, { showNotice: false });
-        } else {
-          cachedWorkspace = d.path || '';
-          updateWsLabel();
-          if (cachedWorkspace) {
-            try { localStorage.setItem(WS_KEY, cachedWorkspace); } catch (_) {}
-            saveRecentWorkspace(cachedWorkspace);
-          }
+        var incomingWs = d.path || '';
+        var wasPendingWorkspaceSwitch = workspaceSwitchPending;
+        var needsUiReset = wasPendingWorkspaceSwitch && !workspaceSwitchUiPrepared && !!incomingWs && incomingWs !== cachedWorkspace;
+        rememberWorkspaceState(incomingWs);
+        if (wasPendingWorkspaceSwitch) {
+          finishWorkspaceSwitchUiState(needsUiReset);
+          workspaceSwitchPending = false;
+          workspaceSwitchUiPrepared = false;
         }
       } else if (d.type === 'usage') {
         updateUsageBadge(d);
       } else if (d.type === 'folder_selected') {
         var fp = d.path || '';
         if (fp && fp !== cachedWorkspace) {
-          cachedWorkspace = fp;
-          updateWsLabel();
-          saveCurrentConv(); currentIdx = -1; messages = []; turnView = null;
-          renderAllMessages(messagesEl);
-          sendToAgent({ type: 'set_workspace', path: fp });
+          sendToAgent({ type: 'set_workspace', path: fp }, { requireLive: false });
         }
       } else if (d.type === 'update_available') {
         cachedUpdate = { available: !!d.available, local: d.local || '', remote: d.remote || '', behind: d.behind || 0, changelog: d.changelog || '', error: d.error };
@@ -3117,6 +3112,86 @@
     if (wsLabel) wsLabel.textContent = wsDisplayName(cachedWorkspace);
   }
 
+  function loadRecentWorkspaceState() {
+    try {
+      var raw = localStorage.getItem(WS_RECENT_KEY);
+      if (raw) {
+        var arr = JSON.parse(raw);
+        if (Array.isArray(arr)) return arr;
+      }
+    } catch (_) {}
+    return [];
+  }
+
+  function saveRecentWorkspaceState(recent) {
+    try { localStorage.setItem(WS_RECENT_KEY, JSON.stringify(recent || [])); } catch (_) {}
+  }
+
+  function loadHiddenWorkspaceState() {
+    try {
+      var raw = localStorage.getItem(WS_HIDDEN_KEY);
+      if (raw) {
+        var arr = JSON.parse(raw);
+        if (Array.isArray(arr)) return arr;
+      }
+    } catch (_) {}
+    return [];
+  }
+
+  function saveHiddenWorkspaceState(list) {
+    try { localStorage.setItem(WS_HIDDEN_KEY, JSON.stringify(list || [])); } catch (_) {}
+  }
+
+  function unhideWorkspaceState(wsPath) {
+    if (!wsPath) return;
+    var hidden = loadHiddenWorkspaceState().filter(function (p) { return p !== wsPath; });
+    saveHiddenWorkspaceState(hidden);
+  }
+
+  function saveRecentWorkspaceEntry(wsPath) {
+    if (!wsPath) return;
+    var recent = loadRecentWorkspaceState().filter(function (r) { return r.path !== wsPath; });
+    var parts = wsPath.replace(/\/+$/, '').split('/');
+    recent.unshift({ name: parts[parts.length - 1] || wsPath, path: wsPath });
+    if (recent.length > MAX_RECENT_WS) recent = recent.slice(0, MAX_RECENT_WS);
+    saveRecentWorkspaceState(recent);
+  }
+
+  function rememberWorkspaceState(wsPath) {
+    cachedWorkspace = wsPath || '';
+    updateWsLabel();
+    if (!cachedWorkspace) return;
+    unhideWorkspaceState(cachedWorkspace);
+    try { localStorage.setItem(WS_KEY, cachedWorkspace); } catch (_) {}
+    saveRecentWorkspaceEntry(cachedWorkspace);
+  }
+
+  function finishWorkspaceSwitchUiState(resetConversation) {
+    if (wsPicker) wsPicker.classList.remove('show');
+    if (wsPickerInput) wsPickerInput.value = '';
+    if (resetConversation) {
+      saveCurrentConv();
+      currentIdx = -1;
+      messages = [];
+      contextData = null;
+      turnView = null;
+      turnEl = null;
+      turnFullText = '';
+      turnFullThinking = '';
+      turnPlan = null;
+      turnPlanEl = null;
+      turnAccumText = [];
+      turnToolCalls = {};
+      renderAllMessages(messagesEl);
+      if (ctxBar) ctxBar.classList.remove('show');
+    }
+    if (inputEl) {
+      setTimeout(function () {
+        try { inputEl.focus(); } catch (_) {}
+      }, 30);
+    }
+  }
+
   function formatTokens(n) {
     if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
     if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
@@ -3605,20 +3680,21 @@
     updatePanelAcpStatus();
 
     // Workspace picker overlay
-    var wsPicker = document.createElement('div');
+    wsPicker = document.createElement('div');
     wsPicker.className = 'cursor-ws-picker';
     wsPicker.innerHTML = '<div class="cursor-ws-picker-hd"><button class="cursor-ws-picker-back">←</button><span class="cursor-ws-picker-title">切换工作区</span></div><div class="cursor-ws-picker-search"><input class="cursor-ws-picker-input" placeholder="搜索工作区..." /><button class="cursor-ws-picker-browse">浏览...</button></div><div class="cursor-ws-picker-list"></div>';
     panelHandle.body.appendChild(wsPicker);
-    var wsPickerList = wsPicker.querySelector('.cursor-ws-picker-list');
-    var wsPickerInput = wsPicker.querySelector('.cursor-ws-picker-input');
+    wsPickerList = wsPicker.querySelector('.cursor-ws-picker-list');
+    wsPickerInput = wsPicker.querySelector('.cursor-ws-picker-input');
 
     function renderWsList(filter) {
       var f = (filter || '').toLowerCase();
       var recentList = loadRecentWorkspaces();
-      var scannedList = cachedWorkspaceList.slice();
+      var hiddenPaths = loadHiddenWorkspaces();
+      var scannedList = cachedWorkspaceList.slice().filter(function (w) { return hiddenPaths.indexOf(w.path) < 0; });
 
       // Ensure current workspace is in recent list
-      if (cachedWorkspace) {
+      if (cachedWorkspace && hiddenPaths.indexOf(cachedWorkspace) < 0) {
         var inRecent = false;
         for (var ri = 0; ri < recentList.length; ri++) { if (recentList[ri].path === cachedWorkspace) { inRecent = true; break; } }
         if (!inRecent) {
@@ -3626,6 +3702,7 @@
           recentList.unshift({ name: parts[parts.length - 1] || cachedWorkspace, path: cachedWorkspace });
         }
       }
+      recentList = recentList.filter(function (w) { return hiddenPaths.indexOf(w.path) < 0; });
 
       // Filter
       function matchFilter(w) { return !f || w.name.toLowerCase().indexOf(f) >= 0 || w.path.toLowerCase().indexOf(f) >= 0; }
@@ -3640,23 +3717,28 @@
         return;
       }
 
-      function renderItem(w) {
+      function renderItem(w, section) {
         var isCurrent = w.path === cachedWorkspace;
         var act = isCurrent ? ' active' : '';
         var icon = isCurrent ? '✓' : '📁';
-        return '<div class="cursor-ws-picker-item' + act + '" data-path="' + escapeHtml(w.path) + '"><span class="ws-icon">' + icon + '</span><div class="ws-info"><div class="ws-name">' + escapeHtml(w.name) + '</div><div class="ws-path">' + escapeHtml(w.path) + '</div></div></div>';
+        var removeBtn = isCurrent ? '' : '<button type="button" class="ws-remove" data-remove="1" title="删除"><svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="3" x2="13" y2="13"></line><line x1="13" y1="3" x2="3" y2="13"></line></svg></button>';
+        return '<div class="cursor-ws-picker-item' + act + '" data-path="' + escapeHtml(w.path) + '" data-section="' + escapeHtml(section || '') + '"><span class="ws-icon">' + icon + '</span><div class="ws-info"><div class="ws-name">' + escapeHtml(w.name) + '</div><div class="ws-path">' + escapeHtml(w.path) + '</div></div>' + removeBtn + '</div>';
       }
 
       var html = '';
       if (filteredRecent.length > 0) {
         html += '<div class="cursor-ws-picker-section">最近使用</div>';
-        for (var a = 0; a < filteredRecent.length; a++) html += renderItem(filteredRecent[a]);
+        for (var a = 0; a < filteredRecent.length; a++) html += renderItem(filteredRecent[a], 'recent');
       }
       if (filteredScanned.length > 0) {
         html += '<div class="cursor-ws-picker-section">本机项目</div>';
-        for (var b = 0; b < filteredScanned.length; b++) html += renderItem(filteredScanned[b]);
+        for (var b = 0; b < filteredScanned.length; b++) html += renderItem(filteredScanned[b], 'scanned');
       }
       wsPickerList.innerHTML = html || '<div style="text-align:center;padding:20px;color:var(--cp-text-dim2);font-size:12px">No workspaces found<br><span style="font-size:10px;margin-top:4px;display:inline-block">点击「浏览...」选择项目文件夹，或在搜索框输入路径后按 Enter</span></div>';
+    }
+
+    function finishWorkspaceSwitchUi(resetConversation) {
+      finishWorkspaceSwitchUiState(resetConversation);
     }
 
     wsBar.addEventListener('click', function () {
@@ -3674,6 +3756,23 @@
       } else if (e.key === 'Escape') { wsPicker.classList.remove('show'); }
     });
     wsPickerList.addEventListener('click', function (e) {
+      var removeBtn = e.target.closest('.ws-remove');
+      if (removeBtn) {
+        e.preventDefault();
+        e.stopPropagation();
+        var removeItem = removeBtn.closest('.cursor-ws-picker-item');
+        if (!removeItem) return;
+        var removePath = removeItem.dataset.path || '';
+        var removeSection = removeItem.dataset.section || '';
+        if (!removePath || removePath === cachedWorkspace) return;
+        if (removeSection === 'recent') {
+          deleteRecentWorkspace(removePath);
+        } else if (removeSection === 'scanned') {
+          hideWorkspace(removePath);
+        }
+        renderWsList(wsPickerInput ? wsPickerInput.value : '');
+        return;
+      }
       var item = e.target.closest('.cursor-ws-picker-item');
       if (!item) return;
       var p = item.dataset.path;
@@ -3682,7 +3781,9 @@
     });
 
     wsPicker.querySelector('.cursor-ws-picker-browse').addEventListener('click', function () {
-      sendToAgent({ type: 'browse_folder' });
+      workspaceSwitchPending = true;
+      workspaceSwitchUiPrepared = false;
+      sendToAgent({ type: 'browse_folder' }, { requireLive: false });
     });
 
     function loadRecentWorkspaces() {
@@ -3692,6 +3793,36 @@
       } catch (_) {}
       return [];
     }
+    function saveRecentWorkspaces(recent) {
+      try { localStorage.setItem(WS_RECENT_KEY, JSON.stringify(recent || [])); } catch (_) {}
+    }
+    function deleteRecentWorkspace(wsPath) {
+      if (!wsPath) return;
+      var recent = loadRecentWorkspaces().filter(function (r) { return r.path !== wsPath; });
+      saveRecentWorkspaces(recent);
+    }
+    function loadHiddenWorkspaces() {
+      try {
+        var raw = localStorage.getItem(WS_HIDDEN_KEY);
+        if (raw) { var arr = JSON.parse(raw); if (Array.isArray(arr)) return arr; }
+      } catch (_) {}
+      return [];
+    }
+    function saveHiddenWorkspaces(list) {
+      try { localStorage.setItem(WS_HIDDEN_KEY, JSON.stringify(list || [])); } catch (_) {}
+    }
+    function hideWorkspace(wsPath) {
+      if (!wsPath) return;
+      var hidden = loadHiddenWorkspaces();
+      if (hidden.indexOf(wsPath) < 0) hidden.push(wsPath);
+      saveHiddenWorkspaces(hidden);
+      cachedWorkspaceList = cachedWorkspaceList.filter(function (w) { return w.path !== wsPath; });
+    }
+    function unhideWorkspace(wsPath) {
+      if (!wsPath) return;
+      var hidden = loadHiddenWorkspaces().filter(function (p) { return p !== wsPath; });
+      saveHiddenWorkspaces(hidden);
+    }
     function saveRecentWorkspace(wsPath) {
       if (!wsPath) return;
       var recent = loadRecentWorkspaces();
@@ -3700,18 +3831,18 @@
       var parts = wsPath.replace(/\/+$/, '').split('/');
       recent.unshift({ name: parts[parts.length - 1] || wsPath, path: wsPath });
       if (recent.length > MAX_RECENT_WS) recent = recent.slice(0, MAX_RECENT_WS);
-      try { localStorage.setItem(WS_RECENT_KEY, JSON.stringify(recent)); } catch (_) {}
+      saveRecentWorkspaces(recent);
+    }
+    function rememberWorkspace(wsPath) {
+      rememberWorkspaceState(wsPath);
     }
 
     function selectWorkspace(p) {
-      cachedWorkspace = p;
-      updateWsLabel();
-      try { localStorage.setItem(WS_KEY, p); } catch (_) {}
-      saveRecentWorkspace(p);
-      wsPicker.classList.remove('show');
-      saveCurrentConv(); currentIdx = -1; messages = []; turnView = null;
-      renderAllMessages(messagesEl);
-      sendToAgent({ type: 'set_workspace', path: p });
+      workspaceSwitchPending = true;
+      workspaceSwitchUiPrepared = true;
+      rememberWorkspace(p);
+      finishWorkspaceSwitchUi(true);
+      sendToAgent({ type: 'set_workspace', path: p }, { requireLive: false });
     }
 
     // Context bar (created here, inserted into inputArea later)
@@ -3744,9 +3875,8 @@
         histOverlay.classList.remove('show');
         // Switch workspace if the conversation was in a different one
         if (c && c.workspace && c.workspace !== cachedWorkspace) {
-          cachedWorkspace = c.workspace;
-          updateWsLabel();
-          sendToAgent({ type: 'set_workspace', path: c.workspace });
+          rememberWorkspace(c.workspace);
+          sendToAgent({ type: 'set_workspace', path: c.workspace }, { requireLive: false });
         }
       }
     });
@@ -3905,7 +4035,7 @@
     icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" width="19" height="19"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="7" stroke-opacity="0.4"/><line x1="12" y1="6" x2="12" y2="15"/><path d="M9 9l3-1 3 1"/><circle cx="12" cy="17" r="1" fill="currentColor" stroke="none"/></svg>',
     onClick: function () { window.__agentToggle(); },
     tooltip: function () {
-      var st = cachedStatus.connected
+      var st = isBackendInteractive()
         ? '<span style="color:#4ec9b0">● 已连接</span>'
         : '<span style="color:#d44">○ 断开连接</span>';
       return '<b>' + backendBrand() + '</b><div style="font-size:10px;color:#858585;margin-top:2px">' + st + '</div>';

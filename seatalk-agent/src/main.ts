@@ -504,6 +504,56 @@ async function main() {
   let cachedWorkspaceList: Array<{ name: string; path: string }> = [];
   const pendingCodexApprovalRequests = new Map<string, AgentApprovalRequest>();
 
+  async function syncWorkspaceUi(wsPath = currentWorkspace) {
+    const wsName = path.basename(wsPath || '') || wsPath || 'No workspace';
+    const escapedPath = JSON.stringify(wsPath || '');
+    const escapedName = JSON.stringify(wsName);
+    try {
+      await client.evaluate(
+        `(() => {
+          var wsPath = ${escapedPath};
+          var wsName = ${escapedName};
+          try {
+            localStorage.setItem('__cursorLastWorkspace', wsPath);
+          } catch (_) {}
+          try {
+            var key = '__cursorRecentWorkspaces';
+            var raw = localStorage.getItem(key);
+            var recent = [];
+            if (raw) {
+              try {
+                recent = JSON.parse(raw);
+                if (!Array.isArray(recent)) recent = [];
+              } catch (_) {
+                recent = [];
+              }
+            }
+            recent = recent.filter(function (item) { return item && item.path !== wsPath; });
+            if (wsPath) recent.unshift({ name: wsName, path: wsPath });
+            if (recent.length > 10) recent = recent.slice(0, 10);
+            localStorage.setItem(key, JSON.stringify(recent));
+          } catch (_) {}
+          var label = document.querySelector('.cursor-ws-name');
+          if (label) label.textContent = wsName || 'No workspace';
+          var picker = document.querySelector('.cursor-ws-picker');
+          if (picker) picker.classList.remove('show');
+          var pickerInput = document.querySelector('.cursor-ws-picker-input');
+          if (pickerInput) pickerInput.value = '';
+          var hist = document.querySelector('.cursor-hist');
+          if (hist) hist.classList.remove('show');
+          var input = document.querySelector('.cursor-input');
+          if (input && typeof input.focus === 'function') {
+            setTimeout(function () {
+              try { input.focus(); } catch (_) {}
+            }, 30);
+          }
+        })()`,
+      );
+    } catch (e) {
+      log(`syncWorkspaceUi failed: ${(e as Error).message}`);
+    }
+  }
+
   function sendBackendToPanel() {
     bridge
       .sendToPanel({
@@ -1360,6 +1410,81 @@ async function main() {
   }
 
   function setupMessageHandler(b: Bridge) {
+    async function switchWorkspace(wsPath: string) {
+      if (!wsPath) return;
+      try {
+        const stat = fs.statSync(wsPath);
+        if (!stat.isDirectory()) {
+          log(`set_workspace failed: not a directory: ${wsPath}`);
+          return;
+        }
+      } catch {
+        log(`set_workspace failed: path not found: ${wsPath}`);
+        return;
+      }
+      if (wsPath === currentWorkspace) {
+        log(`workspace already set to: ${currentWorkspace}, skipping`);
+        b.sendToPanel({ type: 'workspace', path: currentWorkspace, workspaces: cachedWorkspaceList }).catch(() => {});
+        return;
+      }
+
+      currentWorkspace = wsPath;
+      log(`workspace changed to: ${currentWorkspace}`);
+      if (!cachedWorkspaceList.some(w => w.path === wsPath)) {
+        cachedWorkspaceList.unshift({ name: path.basename(wsPath), path: wsPath });
+      }
+
+      if (agent) {
+        try {
+          await agent.connection.cancel({ sessionId: agent.sessionId }).catch(() => {});
+          const res = await agent.connection.newSession({
+            cwd: currentWorkspace,
+            mcpServers: loadMcpServers(log),
+          });
+          agent.sessionId = res.sessionId;
+          lastSessionId = res.sessionId;
+          saveSession(lastSessionId, currentWorkspace, codexRuntimeConfig);
+          sessionPromptCount = 0;
+          log(`new session for workspace: ${agent.sessionId}`);
+          try {
+            await agent.connection.setSessionMode({ sessionId: agent.sessionId, modeId: defaultMode });
+          } catch {}
+        } catch (e) {
+          const errMsg = (e as Error).message;
+          log('set_workspace session failed:', errMsg);
+          if (!acpStarting) {
+            b.sendToPanel({ type: 'status', connected: false, text: '切换工作区中...' }).catch(() => {});
+            agent.proc.removeAllListeners('exit');
+            killAgent(agent.proc);
+            agent = null;
+            killOrphanAgentProcesses();
+            acpStarting = true;
+            try {
+              const ok = await startAcp();
+              const ag = agent as AgentProcess | null;
+              if (ok && ag) {
+                sendBackendToPanel();
+                b.sendToPanel({ type: 'status', connected: true, text: 'Connected' }).catch(() => {});
+                b.sendToPanel({ type: 'mode', mode: defaultMode }).catch(() => {});
+                if (ag.availableModels.length) {
+                  b.sendToPanel({ type: 'models', models: ag.availableModels, currentModelId: ag.currentModelId }).catch(() => {});
+                }
+                log(`workspace switched via agent restart to: ${currentWorkspace}`);
+              } else {
+                b.sendToPanel({ type: 'status', connected: false, text: '工作区切换失败' }).catch(() => {});
+                b.sendToPanel({ type: 'error', text: `工作区切换失败: ${errMsg}` }).catch(() => {});
+              }
+            } finally {
+              acpStarting = false;
+            }
+          }
+        }
+      }
+
+      b.sendToPanel({ type: 'workspace', path: currentWorkspace, workspaces: cachedWorkspaceList }).catch(() => {});
+      await syncWorkspaceUi(currentWorkspace);
+    }
+
     b.onMessage(async (data) => {
       log(`received (bridge#${b.id}):`, JSON.stringify(data).substring(0, 200));
 
@@ -1559,56 +1684,13 @@ async function main() {
           ).trim().replace(/\/$/, '');
           if (result && fs.existsSync(result)) {
             log(`folder selected: ${result}`);
-            bridge.sendToPanel({ type: 'folder_selected', path: result }).catch(() => {});
+            await switchWorkspace(result);
           }
         } catch {
           log('folder picker cancelled or failed');
         }
       } else if (data.type === 'set_workspace') {
-        const wsPath = data.path as string;
-        if (!wsPath) return;
-        try {
-          const stat = fs.statSync(wsPath);
-          if (!stat.isDirectory()) {
-            log(`set_workspace failed: not a directory: ${wsPath}`);
-            return;
-          }
-        } catch {
-          log(`set_workspace failed: path not found: ${wsPath}`);
-          return;
-        }
-        // Skip if workspace is already current (e.g. after loadSession restored it)
-        if (wsPath === currentWorkspace) {
-          log(`workspace already set to: ${currentWorkspace}, skipping`);
-          bridge.sendToPanel({ type: 'workspace', path: currentWorkspace, workspaces: cachedWorkspaceList }).catch(() => {});
-          return;
-        }
-        currentWorkspace = wsPath;
-        log(`workspace changed to: ${currentWorkspace}`);
-        // Add to cached list if not already present
-        if (!cachedWorkspaceList.some(w => w.path === wsPath)) {
-          cachedWorkspaceList.unshift({ name: path.basename(wsPath), path: wsPath });
-        }
-        if (agent) {
-          try {
-            await agent.connection.cancel({ sessionId: agent.sessionId }).catch(() => {});
-            const res = await agent.connection.newSession({
-              cwd: currentWorkspace,
-              mcpServers: loadMcpServers(log),
-            });
-            agent.sessionId = res.sessionId;
-            lastSessionId = res.sessionId;
-            saveSession(lastSessionId, currentWorkspace, codexRuntimeConfig);
-            sessionPromptCount = 0;
-            log(`new session for workspace: ${agent.sessionId}`);
-            try {
-              await agent.connection.setSessionMode({ sessionId: agent.sessionId, modeId: defaultMode });
-            } catch {}
-          } catch (e) {
-            log('set_workspace session failed:', (e as Error).message);
-          }
-        }
-        bridge.sendToPanel({ type: 'workspace', path: currentWorkspace, workspaces: cachedWorkspaceList }).catch(() => {});
+        await switchWorkspace(data.path as string);
       } else if (data.type === 'new_conversation') {
         if (agent) {
           try {
@@ -2200,6 +2282,7 @@ async function main() {
     cachedWorkspaceList = scanWorkspaces(currentWorkspace);
     log(`sending workspace info: ${currentWorkspace}, ${cachedWorkspaceList.length} workspaces`);
     bridge.sendToPanel({ type: 'workspace', path: currentWorkspace, workspaces: cachedWorkspaceList, isDefault: true }).catch(() => {});
+    syncWorkspaceUi(currentWorkspace).catch(() => {});
     if (agent && agent.availableModels.length) {
       bridge
         .sendToPanel({
@@ -2299,12 +2382,13 @@ async function main() {
     const ag = agent as AgentProcess;
     sendBackendToPanel();
     bridge.sendToPanel({ type: 'status', connected: true, text: 'Connected' }).catch(() => {});
-    bridge.sendToPanel({ type: 'mode', mode: defaultMode }).catch(() => {});
-    if (ag.availableModels.length) {
-      bridge.sendToPanel({ type: 'models', models: ag.availableModels, currentModelId: ag.currentModelId }).catch(() => {});
+      bridge.sendToPanel({ type: 'mode', mode: defaultMode }).catch(() => {});
+      if (ag.availableModels.length) {
+        bridge.sendToPanel({ type: 'models', models: ag.availableModels, currentModelId: ag.currentModelId }).catch(() => {});
+      }
+      bridge.sendToPanel({ type: 'workspace', path: currentWorkspace, workspaces: cachedWorkspaceList }).catch(() => {});
+      syncWorkspaceUi(currentWorkspace).catch(() => {});
     }
-    bridge.sendToPanel({ type: 'workspace', path: currentWorkspace, workspaces: cachedWorkspaceList }).catch(() => {});
-  }
 
   // ── Silent update check (immediate on start, then every 10 min) ──
 

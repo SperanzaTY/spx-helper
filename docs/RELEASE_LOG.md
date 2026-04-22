@@ -6,6 +6,33 @@
 
 ---
 
+## v3.6.9 -- 2026-04-22 -- `fix`: 修复 SeaTalk Agent 工作区切换收口与自恢复
+
+**提交者**: Codex / 仓库维护者  
+**Commit Type**: fix（PATCH **3.6.8 → 3.6.9**）
+
+### 变更说明
+
+**SeaTalk Agent**
+
+- **`launch.sh`**、**`install.sh`**：Agent 意外退出后不再静默停住，wrapper 会延迟重拉起，避免 JSON-RPC / CDP 端口消失但前端仍显示已连接。
+- **`src/inject/sidebar-app.js`**：工作区状态同步与 picker 收口逻辑统一，修复 `workspace` 回包路径上的作用域错误；列表切换和 **`浏览...`** 切换成功后都会自动关闭选择器并回到对话页。
+- 工作区选择器支持删除 **最近使用**、隐藏 **本机项目**，且**当前工作区不再显示删除按钮**。
+- **`src/main.ts`**：后端在切换工作区后同步刷新前端标签、最近工作区和 picker / history 状态，避免前后端工作区状态漂移。
+
+**文档**
+
+- 更新 **`docs/guides/SEATALK_AGENT.md`**，补充工作区选择器的关闭 / 删除 / 隐藏行为说明。
+- 更新 **`README.md`**、**`docs/guides/CHROME_EXTENSION.md`**，同步版本号与本次发布摘要。
+
+### 测试项
+
+- `cd seatalk-agent && npx tsc -p tsconfig.json --noEmit`
+- `npm run verify:hooks`
+- SeaTalk CDP 实测：列表点击与 **`浏览...`** 两条工作区切换路径均会自动关闭选择器并同步工作区标签
+
+---
+
 ## v3.6.8 -- 2026-04-22 -- `docs`: 同步 Chrome 扩展指南到 3.6.8
 
 **提交者**: Cursor Agent / 仓库维护者  
