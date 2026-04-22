@@ -2,7 +2,7 @@
 
 > **Shopee 大数据开发助手** — Chrome 扩展 + MCP 工具套件 + SeaTalk AI Agent
 
-[![Version](https://img.shields.io/badge/version-3.6.7-blue.svg)](https://github.com/SperanzaTY/spx-helper/releases)
+[![Version](https://img.shields.io/badge/version-3.6.8-blue.svg)](https://github.com/SperanzaTY/spx-helper/releases)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 SPX Helper 是一套为 Shopee 大数据开发工程师打造的效率工具集，包含四个核心模块：
@@ -137,7 +137,7 @@ GitHub（备份）  ：https://github.com/SperanzaTY/spx-helper
 
 ## 更新日志
 
-- **v3.6.7**：**scheduler-query** 整理 Mart / SLA 批量运维 DataSuite 接口：**`datasuite_bulk_api`** 路径速查；新增 MCP **`search_scheduler_tasks_fuzzy`**、**`list_task_instances_by_update_time`**、**`get_sla_full_configuration`**、**`query_marker_task_bindings`**、**`list_sla_bindings_for_task_instance`**；`_request` / `_sla_request` 支持 **`x-datasuites-project-code`**；**`get_task_instances`** / **`search_tasks`** 默认带项目头。发版说明见 [docs/RELEASE_LOG.md](docs/RELEASE_LOG.md)。
+- **v3.6.8**：**presto-query** 新增可配置超时：`query_presto` 支持 **`max_wait_seconds`** 与 **`request_timeout_seconds`**，默认总等待提升到 **600s**、单次 HTTP 读超时提升到 **60s**；`PrestoQueryTool` 同步支持环境变量 **`PRESTO_MAX_WAIT_SECONDS`**、**`PRESTO_HTTP_READ_TIMEOUT_SECONDS`**、**`PRESTO_HTTP_CONNECT_TIMEOUT_SECONDS`**。发版说明见 [docs/RELEASE_LOG.md](docs/RELEASE_LOG.md)。
 - **v3.6.1**：**seatalk-agent** 默认后端优先级改为 **Codex first**：本机可用 `codex` CLI 时默认走 **`codex-app-server`**，仅在未安装 `codex` 时才回退到 `cursor-acp`。发版说明见 [docs/RELEASE_LOG.md](docs/RELEASE_LOG.md)。
 - **v3.6.0**：**seatalk-agent** 新增 **`codex-app-server`** 后端，支持 Codex CLI `app-server` 接入；SeaTalk UI 按 backend 动态切换品牌；`Plan` 模式改为真实计划卡片流；新增并持久化 Codex 运行时设置（默认 **`Approval=never`**、**`Sandbox=danger-full-access`**、**`Web Search=live`**），前端 `Approval` 仅保留稳定的 **`never / untrusted`**。发版说明见 [docs/RELEASE_LOG.md](docs/RELEASE_LOG.md)。
 - **v3.5.21**：**scheduler-query** Mart SLA 短链闭环：**`slaInstance/get`** + **`fetch_mart_sla_instances_from_shortlink`**；**`triage_mart_sla_alert`** 默认 **`sla_shortlink_fetch_instances`** 在无正文编码时补全 **taskInstanceCode**；脚本 **`scripts/probe-datasuite-sla-cdp.js`** 辅助 CDP/Network 对照。发版说明见 [docs/RELEASE_LOG.md](docs/RELEASE_LOG.md)。
