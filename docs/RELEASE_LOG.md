@@ -6,6 +6,23 @@
 
 ---
 
+## v3.6.9 -- 2026-04-22 -- `chore`: release 通知草稿改回仅本地文件
+
+**提交者**: Codex / 仓库维护者  
+**Commit Type**: chore（release hygiene）；版本保持 **v3.6.9** 不变
+
+### 变更说明
+
+**发布流程**
+
+- 将 **`.release-notification`** 从 Git 跟踪中移除，恢复为仅存在于工作区、由 release push 脚本读取后发送的一次性通知草稿。
+- 保持 **`.gitignore`** 与 pre-push hook 的约束一致，避免后续 release 再把通知文件误提交进仓库历史。
+
+### 测试项
+
+- `npm run verify:hooks`
+- `git ls-files .release-notification` 返回空，工作区中的 `.release-notification` 仍可供 `scripts/notify-release.sh` 读取
+
 ## v3.6.9 -- 2026-04-22 -- `fix`: 修复 SeaTalk Agent 工作区切换收口与自恢复
 
 **提交者**: Codex / 仓库维护者  
