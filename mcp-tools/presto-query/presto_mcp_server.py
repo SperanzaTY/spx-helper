@@ -34,6 +34,13 @@ PERSONAL_TOKEN = os.environ.get('PRESTO_PERSONAL_TOKEN', '')
 DEFAULT_USERNAME = os.environ.get('PRESTO_USERNAME', '')
 DEFAULT_QUEUE = os.environ.get('PRESTO_QUEUE', 'szsc-adhoc')
 DEFAULT_IDC = os.environ.get('PRESTO_IDC') or os.environ.get('PRESTO_REGION', 'sg')
+DEFAULT_HTTP_CONNECT_TIMEOUT_SECONDS = float(
+    os.environ.get('PRESTO_HTTP_CONNECT_TIMEOUT_SECONDS', '10')
+)
+DEFAULT_HTTP_READ_TIMEOUT_SECONDS = float(
+    os.environ.get('PRESTO_HTTP_READ_TIMEOUT_SECONDS', '60')
+)
+DEFAULT_MAX_WAIT_SECONDS = int(os.environ.get('PRESTO_MAX_WAIT_SECONDS', '600'))
 
 if not PERSONAL_TOKEN:
     print("错误: 未设置 PRESTO_PERSONAL_TOKEN 环境变量", file=sys.stderr)
@@ -93,14 +100,19 @@ def _format_sql_block(sql: str) -> str:
     return f"执行 SQL:\n```sql\n{sql.strip()}\n```"
 
 
-def _http_post(url: str, headers: dict, payload: dict, timeout: int = 10) -> dict:
+def _build_http_timeout(read_timeout_seconds: float) -> Tuple[float, float]:
+    """requests 超时使用 (connect_timeout, read_timeout) 元组。"""
+    return (DEFAULT_HTTP_CONNECT_TIMEOUT_SECONDS, read_timeout_seconds)
+
+
+def _http_post(url: str, headers: dict, payload: dict, timeout: Tuple[float, float]) -> dict:
     """同步 POST，在线程池中执行"""
     resp = requests.post(url, headers=headers, json=payload, timeout=timeout)
     resp.raise_for_status()
     return resp.json()
 
 
-def _http_get(url: str, headers: dict, timeout: int = 10) -> dict:
+def _http_get(url: str, headers: dict, timeout: Tuple[float, float]) -> dict:
     """同步 GET，在线程池中执行"""
     resp = requests.get(url, headers=headers, timeout=timeout)
     resp.raise_for_status()
@@ -199,6 +211,8 @@ async def query_presto(
     max_rows: int = 100,
     cell_max_len: int = 0,
     write_full_result_to: Optional[str] = None,
+    max_wait_seconds: int = DEFAULT_MAX_WAIT_SECONDS,
+    request_timeout_seconds: int = int(DEFAULT_HTTP_READ_TIMEOUT_SECONDS),
 ) -> Any:
     """查询 Presto 数据库，执行只读 SELECT 查询。
 
@@ -215,7 +229,8 @@ async def query_presto(
       建议改用 SELECT * FROM table LIMIT 1 查看字段，或用 information_schema 查元数据。
     - DDL 语句（CREATE / ALTER / DROP）不被支持
     - 每次最多返回 2000 行（可通过 max_rows 参数限制）
-    - 查询超时时间为 5 分钟
+    - 默认查询等待超时时间为 10 分钟，可通过 `max_wait_seconds` 调整
+    - 单次 HTTP 请求默认读超时为 60 秒，可通过 `request_timeout_seconds` 调整
     - 环境变量 PRESTO_MCP_OUTPUT_DIR：write_full_result_to 为相对路径时的基准目录（默认进程 cwd）
 
     Args:
@@ -229,6 +244,8 @@ async def query_presto(
         write_full_result_to: 若提供相对/绝对路径，将 **完整** 查询结果写入 UTF-8 JSON
            （columns + rows + jobId），便于后续脚本合并或写 Sheet；相对路径基于 PRESTO_MCP_OUTPUT_DIR 或 cwd。
             写入后回复中附带 **短预览表**（前若干行、单元格最多 96 字符），完整数据以文件为准。
+        max_wait_seconds: 查询轮询的总等待时间（秒），默认 600，最大不做额外限制。
+        request_timeout_seconds: 单次 HTTP 请求的读超时（秒），默认 60。
     """
     sql = sql.strip()
     sql_block = _format_sql_block(sql)
@@ -264,13 +281,19 @@ async def query_presto(
     }
     max_rows = min(max_rows, 2000)
     effective_cell = cell_max_len if cell_max_len >= 0 else 0
+    if max_wait_seconds <= 0:
+        return "❌ 参数错误: max_wait_seconds 必须大于 0"
+    if request_timeout_seconds <= 0:
+        return "❌ 参数错误: request_timeout_seconds 必须大于 0"
+    http_timeout = _build_http_timeout(float(request_timeout_seconds))
 
     try:
         data = await asyncio.to_thread(
             _http_post,
             f"{BASE_URL}/query/presto",
             headers,
-            {'sql': sql, 'prestoQueue': queue, 'idcRegion': normalized_idc, 'priority': '3'}
+            {'sql': sql, 'prestoQueue': queue, 'idcRegion': normalized_idc, 'priority': '3'},
+            http_timeout,
         )
         job_id = data.get('jobId')
         if not job_id:
@@ -289,9 +312,9 @@ async def query_presto(
 
         while True:
             elapsed = int(time.time() - start_time)
-            if elapsed > 300:
+            if elapsed > max_wait_seconds:
                 out = (
-                    f"❌ 查询超时 (>300秒)\n\nJob ID: {job_id}\nSQL 类型: {sql_stmt_type or sql_category}\n"
+                    f"❌ 查询超时 (>{max_wait_seconds}秒)\n\nJob ID: {job_id}\nSQL 类型: {sql_stmt_type or sql_category}\n"
                     f"{sql_block}"
                 )
                 if sql_category == "METADATA":
@@ -299,7 +322,7 @@ async def query_presto(
                 return out
 
             status_data = await asyncio.to_thread(
-                _http_get, f"{BASE_URL}/status/{job_id}", headers
+                _http_get, f"{BASE_URL}/status/{job_id}", headers, http_timeout
             )
             query_status = status_data.get('status')
 
@@ -333,7 +356,7 @@ async def query_presto(
                 return f"❌ 未知状态: {query_status}\nJob ID: {job_id}\n{sql_block}"
 
         result_data = await asyncio.to_thread(
-            _http_get, f"{BASE_URL}/result/{job_id}", headers
+            _http_get, f"{BASE_URL}/result/{job_id}", headers, http_timeout
         )
         if 'resultSchema' not in result_data:
             return f"❌ 获取结果失败: {result_data.get('errorMsg', 'Unknown error')}\nJob ID: {job_id}\n{sql_block}"

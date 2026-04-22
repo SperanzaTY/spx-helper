@@ -10,6 +10,15 @@ import os
 from typing import Dict, List, Any, Optional, Tuple
 
 
+DEFAULT_HTTP_CONNECT_TIMEOUT_SECONDS = float(
+    os.environ.get('PRESTO_HTTP_CONNECT_TIMEOUT_SECONDS', '10')
+)
+DEFAULT_HTTP_READ_TIMEOUT_SECONDS = float(
+    os.environ.get('PRESTO_HTTP_READ_TIMEOUT_SECONDS', '60')
+)
+DEFAULT_MAX_WAIT_SECONDS = int(os.environ.get('PRESTO_MAX_WAIT_SECONDS', '600'))
+
+
 class PrestoQueryTool:
     """Presto查询工具 - 适用于平台Agent集成"""
     
@@ -34,12 +43,17 @@ class PrestoQueryTool:
             'X-End-User': self.username,
             'Content-Type': 'application/json'
         }
+
+    def _build_timeout(self, read_timeout_seconds: float) -> Tuple[float, float]:
+        """requests 超时使用 (connect_timeout, read_timeout) 元组。"""
+        return (DEFAULT_HTTP_CONNECT_TIMEOUT_SECONDS, read_timeout_seconds)
     
     def execute(self, sql: str, 
                 queue: str = 'szsc-adhoc',
                 region: str = 'SG',
                 priority: str = '3',
-                max_wait_seconds: int = 300,
+                max_wait_seconds: int = DEFAULT_MAX_WAIT_SECONDS,
+                request_timeout_seconds: int = int(DEFAULT_HTTP_READ_TIMEOUT_SECONDS),
                 max_rows: Optional[int] = None) -> Dict[str, Any]:
         """
         执行Presto SQL查询（同步方法）
@@ -50,6 +64,7 @@ class PrestoQueryTool:
             region: IDC集群 (SG | US)
             priority: 优先级 1-5
             max_wait_seconds: 最大等待时间（秒）
+            request_timeout_seconds: 单次 HTTP 请求的读超时（秒）
             max_rows: 限制返回行数（None表示全部）
             
         Returns:
@@ -64,16 +79,21 @@ class PrestoQueryTool:
             }
         """
         start_time = time.time()
+        if max_wait_seconds <= 0:
+            raise ValueError("max_wait_seconds 必须大于 0")
+        if request_timeout_seconds <= 0:
+            raise ValueError("request_timeout_seconds 必须大于 0")
+        request_timeout = self._build_timeout(float(request_timeout_seconds))
         
         try:
             # 1. 提交查询
-            job_id = self._submit_query(sql, queue, region, priority)
+            job_id = self._submit_query(sql, queue, region, priority, request_timeout)
             
             # 2. 等待完成
-            self._wait_for_completion(job_id, max_wait_seconds, start_time)
+            self._wait_for_completion(job_id, max_wait_seconds, start_time, request_timeout)
             
             # 3. 获取结果
-            result = self._fetch_result(job_id)
+            result = self._fetch_result(job_id, request_timeout)
             
             # 4. 格式化返回
             columns = result['columns']
@@ -108,7 +128,14 @@ class PrestoQueryTool:
                 'error': str(e)
             }
     
-    def _submit_query(self, sql: str, queue: str, region: str, priority: str) -> str:
+    def _submit_query(
+        self,
+        sql: str,
+        queue: str,
+        region: str,
+        priority: str,
+        request_timeout: Tuple[float, float],
+    ) -> str:
         """提交查询并返回job_id"""
         url = f"{self.base_url}/query/presto"
         payload = {
@@ -118,7 +145,7 @@ class PrestoQueryTool:
             'priority': priority
         }
         
-        response = requests.post(url, headers=self._get_headers(), json=payload, timeout=30)
+        response = requests.post(url, headers=self._get_headers(), json=payload, timeout=request_timeout)
         response.raise_for_status()
         
         data = response.json()
@@ -130,7 +157,13 @@ class PrestoQueryTool:
         
         return job_id
     
-    def _wait_for_completion(self, job_id: str, max_wait_seconds: int, start_time: float):
+    def _wait_for_completion(
+        self,
+        job_id: str,
+        max_wait_seconds: int,
+        start_time: float,
+        request_timeout: Tuple[float, float],
+    ):
         """等待查询完成"""
         status_url = f"{self.base_url}/status/{job_id}"
         
@@ -139,7 +172,7 @@ class PrestoQueryTool:
             if elapsed > max_wait_seconds:
                 raise Exception(f"查询超时 (>{max_wait_seconds}秒)")
             
-            response = requests.get(status_url, headers=self._get_headers(), timeout=10)
+            response = requests.get(status_url, headers=self._get_headers(), timeout=request_timeout)
             response.raise_for_status()
             
             status_data = response.json()
@@ -159,11 +192,11 @@ class PrestoQueryTool:
             else:
                 raise Exception(f"未知状态: {status}")
     
-    def _fetch_result(self, job_id: str) -> Dict[str, Any]:
+    def _fetch_result(self, job_id: str, request_timeout: Tuple[float, float]) -> Dict[str, Any]:
         """获取查询结果"""
         url = f"{self.base_url}/result/{job_id}"
         
-        response = requests.get(url, headers=self._get_headers(), timeout=30)
+        response = requests.get(url, headers=self._get_headers(), timeout=request_timeout)
         response.raise_for_status()
         
         data = response.json()

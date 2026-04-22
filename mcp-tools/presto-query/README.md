@@ -128,8 +128,13 @@ python3 query_presto.py "你的SQL查询"
 |-----------------|------|
 | `cell_max_len` | **默认 0** = 表格展示**不截断**；设为 `50`–`120` 可缩短 MCP 返回体积。 |
 | `idc` | 支持传 `sg` 或 `us`，用于切换查询的 Presto 集群；默认 `sg`。 |
+| `max_wait_seconds` | 查询轮询的总等待时间；默认 `600` 秒。 |
+| `request_timeout_seconds` | 单次 HTTP 请求的读超时；默认 `60` 秒。适合大结果 / 网关慢返回场景。 |
 | `write_full_result_to` | 传入相对或绝对路径（如 `docs/investigations/presto_lineage.json`），将 **完整** 结果写入 UTF-8 JSON（`columns` + `rows` + `jobId`），对话中仅保留短预览表。后续用脚本读文件合并或写 Google Sheet。 |
 | `PRESTO_MCP_OUTPUT_DIR` | 可选；`write_full_result_to` 为**相对路径**时的基准目录（未设则用 MCP 进程当前工作目录，一般为 Cursor 工作区根）。 |
+| `PRESTO_MAX_WAIT_SECONDS` | 可选环境变量；调整 MCP 默认总等待时间。 |
+| `PRESTO_HTTP_READ_TIMEOUT_SECONDS` | 可选环境变量；调整 MCP 默认单次请求读超时。 |
+| `PRESTO_HTTP_CONNECT_TIMEOUT_SECONDS` | 可选环境变量；调整 MCP 默认连接超时。 |
 
 MCP 返回会附带 **实际执行的 SQL**，便于在对话中核对本次查询语句。
 
