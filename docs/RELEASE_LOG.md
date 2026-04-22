@@ -6,6 +6,28 @@
 
 ---
 
+## v3.6.7 -- 2026-04-22 -- `docs`: 同步 presto-query 超时能力说明
+
+**提交者**: Cursor Agent / 仓库维护者  
+**Commit Type**: docs（release notes + MCP guide）；版本保持 **v3.6.7** 不变
+
+### 变更说明
+
+**presto-query（MCP）**
+
+- 补充 **`query_presto`** 的新超时能力说明：支持 **`max_wait_seconds`**（总轮询等待）与 **`request_timeout_seconds`**（单次 HTTP 读超时）。
+- 记录新的默认行为：MCP 默认总等待时间为 **600 秒**，单次请求读超时为 **60 秒**，减少大查询 / 慢网关场景下的误报超时。
+- 补充可选环境变量：**`PRESTO_MAX_WAIT_SECONDS`**、**`PRESTO_HTTP_READ_TIMEOUT_SECONDS`**、**`PRESTO_HTTP_CONNECT_TIMEOUT_SECONDS`**。
+
+**文档**
+
+- 更新 **`docs/guides/MCP_TOOLS.md`**，同步 `presto-query` 的超时参数、默认值与环境变量配置入口。
+- 更新 **`mcp-tools/presto-query/README.md`**，同步 `query_presto` 与 `PrestoQueryTool` 的超时配置说明。
+
+### 测试项
+
+- `python3 -m py_compile mcp-tools/presto-query/presto_mcp_server.py mcp-tools/presto-query/presto_query_tool.py`
+
 ## v3.6.7 -- 2026-04-21 -- `feat`: scheduler-query DataSuite 批量接口（MCP）
 
 **提交者**: Cursor Agent / 仓库维护者  
