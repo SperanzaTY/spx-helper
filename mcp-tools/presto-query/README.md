@@ -71,6 +71,9 @@ python3 query_presto.py "SELECT * FROM table" --output result.csv
 
 # 查看帮助
 python3 query_presto.py --help
+
+# 也可直接执行（release 分支保留可执行权限）
+./query_presto.py "SELECT 1"
 ```
 
 ### 4. 代码集成示例
@@ -230,6 +233,10 @@ pip3 install mcp
 - 若你本地仍用旧版 `presto_mcp_server.py`，请 `git pull` 后重启 Cursor。
 
 ## 📝 更新日志
+
+### v1.3 (2026-04-23)
+
+- 命令行脚本 `query_presto.py` 保留可执行权限，支持拉取 release 后直接用 `./query_presto.py "SELECT 1"` 调用。
 
 ### v1.2 (2026-04-14)
 

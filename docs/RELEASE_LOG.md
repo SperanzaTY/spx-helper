@@ -6,6 +6,39 @@
 
 ---
 
+## v3.6.10 -- 2026-04-23 -- `fix`: 修复 Presto 直接脚本调用与 SeaTalk 历史恢复
+
+**提交者**: Codex / 仓库维护者  
+**Commit Type**: fix（PATCH **3.6.9 → 3.6.10**）
+
+### 变更说明
+
+**presto-query**
+
+- **`mcp-tools/presto-query/query_presto.py`** 保留可执行权限，支持拉取 release 后直接用 `./mcp-tools/presto-query/query_presto.py "SELECT 1"` 调用。
+- 已验证 `python3 mcp-tools/presto-query/query_presto.py "SELECT 1"` 与直接执行脚本两种方式均可完成查询。
+
+**SeaTalk Agent**
+
+- **`src/inject/sidebar-app.js`**：历史对话恢复会保留工具调用卡片、计划卡片和消息上下文提示，继续排查时可看到工具输入输出摘要。
+- 长 SQL / JSON / URL / Markdown 表格增加换行与宽度收口，减少侧栏被内容横向撑开的情况。
+- 切换历史对话与清除上下文时同步刷新上下文提示条，避免显示旧会话残留上下文。
+
+**发布流程**
+
+- **`.githooks/pre-push`**：校验 `.release-notification` 不被 Git 跟踪，并要求通知草稿正文包含当前版本号，避免误发旧 release 文案。
+
+**文档**
+
+- 更新 **`README.md`**、**`docs/guides/CHROME_EXTENSION.md`**、**`docs/guides/MCP_TOOLS.md`**、**`docs/guides/SEATALK_AGENT.md`** 与 **`mcp-tools/presto-query/README.md`**，同步版本号和本次行为说明。
+
+### 测试项
+
+- `python3 mcp-tools/presto-query/query_presto.py "SELECT 1" --timeout 30 --max-rows 5`
+- `./mcp-tools/presto-query/query_presto.py "SELECT 1" --timeout 30 --max-rows 5`
+- `cd seatalk-agent && npx tsc -p tsconfig.json --noEmit`
+- `npm run verify:hooks`
+
 ## v3.6.9 -- 2026-04-22 -- `chore`: release 通知草稿改回仅本地文件
 
 **提交者**: Codex / 仓库维护者  

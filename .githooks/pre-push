@@ -287,6 +287,15 @@ fi
 # 4. 检查发版通知文件是否存在
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 NOTIFICATION_FILE="$REPO_ROOT/.release-notification"
+if git ls-files --error-unmatch .release-notification >/dev/null 2>&1; then
+  echo "❌ .release-notification 不应被 Git 跟踪！"
+  echo "   该文件是一次性 release 通知草稿，只应保留在工作区并受 .gitignore 保护。"
+  echo "   请先将它从版本控制中移除，例如："
+  echo "     git rm --cached .release-notification"
+  echo ""
+  HAS_ERRORS=1
+fi
+
 if [ ! -f "$NOTIFICATION_FILE" ] || [ ! -s "$NOTIFICATION_FILE" ]; then
   echo "❌ 缺少发版通知文件 .release-notification！"
   echo "   推送成功后会自动发送 SeaTalk 群通知，需要先准备通知内容。"
@@ -298,7 +307,15 @@ if [ ! -f "$NOTIFICATION_FILE" ] || [ ! -s "$NOTIFICATION_FILE" ]; then
   echo ""
   HAS_ERRORS=1
 else
-  echo "✅ 发版通知文件已准备"
+  if ! grep -q "v${VERSION}" "$NOTIFICATION_FILE"; then
+    echo "❌ 发版通知内容未包含当前版本号 v${VERSION}！"
+    echo "   当前文件可能是旧 release 残留，继续推送会把旧文案发到 SeaTalk。"
+    echo "   请更新 .release-notification，确保正文明确提到本次版本号。"
+    echo ""
+    HAS_ERRORS=1
+  else
+    echo "✅ 发版通知文件已准备"
+  fi
 fi
 
 # 5. 提醒：SeaTalk Agent 修改需要重启

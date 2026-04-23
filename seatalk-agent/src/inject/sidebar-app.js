@@ -205,6 +205,68 @@
   // ── Persistence ──
   function loadConvs() { try { var r = localStorage.getItem(STORE_KEY); return r ? JSON.parse(r) : []; } catch (_) { return []; } }
   function saveConvs(c) { try { localStorage.setItem(STORE_KEY, JSON.stringify(c.slice(-50))); } catch (_) {} }
+  function truncateSavedText(text, limit) {
+    if (!text || typeof text !== 'string') return '';
+    if (!limit || text.length <= limit) return text;
+    return text.substring(0, limit) + '\n...(内容过长，已截断)';
+  }
+  function cloneContextData(data) {
+    if (!data || typeof data !== 'object') return null;
+    var out = {
+      label: data.label || '',
+      sessionName: data.sessionName || '',
+      isThread: !!data.isThread
+    };
+    if (data.focusMessage) {
+      out.focusMessage = {
+        sender: data.focusMessage.sender || '',
+        text: truncateSavedText(data.focusMessage.text || '', 1000)
+      };
+    }
+    if (Array.isArray(data.messages) && data.messages.length > 0) {
+      out.messages = data.messages.slice(0, 30).map(function (m) {
+        return {
+          sender: m && m.sender ? m.sender : '',
+          text: truncateSavedText(m && m.text ? m.text : '', 1000)
+        };
+      });
+    }
+    return out;
+  }
+  function cloneToolCalls(toolCalls) {
+    if (!Array.isArray(toolCalls) || toolCalls.length === 0) return [];
+    return toolCalls.slice(0, 20).map(function (tc, idx) {
+      var tool = tc && tc.tool && typeof tc.tool === 'object'
+        ? { action_description: truncateSavedText(tc.tool.action_description || '', 500) }
+        : undefined;
+      return {
+        id: (tc && tc.id) || ('saved-tc-' + idx),
+        name: truncateSavedText((tc && tc.name) || 'Tool', 500),
+        status: (tc && tc.status) || 'completed',
+        arguments: truncateSavedText((tc && tc.arguments) || '', 4000),
+        result: truncateSavedText((tc && tc.result) || '', 12000),
+        tool: tool
+      };
+    });
+  }
+  function updateContextBar() {
+    if (!ctxBar || !ctxLabel) return;
+    if (!contextData) {
+      ctxBar.classList.remove('show');
+      ctxLabel.textContent = '';
+      return;
+    }
+    var count = contextData.messages ? contextData.messages.length : 1;
+    var preview = '';
+    if (contextData.messages && contextData.messages.length > 0) {
+      preview = (contextData.messages[0].text || '').substring(0, 60);
+      if (preview.length >= 60) preview += '…';
+    }
+    var label = (contextData.label || '消息') + ' · ' + count + '条';
+    if (preview) label += ' — ' + preview;
+    ctxLabel.textContent = label;
+    ctxBar.classList.add('show');
+  }
   function saveCurrentConv() {
     if (messages.length === 0) return;
     var first = messages.find(function (m) { return m.role === 'user'; });
@@ -215,11 +277,14 @@
         var o = { role: m.role, text: m.text };
         if (m.thinking) o.thinking = m.thinking.length > 2000 ? m.thinking.substring(0, 2000) + '\n...(思考内容过长，已截断)' : m.thinking;
         if (m.toolSummary) o.toolSummary = m.toolSummary;
+        if (m.toolCalls && m.toolCalls.length > 0) o.toolCalls = cloneToolCalls(m.toolCalls);
         if (m.plan) o.plan = m.plan;
+        if (m.context) o.context = cloneContextData(m.context);
         return o;
       }),
       summary: first ? first.text.substring(0, 80) : '(empty)',
-      workspace: cachedWorkspace || ''
+      workspace: cachedWorkspace || '',
+      draftContext: cloneContextData(contextData)
     };
     if (currentIdx >= 0) { conversations[currentIdx] = conv; } else { conversations.push(conv); currentIdx = conversations.length - 1; }
     saveConvs(conversations);
@@ -296,55 +361,55 @@
     '#cursor-panel .hp-panel-header { background:var(--cp-bg); border-bottom:none; padding:6px 12px 4px; cursor:grab; }',
     '#cursor-panel .hp-panel-header:active { cursor:grabbing; }',
     '#cursor-panel .hp-panel-title { font-size:11px; font-weight:400; color:var(--cp-text2); text-transform:uppercase; letter-spacing:0.5px; }',
-    '#cursor-panel .hp-panel-body { padding:0; background:var(--cp-bg); }',
+    '#cursor-panel .hp-panel-body { padding:0; background:var(--cp-bg); overflow-x:hidden; }',
     '#cursor-panel .hp-panel-close { color:var(--cp-text-dim); }',
     '#cursor-panel .hp-panel-close:hover { color:var(--cp-text); }',
 
     // Messages container
-    '.cursor-msgs { flex:1; overflow-y:auto; padding:0; display:flex; flex-direction:column; }',
+    '.cursor-msgs { flex:1; min-width:0; overflow-y:auto; overflow-x:hidden; padding:0; display:flex; flex-direction:column; }',
     '.cursor-msgs::-webkit-scrollbar { width:6px; }',
     '.cursor-msgs::-webkit-scrollbar-track { background:transparent; }',
     '.cursor-msgs::-webkit-scrollbar-thumb { background:var(--cp-scroll-thumb); border-radius:3px; }',
     '.cursor-msgs::-webkit-scrollbar-thumb:hover { background:var(--cp-scroll-thumb-hover); }',
 
     // User message
-    '.cursor-msg-user { padding:12px 16px; background:var(--cp-bg3); border-top:1px solid var(--cp-border); border-bottom:1px solid var(--cp-border); color:var(--cp-text); font-size:13px; line-height:1.5; white-space:pre-wrap; word-break:break-word; cursor:text; user-select:text; }',
+    '.cursor-msg-user { padding:12px 16px; min-width:0; max-width:100%; background:var(--cp-bg3); border-top:1px solid var(--cp-border); border-bottom:1px solid var(--cp-border); color:var(--cp-text); font-size:13px; line-height:1.5; white-space:pre-wrap; word-break:break-word; overflow-wrap:anywhere; cursor:text; user-select:text; box-sizing:border-box; }',
     '.cursor-msg-user-label { font-size:11px; font-weight:600; color:var(--cp-accent); margin-bottom:4px; }',
 
     // Agent turn
-    '.cursor-agent-turn { padding:12px 16px; border-bottom:1px solid var(--cp-border); }',
-    '.cursor-plan-card { margin:0 0 10px; padding:10px 12px; border-radius:8px; background:var(--cp-bg3); border:1px solid var(--cp-border2); }',
+    '.cursor-agent-turn { padding:12px 16px; min-width:0; max-width:100%; border-bottom:1px solid var(--cp-border); box-sizing:border-box; }',
+    '.cursor-plan-card { margin:0 0 10px; padding:10px 12px; min-width:0; max-width:100%; border-radius:8px; background:var(--cp-bg3); border:1px solid var(--cp-border2); box-sizing:border-box; }',
     '.cursor-plan-title { font-size:11px; font-weight:600; color:var(--cp-text2); margin-bottom:6px; text-transform:uppercase; letter-spacing:0.4px; }',
     '.cursor-plan-expl { font-size:12px; line-height:1.5; color:var(--cp-text-dim); margin-bottom:8px; white-space:pre-wrap; }',
     '.cursor-plan-list { margin:0; padding:0; list-style:none; display:flex; flex-direction:column; gap:6px; }',
-    '.cursor-plan-item { display:flex; gap:8px; align-items:flex-start; font-size:12px; line-height:1.45; color:var(--cp-text); }',
+    '.cursor-plan-item { display:flex; gap:8px; align-items:flex-start; min-width:0; font-size:12px; line-height:1.45; color:var(--cp-text); }',
     '.cursor-plan-badge { display:inline-flex; align-items:center; justify-content:center; min-width:18px; height:18px; padding:0 6px; border-radius:999px; font-size:10px; font-weight:700; text-transform:uppercase; background:var(--cp-bg4); border:1px solid var(--cp-border3); color:var(--cp-text-dim); }',
     '.cursor-plan-item.completed .cursor-plan-badge { background:rgba(78,201,176,0.14); border-color:rgba(78,201,176,0.3); color:var(--cp-ok); }',
     '.cursor-plan-item.in_progress .cursor-plan-badge { background:rgba(86,156,214,0.14); border-color:rgba(86,156,214,0.3); color:var(--cp-accent); }',
     '.cursor-plan-item.pending .cursor-plan-badge { background:rgba(220,165,97,0.12); border-color:rgba(220,165,97,0.28); color:var(--cp-warn); }',
 
     // Streaming result — markdown rendering
-    '.ca-result { font-size:13px; line-height:1.6; color:var(--cp-text); word-break:break-word; cursor:text; user-select:text; }',
+    '.ca-result { min-width:0; max-width:100%; font-size:13px; line-height:1.6; color:var(--cp-text); word-break:break-word; overflow-wrap:anywhere; cursor:text; user-select:text; }',
     '.ca-result.has-tools { margin-top:10px; padding-top:10px; border-top:1px solid var(--cp-accent); border-top-style:dashed; }',
     '.ca-result p { margin:0 0 8px; } .ca-result p:last-child { margin-bottom:0; }',
     '.ca-result h1,.ca-result h2,.ca-result h3,.ca-result h4 { margin:16px 0 8px; font-weight:600; color:var(--cp-heading); }',
     '.ca-result h1 { font-size:1.3em; } .ca-result h2 { font-size:1.15em; } .ca-result h3 { font-size:1.05em; }',
-    '.ca-result code { background:var(--cp-code-bg); padding:2px 6px; border-radius:3px; font-size:12px; color:var(--cp-code-color); font-family:\"Menlo\",\"Consolas\",\"Courier New\",monospace; }',
-    '.ca-result pre { background:var(--cp-pre-bg); border:1px solid var(--cp-border3); border-radius:6px; padding:12px; margin:8px 0; overflow-x:auto; font-size:12px; line-height:1.5; }',
+    '.ca-result code { background:var(--cp-code-bg); padding:2px 6px; border-radius:3px; font-size:12px; color:var(--cp-code-color); font-family:\"Menlo\",\"Consolas\",\"Courier New\",monospace; word-break:break-word; overflow-wrap:anywhere; }',
+    '.ca-result pre { max-width:100%; box-sizing:border-box; background:var(--cp-pre-bg); border:1px solid var(--cp-border3); border-radius:6px; padding:12px; margin:8px 0; overflow-x:auto; font-size:12px; line-height:1.5; }',
     '.ca-result pre code { background:none; padding:0; border-radius:0; font-size:12px; color:var(--cp-pre-code); }',
     '.ca-result ul,.ca-result ol { margin:6px 0; padding-left:24px; } .ca-result li { margin:4px 0; }',
     '.ca-result strong { color:var(--cp-strong); font-weight:600; }',
     '.ca-result em { color:var(--cp-text); }',
     '.ca-result blockquote { border-left:3px solid var(--cp-accent); margin:8px 0; padding:4px 16px; color:var(--cp-blockquote-color); background:var(--cp-blockquote-bg); }',
-    '.ca-result table { border-collapse:collapse; margin:8px 0; font-size:12px; width:100%; }',
-    '.ca-result th { text-align:left; padding:6px 10px; border:1px solid var(--cp-border3); background:var(--cp-bg3); color:var(--cp-text2); font-weight:600; }',
-    '.ca-result td { padding:6px 10px; border:1px solid var(--cp-border3); color:var(--cp-text); }',
+    '.ca-result table { border-collapse:collapse; margin:8px 0; font-size:12px; width:100%; table-layout:fixed; }',
+    '.ca-result th { text-align:left; padding:6px 10px; border:1px solid var(--cp-border3); background:var(--cp-bg3); color:var(--cp-text2); font-weight:600; word-break:break-word; overflow-wrap:anywhere; }',
+    '.ca-result td { padding:6px 10px; border:1px solid var(--cp-border3); color:var(--cp-text); word-break:break-word; overflow-wrap:anywhere; }',
     '.ca-result a { color:var(--cp-link); text-decoration:none; } .ca-result a:hover { text-decoration:underline; }',
     '.ca-result hr { border:none; border-top:1px solid var(--cp-border3); margin:16px 0; }',
     '.ca-result-frozen { opacity:0.7; padding-bottom:8px; margin-bottom:4px; border-bottom:1px dashed var(--cp-border3); }',
 
     // Thinking block
-    '.ca-thinking { padding:8px 12px; border-radius:4px; background:var(--cp-think-bg); border:1px solid var(--cp-think-border); font-size:12px; line-height:1.5; color:var(--cp-think-color); max-height:200px; overflow-y:auto; white-space:pre-wrap; word-break:break-word; cursor:text; user-select:text; transition:max-height .3s, padding .2s; }',
+    '.ca-thinking { padding:8px 12px; min-width:0; max-width:100%; border-radius:4px; background:var(--cp-think-bg); border:1px solid var(--cp-think-border); font-size:12px; line-height:1.5; color:var(--cp-think-color); max-height:200px; overflow-y:auto; overflow-x:hidden; white-space:pre-wrap; word-break:break-word; overflow-wrap:anywhere; cursor:text; user-select:text; transition:max-height .3s, padding .2s; box-sizing:border-box; }',
     '.ca-thinking-label { font-size:11px; color:var(--cp-text-dim); cursor:pointer; user-select:none; display:flex; align-items:center; gap:4px; margin-bottom:4px; }',
     '.ca-thinking-label:hover { color:var(--cp-text2); }',
     '.ca-thinking.collapsed { max-height:0; overflow:hidden; padding:0 12px; border-color:transparent; }',
@@ -353,8 +418,8 @@
     '.ca-tool-call-label { font-size:12px; color:var(--cp-tool-label); cursor:pointer; user-select:none; display:flex; align-items:center; gap:5px; padding:3px 0; line-height:1; }',
     '.ca-tool-call-label:hover { color:var(--cp-tool-label-hover); }',
     '.ca-tool-call-label svg { flex-shrink:0; vertical-align:middle; }',
-    '.ca-tool-call-body { max-height:0; overflow:hidden; transition:max-height .3s ease, padding .2s ease; padding:0; border:1px solid transparent; border-radius:6px; font-size:11px; line-height:1.4; color:var(--cp-text-dim); }',
-    '.ca-tool-call-body.open { max-height:600px; overflow-y:auto; padding:8px 10px; background:var(--cp-tool-bg); border-color:var(--cp-border3); margin-top:2px; }',
+    '.ca-tool-call-body { min-width:0; max-height:0; overflow:hidden; transition:max-height .3s ease, padding .2s ease; padding:0; border:1px solid transparent; border-radius:6px; font-size:11px; line-height:1.4; color:var(--cp-text-dim); }',
+    '.ca-tool-call-body.open { max-height:600px; overflow-y:auto; overflow-x:hidden; padding:8px 10px; background:var(--cp-tool-bg); border-color:var(--cp-border3); margin-top:2px; box-sizing:border-box; }',
     '.ca-tool-call-section { color:var(--cp-text-dim); margin-top:6px; padding-top:6px; border-top:1px solid var(--cp-tool-section-border); }',
     '.ca-tool-call-section:first-child { border-top:none; margin-top:2px; padding-top:0; }',
     '.ca-tool-call-section b { color:var(--cp-tool-section-b); font-size:11px; }',
@@ -753,9 +818,14 @@
         var turnContainer = document.createElement('div');
         turnContainer.className = 'cursor-agent-turn';
         if (m.plan) renderPlanCard(turnContainer, m.plan);
-        if (m.thinking) {
+        if (m.thinking || (m.toolCalls && m.toolCalls.length > 0)) {
           var view = sr.createView({ container: turnContainer, prefix: 'ca' });
-          view.processChunk({ type: 'thinking_done', thinking: m.thinking });
+          if (m.thinking) view.processChunk({ type: 'thinking_done', thinking: m.thinking });
+          if (m.toolCalls && m.toolCalls.length > 0) {
+            for (var ti = 0; ti < m.toolCalls.length; ti++) {
+              view.processChunk({ type: 'tool_call', toolCall: m.toolCalls[ti] });
+            }
+          }
           if (m.text) view.processChunk({ type: 'text', text: m.text });
           view.finalize();
         } else if (m.text) {
@@ -764,7 +834,7 @@
           resultDiv.innerHTML = sr.renderMarkdown(m.text);
           turnContainer.appendChild(resultDiv);
         }
-        if (m.toolSummary && m.toolSummary.length > 0) {
+        if ((!m.toolCalls || m.toolCalls.length === 0) && m.toolSummary && m.toolSummary.length > 0) {
           var toolDiv = document.createElement('div');
           toolDiv.style.cssText = 'font-size:11px;color:var(--cp-text-dim);padding:6px 8px;margin-bottom:4px;border-radius:6px;background:var(--cp-tool-bg);border:1px solid var(--cp-border3);';
           toolDiv.innerHTML = '<div style="font-size:10px;color:var(--cp-text-dim2);margin-bottom:2px">' + sr.svgIcon('check', 12) + ' 执行了 ' + m.toolSummary.length + ' 个工具</div>' + m.toolSummary.map(function(s){ return '<div>' + escapeHtml(s) + '</div>'; }).join('');
@@ -847,7 +917,12 @@
       toolSummaries.push(tcStatus + ' ' + tcName);
     }
     var savedMsg = { role: 'assistant', text: finalText, thinking: turnFullThinking || undefined };
+    var savedToolCalls = [];
+    for (var tcKey2 in turnToolCalls) {
+      if (turnToolCalls[tcKey2]) savedToolCalls.push(turnToolCalls[tcKey2]);
+    }
     if (toolSummaries.length > 0) savedMsg.toolSummary = toolSummaries;
+    if (savedToolCalls.length > 0) savedMsg.toolCalls = cloneToolCalls(savedToolCalls);
     if (turnPlan && (turnPlan.explanation || (turnPlan.steps && turnPlan.steps.length > 0))) savedMsg.plan = turnPlan;
     if (finalText || turnFullThinking || toolSummaries.length > 0 || savedMsg.plan) {
       messages.push(savedMsg);
@@ -1043,16 +1118,7 @@
   function setContextAndOpen(data) {
     if (!panelHandle) window.__agentToggle(true);
     contextData = data;
-    var count = data.messages ? data.messages.length : 1;
-    var preview = '';
-    if (data.messages && data.messages.length > 0) {
-      preview = (data.messages[0].text || '').substring(0, 60);
-      if (preview.length >= 60) preview += '…';
-    }
-    var label = (data.label || '消息') + ' · ' + count + '条';
-    if (preview) label += ' — ' + preview;
-    if (ctxLabel) ctxLabel.textContent = label;
-    if (ctxBar) ctxBar.classList.add('show');
+    updateContextBar();
     if (inputEl) inputEl.focus();
   }
 
@@ -3870,8 +3936,10 @@
         currentIdx = parseInt(item.dataset.i);
         var c = conversations[currentIdx];
         messages = c ? c.messages.slice() : [];
+        contextData = c && c.draftContext ? c.draftContext : null;
         turnView = null;
         renderAllMessages(messagesEl);
+        updateContextBar();
         histOverlay.classList.remove('show');
         // Switch workspace if the conversation was in a different one
         if (c && c.workspace && c.workspace !== cachedWorkspace) {
@@ -3904,7 +3972,7 @@
     ctxBar.className = 'cursor-ctx';
     ctxBar.innerHTML = '<svg class="cursor-ctx-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21c3-3 6.5-7 8-10a4 4 0 1 0-4-4"/><path d="M12.5 8c1.5 3 5 7 8 10"/></svg><span class="cursor-ctx-label"></span><span class="rm"><svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="3" x2="13" y2="13"/><line x1="13" y1="3" x2="3" y2="13"/></svg></span>';
     ctxLabel = ctxBar.querySelector('.cursor-ctx-label');
-    ctxBar.querySelector('.rm').addEventListener('click', function () { contextData = null; ctxBar.classList.remove('show'); });
+    ctxBar.querySelector('.rm').addEventListener('click', function () { contextData = null; updateContextBar(); });
     inputArea.insertBefore(ctxBar, inputArea.querySelector('.cursor-img-preview'));
 
     inputEl = inputArea.querySelector('.cursor-input');

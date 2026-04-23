@@ -2,7 +2,7 @@
 
 > **Shopee 大数据开发助手** — Chrome 扩展 + MCP 工具套件 + SeaTalk AI Agent
 
-[![Version](https://img.shields.io/badge/version-3.6.9-blue.svg)](https://github.com/SperanzaTY/spx-helper/releases)
+[![Version](https://img.shields.io/badge/version-3.6.10-blue.svg)](https://github.com/SperanzaTY/spx-helper/releases)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 SPX Helper 是一套为 Shopee 大数据开发工程师打造的效率工具集，包含四个核心模块：
@@ -137,6 +137,7 @@ GitHub（备份）  ：https://github.com/SperanzaTY/spx-helper
 
 ## 更新日志
 
+- **v3.6.10**：**seatalk-agent** 历史对话恢复会保留工具调用卡片与消息上下文，并增强长文本/表格换行避免侧栏横向溢出；**presto-query** 直接查询脚本补齐可执行权限，可用 `./mcp-tools/presto-query/query_presto.py "SELECT 1"` 直接调用；**pre-push** 增加 release 通知草稿未跟踪与版本号校验。发版说明见 [docs/RELEASE_LOG.md](docs/RELEASE_LOG.md)。
 - **v3.6.9**：**seatalk-agent** 修复工作区切换链路：异常退出后自动拉起，连接状态按真实后端可交互性显示；工作区选择器支持删除历史 / 隐藏本机项目，列表与“浏览...”切换成功后会自动关闭并回到对话页，当前工作区不再显示删除按钮。发版说明见 [docs/RELEASE_LOG.md](docs/RELEASE_LOG.md)。
 - **v3.6.8**：**presto-query** 新增可配置超时：`query_presto` 支持 **`max_wait_seconds`** 与 **`request_timeout_seconds`**，默认总等待提升到 **600s**、单次 HTTP 读超时提升到 **60s**；`PrestoQueryTool` 同步支持环境变量 **`PRESTO_MAX_WAIT_SECONDS`**、**`PRESTO_HTTP_READ_TIMEOUT_SECONDS`**、**`PRESTO_HTTP_CONNECT_TIMEOUT_SECONDS`**。发版说明见 [docs/RELEASE_LOG.md](docs/RELEASE_LOG.md)。
 - **v3.6.1**：**seatalk-agent** 默认后端优先级改为 **Codex first**：本机可用 `codex` CLI 时默认走 **`codex-app-server`**，仅在未安装 `codex` 时才回退到 `cursor-acp`。发版说明见 [docs/RELEASE_LOG.md](docs/RELEASE_LOG.md)。
