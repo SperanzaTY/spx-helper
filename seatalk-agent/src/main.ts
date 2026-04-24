@@ -7,6 +7,14 @@ import { connectViaInspector, findSeaTalkPid, type ICdpClient } from './cdp.js';
 import { Bridge } from './bridge.js';
 import { spawnAgent, killAgent, listModels, resolveModelId, loadMcpServers, type AgentProcess } from './acp.js';
 import type { AgentApprovalRequest, AgentRuntimeConfig } from './acp.js';
+import {
+  collectMcpConfigSnapshot,
+  collectMcpStatus,
+  runSafeMcpSmokeTests,
+  type McpSmokeResult,
+  type McpStartupSignal,
+  type McpStatusSnapshot,
+} from './mcp-status.js';
 import { CdpProxy } from './cdp-proxy.js';
 import { AlarmManager, type WatchMessage, type PendingAlarm } from './alarm-manager.js';
 
@@ -503,6 +511,10 @@ async function main() {
   const toolTitleCache = new Map<string, string>();
   let cachedWorkspaceList: Array<{ name: string; path: string }> = [];
   const pendingCodexApprovalRequests = new Map<string, AgentApprovalRequest>();
+  const mcpStartupSignals = new Map<string, McpStartupSignal>();
+  let cachedMcpStatus: McpStatusSnapshot | null = null;
+  let mcpStatusRunning = false;
+  let mcpSmokeRunning = false;
 
   async function syncWorkspaceUi(wsPath = currentWorkspace) {
     const wsName = path.basename(wsPath || '') || wsPath || 'No workspace';
@@ -733,6 +745,105 @@ async function main() {
 
   let currentModelId = '';
 
+  async function refreshMcpStatus(reason: string) {
+    if (mcpStatusRunning) {
+      bridge.sendToPanel({ type: 'mcp_status_progress', text: 'MCP status refresh already running' }).catch(() => {});
+      return;
+    }
+    mcpStatusRunning = true;
+    bridge.sendToPanel({ type: 'mcp_status_progress', text: `Refreshing MCP status (${reason})...` }).catch(() => {});
+    try {
+      cachedMcpStatus = collectMcpConfigSnapshot({
+        log: (msg) => log(`[mcp-status] ${msg}`),
+        startupSignals: mcpStartupSignals,
+      });
+      bridge.sendToPanel({ type: 'mcp_status_update', snapshot: cachedMcpStatus }).catch(() => {});
+      cachedMcpStatus = await collectMcpStatus({
+        log: (msg) => log(`[mcp-status] ${msg}`),
+        startupSignals: mcpStartupSignals,
+      });
+      bridge.sendToPanel({ type: 'mcp_status_update', snapshot: cachedMcpStatus }).catch(() => {});
+    } catch (e) {
+      bridge.sendToPanel({
+        type: 'mcp_status_update',
+        snapshot: null,
+        error: (e as Error).message,
+      }).catch(() => {});
+    } finally {
+      mcpStatusRunning = false;
+    }
+  }
+
+  function applySmokeResults(results: McpSmokeResult[]) {
+    if (!cachedMcpStatus) return;
+    const byName = new Map(results.map((result) => [result.serverName, result]));
+    cachedMcpStatus = {
+      ...cachedMcpStatus,
+      generatedAt: Date.now(),
+      servers: cachedMcpStatus.servers.map((server) => {
+        const result = byName.get(server.name);
+        if (!result) return server;
+        const nextStatus = result.status === 'passed'
+          ? 'Smoke OK'
+          : result.status === 'failed'
+            ? 'Needs Attention'
+            : server.status;
+        return {
+          ...server,
+          status: nextStatus,
+          smokeStatus: result.status,
+          error: result.status === 'failed' ? result.message : server.error,
+          lastChecked: Date.now(),
+        };
+      }),
+    };
+  }
+
+  async function runMcpSmoke(serverName?: string) {
+    if (mcpSmokeRunning) {
+      bridge.sendToPanel({ type: 'mcp_status_progress', text: 'MCP smoke already running' }).catch(() => {});
+      return;
+    }
+    mcpSmokeRunning = true;
+    bridge.sendToPanel({ type: 'mcp_status_progress', text: `Running MCP smoke${serverName ? ` for ${serverName}` : ''}...` }).catch(() => {});
+    try {
+      const results = await runSafeMcpSmokeTests({
+        serverName,
+        log: (msg) => log(`[mcp-smoke] ${msg}`),
+      });
+      applySmokeResults(results);
+      bridge.sendToPanel({ type: 'mcp_status_update', snapshot: cachedMcpStatus, smokeResults: results }).catch(() => {});
+    } catch (e) {
+      bridge.sendToPanel({ type: 'mcp_status_progress', text: `MCP smoke failed: ${(e as Error).message}` }).catch(() => {});
+    } finally {
+      mcpSmokeRunning = false;
+    }
+  }
+
+  async function reloadMcpSession() {
+    if (!agent) {
+      bridge.sendToPanel({ type: 'mcp_status_progress', text: 'Agent is not connected; cannot reload MCP session' }).catch(() => {});
+      return;
+    }
+    bridge.sendToPanel({ type: 'status', connected: false, text: '重载 MCP 会话中...' }).catch(() => {});
+    bridge.sendToPanel({ type: 'mcp_status_progress', text: 'Creating a new Agent session with current MCP config...' }).catch(() => {});
+    try {
+      await agent.connection.cancel({ sessionId: agent.sessionId }).catch(() => {});
+      const res = await agent.connection.newSession({ cwd: currentWorkspace, mcpServers: loadMcpServers(log) });
+      agent.sessionId = res.sessionId;
+      lastSessionId = res.sessionId;
+      saveSession(lastSessionId, currentWorkspace, codexRuntimeConfig);
+      sessionPromptCount = 0;
+      await agent.connection.setSessionMode({ sessionId: agent.sessionId, modeId: defaultMode }).catch(() => {});
+      bridge.sendToPanel({ type: 'status', connected: true, text: 'Connected' }).catch(() => {});
+      bridge.sendToPanel({ type: 'mode', mode: defaultMode }).catch(() => {});
+      await refreshMcpStatus('reload-session');
+    } catch (e) {
+      bridge.sendToPanel({ type: 'status', connected: false, text: 'MCP 会话重载失败' }).catch(() => {});
+      bridge.sendToPanel({ type: 'mcp_status_progress', text: `MCP reload failed: ${(e as Error).message}` }).catch(() => {});
+    }
+  }
+
   const acpCallbacks = {
     onTextChunk: (text: string) => {
       const filtered = handleTextChunkForSwitch(text);
@@ -764,6 +875,17 @@ async function main() {
     },
     onUsageUpdate: (info: import('./acp.js').UsageInfo) => {
       bridge.sendToPanel({ type: 'usage', contextSize: info.contextSize, contextUsed: info.contextUsed, costAmount: info.costAmount, costCurrency: info.costCurrency }).catch(() => {});
+    },
+    onMcpStartupStatus: (info: import('./acp.js').McpStartupStatusInfo) => {
+      mcpStartupSignals.set(info.name, {
+        name: info.name,
+        status: info.status,
+        message: info.message,
+        updatedAt: Date.now(),
+      });
+      if (cachedMcpStatus) {
+        refreshMcpStatus('startup-status').catch(() => {});
+      }
     },
     onApprovalRequest: (info: AgentApprovalRequest) => {
       pendingCodexApprovalRequests.set(info.requestId, info);
@@ -1917,6 +2039,18 @@ async function main() {
             }
           }
         })();
+      } else if (data.type === 'mcp_status_get') {
+        if (cachedMcpStatus) {
+          bridge.sendToPanel({ type: 'mcp_status_update', snapshot: cachedMcpStatus }).catch(() => {});
+        } else {
+          refreshMcpStatus('initial').catch((e) => log(`[mcp-status] initial failed: ${(e as Error).message}`));
+        }
+      } else if (data.type === 'mcp_status_refresh') {
+        refreshMcpStatus('manual').catch((e) => log(`[mcp-status] refresh failed: ${(e as Error).message}`));
+      } else if (data.type === 'mcp_smoke_run') {
+        runMcpSmoke((data.serverName as string) || undefined).catch((e) => log(`[mcp-smoke] failed: ${(e as Error).message}`));
+      } else if (data.type === 'mcp_reload_session') {
+        reloadMcpSession().catch((e) => log(`[mcp-reload] failed: ${(e as Error).message}`));
       } else if (data.type === 'get_logs') {
         bridge.sendToPanel({ type: 'logs', lines: logBuffer.slice() }).catch(() => {});
       } else if (data.type === 'get_diagnostics') {

@@ -10,10 +10,13 @@ import { Writable, Readable } from 'node:stream';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import * as acp from '@agentclientprotocol/sdk';
 import { checkCodexCli, listCodexModels, spawnCodexAgent } from './codex-app-server.js';
 
 const AGENT_BIN = path.join(os.homedir(), '.local', 'bin', 'agent');
+const SOURCE_DIR = path.dirname(fileURLToPath(import.meta.url));
+const PROJECT_ROOT = process.env.SPX_HELPER_ROOT || path.resolve(SOURCE_DIR, '../..');
 
 export function checkAgentCli(): { ok: boolean; path: string; error?: string } {
   if (fs.existsSync(AGENT_BIN)) {
@@ -80,6 +83,12 @@ export interface UsageInfo {
   costCurrency?: string;
 }
 export type OnUsageUpdate = (info: UsageInfo) => void;
+export interface McpStartupStatusInfo {
+  name: string;
+  status: string;
+  message?: string;
+}
+export type OnMcpStartupStatus = (info: McpStartupStatusInfo) => void;
 
 export interface AcpCallbacks {
   onTurnStart?: OnTurnStart;
@@ -89,6 +98,7 @@ export interface AcpCallbacks {
   onModeUpdate?: OnModeUpdate;
   onPlanUpdate?: OnPlanUpdate;
   onUsageUpdate?: OnUsageUpdate;
+  onMcpStartupStatus?: OnMcpStartupStatus;
   onApprovalRequest?: (info: AgentApprovalRequest) => void;
 }
 
@@ -288,67 +298,361 @@ class SeaTalkAcpClient implements acp.Client {
   async extNotification(_method: string, _params: Record<string, unknown>) {}
 }
 
-// ── MCP config loader — reads ~/.cursor/mcp.json ──
+// ── MCP config loader — reads Cursor and Codex MCP config files ──
 
-interface CursorMcpEntry {
+export interface CursorMcpEntry {
   command?: string;
   args?: string[];
   env?: Record<string, string>;
+  env_vars?: string[];
   enabled?: boolean;
   url?: string;
+  cwd?: string;
+  transport?: string;
 }
 
-export function loadMcpServers(log?: (msg: string) => void): acp.McpServer[] {
-  const configPath = path.join(os.homedir(), '.cursor', 'mcp.json');
-  let raw: string;
-  try {
-    raw = fs.readFileSync(configPath, 'utf-8');
-  } catch {
-    log?.('no ~/.cursor/mcp.json found, skipping MCP');
-    return [];
-  }
+export type McpConfigSource = 'cursor' | 'codex-user' | 'codex-project';
 
+export interface LoadedMcpServerConfig {
+  name: string;
+  enabled: boolean;
+  transport: 'stdio' | 'sse' | 'http';
+  command?: string;
+  args: string[];
+  env: Record<string, string>;
+  cwd?: string;
+  url?: string;
+  source: McpConfigSource;
+  sourcePath: string;
+  raw: CursorMcpEntry;
+}
+
+export interface LoadedMcpConfigResult {
+  configPath: string;
+  servers: LoadedMcpServerConfig[];
+  errors: string[];
+}
+
+export interface LoadMcpServerConfigOptions {
+  source?: 'cursor' | 'codex' | 'all';
+  cursorConfigPath?: string;
+  userCodexConfigPath?: string;
+  projectCodexConfigPath?: string;
+  env?: NodeJS.ProcessEnv;
+}
+
+function parseTomlStringValue(value: string): string | undefined {
+  const trimmed = value.trim();
+  const quote = trimmed[0];
+  if (quote !== '"' && quote !== "'") return undefined;
+  let out = '';
+  for (let i = 1; i < trimmed.length; i++) {
+    const ch = trimmed[i];
+    if (ch === quote) return out;
+    if (quote === '"' && ch === '\\' && i + 1 < trimmed.length) {
+      i++;
+      const next = trimmed[i];
+      if (next === 'n') out += '\n';
+      else if (next === 't') out += '\t';
+      else out += next;
+    } else {
+      out += ch;
+    }
+  }
+  return undefined;
+}
+
+function splitTomlItems(value: string): string[] {
+  const out: string[] = [];
+  let current = '';
+  let quote = '';
+  let escaped = false;
+  for (const ch of value) {
+    if (escaped) {
+      current += ch;
+      escaped = false;
+      continue;
+    }
+    if (quote && ch === '\\' && quote === '"') {
+      current += ch;
+      escaped = true;
+      continue;
+    }
+    if ((ch === '"' || ch === "'") && !quote) {
+      quote = ch;
+      current += ch;
+      continue;
+    }
+    if (ch === quote) {
+      quote = '';
+      current += ch;
+      continue;
+    }
+    if (ch === ',' && !quote) {
+      out.push(current.trim());
+      current = '';
+      continue;
+    }
+    current += ch;
+  }
+  if (current.trim()) out.push(current.trim());
+  return out;
+}
+
+function parseTomlStringArray(value: string): string[] | undefined {
+  const trimmed = value.trim();
+  if (!trimmed.startsWith('[') || !trimmed.endsWith(']')) return undefined;
+  const inner = trimmed.slice(1, -1).trim();
+  if (!inner) return [];
+  const out: string[] = [];
+  for (const item of splitTomlItems(inner)) {
+    const parsed = parseTomlStringValue(item);
+    if (parsed !== undefined) out.push(parsed);
+  }
+  return out;
+}
+
+function parseTomlInlineEnv(value: string): Record<string, string> | undefined {
+  const trimmed = value.trim();
+  if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) return undefined;
+  const inner = trimmed.slice(1, -1).trim();
+  const env: Record<string, string> = {};
+  if (!inner) return env;
+  for (const item of splitTomlItems(inner)) {
+    const eq = item.indexOf('=');
+    if (eq < 0) continue;
+    const key = item.slice(0, eq).trim().replace(/^['"]|['"]$/g, '');
+    const parsed = parseTomlStringValue(item.slice(eq + 1));
+    if (key && parsed !== undefined) env[key] = parsed;
+  }
+  return env;
+}
+
+function codexSourceForPath(configPath: string): McpConfigSource {
+  const userConfig = path.join(os.homedir(), '.codex', 'config.toml');
+  return path.resolve(configPath) === path.resolve(userConfig) ? 'codex-user' : 'codex-project';
+}
+
+export function parseCursorMcpConfigText(raw: string, configPath: string): LoadedMcpConfigResult {
   let config: { mcpServers?: Record<string, CursorMcpEntry> };
   try {
     config = JSON.parse(raw);
   } catch (e) {
-    log?.(`failed to parse mcp.json: ${(e as Error).message}`);
-    return [];
+    return { configPath, servers: [], errors: [`failed to parse mcp.json: ${(e as Error).message}`] };
   }
 
-  const entries = config.mcpServers || {};
+  const servers: LoadedMcpServerConfig[] = [];
+  for (const [name, entry] of Object.entries(config.mcpServers || {})) {
+    const enabled = entry.enabled !== false;
+    const transport = entry.command
+      ? 'stdio'
+      : entry.url
+        ? entry.transport === 'streamable-http' || entry.transport === 'http'
+          ? 'http'
+          : 'sse'
+        : 'stdio';
+    const server: LoadedMcpServerConfig = {
+      name,
+      enabled,
+      transport,
+      args: entry.args || [],
+      env: entry.env || {},
+      source: 'cursor',
+      sourcePath: configPath,
+      raw: entry,
+    };
+    if (entry.command) server.command = entry.command;
+    if (entry.cwd) server.cwd = entry.cwd;
+    if (entry.url) server.url = entry.url;
+    servers.push(server);
+  }
+
+  return { configPath, servers, errors: [] };
+}
+
+export function parseCodexMcpConfigText(
+  raw: string,
+  configPath: string,
+  env: NodeJS.ProcessEnv = process.env,
+): LoadedMcpConfigResult {
+  const source = codexSourceForPath(configPath);
+  const sectionRe = /^\s*\[mcp_servers\.([^\]]+)\]\s*$/;
+  const servers: LoadedMcpServerConfig[] = [];
+  const errors: string[] = [];
+  let currentName = '';
+  let current: CursorMcpEntry | null = null;
+
+  function flushCurrent() {
+    if (!currentName || !current) return;
+    const transport = current.command
+      ? 'stdio'
+      : current.url
+        ? current.transport === 'streamable-http' || current.transport === 'http'
+          ? 'http'
+          : 'sse'
+        : 'stdio';
+    const rawEntry: CursorMcpEntry = {
+      ...(current.command ? { command: current.command } : {}),
+      ...(current.args ? { args: current.args } : {}),
+      ...(current.env ? { env: current.env } : {}),
+      ...(current.enabled === false ? { enabled: false } : {}),
+      ...(current.url ? { url: current.url } : {}),
+      ...(current.cwd ? { cwd: current.cwd } : {}),
+      ...(current.transport ? { transport: current.transport } : {}),
+    };
+    const server: LoadedMcpServerConfig = {
+      name: currentName,
+      enabled: current.enabled !== false,
+      transport,
+      args: current.args || [],
+      env: current.env || {},
+      source,
+      sourcePath: configPath,
+      raw: rawEntry,
+    };
+    if (current.command) server.command = current.command;
+    if (current.cwd) server.cwd = current.cwd;
+    if (current.url) server.url = current.url;
+    servers.push(server);
+  }
+
+  for (const rawLine of raw.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#')) continue;
+    const section = line.match(sectionRe);
+    if (section) {
+      flushCurrent();
+      currentName = section[1].trim().replace(/^['"]|['"]$/g, '');
+      current = {};
+      continue;
+    }
+    if (!current) continue;
+    const eq = line.indexOf('=');
+    if (eq < 0) continue;
+    const key = line.slice(0, eq).trim();
+    const value = line.slice(eq + 1).trim();
+    if (key === 'command') {
+      current.command = parseTomlStringValue(value);
+    } else if (key === 'args') {
+      current.args = parseTomlStringArray(value) || [];
+    } else if (key === 'env_vars') {
+      current.env_vars = parseTomlStringArray(value) || [];
+      current.env = { ...(current.env || {}) };
+      for (const envKey of current.env_vars) {
+        if (env[envKey] !== undefined) current.env[envKey] = String(env[envKey]);
+      }
+    } else if (key === 'env') {
+      current.env = { ...(current.env || {}), ...(parseTomlInlineEnv(value) || {}) };
+    } else if (key === 'cwd') {
+      current.cwd = parseTomlStringValue(value);
+    } else if (key === 'url') {
+      current.url = parseTomlStringValue(value);
+    } else if (key === 'transport') {
+      current.transport = parseTomlStringValue(value);
+    } else if (key === 'enabled') {
+      current.enabled = value !== 'false';
+    }
+  }
+  flushCurrent();
+
+  return { configPath, servers, errors };
+}
+
+function loadMcpConfigFile(configPath: string, parser: (raw: string, filePath: string) => LoadedMcpConfigResult): LoadedMcpConfigResult {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(configPath, 'utf-8');
+  } catch {
+    return { configPath, servers: [], errors: [`config not found: ${configPath}`] };
+  }
+  return parser(raw, configPath);
+}
+
+export function mergeMcpServerConfigs(results: LoadedMcpConfigResult[]): LoadedMcpConfigResult {
+  const priority: Record<McpConfigSource, number> = { cursor: 1, 'codex-project': 2, 'codex-user': 3 };
+  const byName = new Map<string, LoadedMcpServerConfig>();
+  const errors: string[] = [];
+  const configPaths: string[] = [];
+  for (const result of results) {
+    if (result.configPath) configPaths.push(result.configPath);
+    errors.push(...result.errors.filter((err) => !err.startsWith('config not found:')));
+    for (const server of result.servers) {
+      const prev = byName.get(server.name);
+      if (!prev || priority[server.source] >= priority[prev.source]) {
+        byName.set(server.name, server);
+      }
+    }
+  }
+  return {
+    configPath: configPaths.join(', '),
+    servers: [...byName.values()].sort((a, b) => a.name.localeCompare(b.name)),
+    errors,
+  };
+}
+
+export function loadMcpServerConfigs(
+  log?: (msg: string) => void,
+  options: LoadMcpServerConfigOptions = {},
+): LoadedMcpConfigResult {
+  const source = options.source || 'all';
+  const cursorConfigPath = options.cursorConfigPath || path.join(os.homedir(), '.cursor', 'mcp.json');
+  const userCodexConfigPath = options.userCodexConfigPath || path.join(os.homedir(), '.codex', 'config.toml');
+  const projectCodexConfigPath = options.projectCodexConfigPath || path.join(PROJECT_ROOT, '.codex', 'config.toml');
+  const results: LoadedMcpConfigResult[] = [];
+
+  if (source === 'cursor' || source === 'all') {
+    results.push(loadMcpConfigFile(cursorConfigPath, parseCursorMcpConfigText));
+  }
+  if (source === 'codex' || source === 'all') {
+    results.push(loadMcpConfigFile(
+      projectCodexConfigPath,
+      (raw, filePath) => parseCodexMcpConfigText(raw, filePath, options.env || process.env),
+    ));
+    results.push(loadMcpConfigFile(
+      userCodexConfigPath,
+      (raw, filePath) => parseCodexMcpConfigText(raw, filePath, options.env || process.env),
+    ));
+  }
+
+  const loaded = source === 'cursor' ? results[0] : mergeMcpServerConfigs(results);
+  if (!loaded.servers.length) {
+    log?.(`no MCP servers loaded from ${loaded.configPath || source}`);
+  } else {
+    log?.(`loaded ${loaded.servers.length} MCP server config(s) from ${loaded.configPath}`);
+  }
+  return loaded;
+}
+
+export function loadMcpServers(log?: (msg: string) => void): acp.McpServer[] {
+  const loaded = loadMcpServerConfigs(log, { source: 'cursor' });
   const servers: acp.McpServer[] = [];
 
-  for (const [name, entry] of Object.entries(entries)) {
-    if (entry.enabled === false) continue;
+  for (const entry of loaded.servers) {
+    if (!entry.enabled) continue;
 
-    if (entry.command) {
+    if (entry.transport === 'stdio' && entry.command) {
       const envArr: acp.EnvVariable[] = [];
-      if (entry.env) {
-        for (const [k, v] of Object.entries(entry.env)) {
-          envArr.push({ name: k, value: v });
-        }
+      for (const [k, v] of Object.entries(entry.env)) {
+        envArr.push({ name: k, value: v });
       }
       servers.push({
         type: 'stdio',
-        name,
+        name: entry.name,
         command: entry.command,
-        args: entry.args || [],
+        args: entry.args,
         env: envArr,
       } as acp.McpServer);
-    } else if (entry.url) {
-      const transport = (entry as any).transport;
-      const mcpType = transport === 'streamable-http' ? 'http' : 'sse';
+    } else if ((entry.transport === 'sse' || entry.transport === 'http') && entry.url) {
       servers.push({
-        type: mcpType,
-        name,
+        type: entry.transport,
+        name: entry.name,
         url: entry.url,
         headers: [],
       } as acp.McpServer);
     }
   }
 
-  log?.(`loaded ${servers.length} MCP servers from mcp.json`);
+  log?.(`loaded ${servers.length} MCP servers from Cursor mcp.json`);
   return servers;
 }
 

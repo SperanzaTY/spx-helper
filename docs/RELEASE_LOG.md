@@ -6,6 +6,34 @@
 
 ---
 
+## v3.6.13 -- 2026-04-24 -- `feat`: SeaTalk Agent 增加 MCP 状态面板
+
+**提交者**: Codex / 仓库维护者
+**Commit Type**: feat（PATCH **3.6.12 → 3.6.13**）
+
+### 变更说明
+
+**SeaTalk Agent**
+
+- 左侧 Agent rail 齿轮菜单新增 **MCP 状态** 入口，可在 SeaTalk 内查看 MCP server / tool schema 是否可见。
+- MCP 状态页支持 **重新检测**、手动运行内置只读低成本 **Smoke Tests**，以及 **重载 MCP 会话**，方便定位「配置存在但工具未加载」的问题。
+- MCP 状态页改为和 **诊断信息** / **查看后端日志** 共用 Agent sidebar 内的 overlay，不再作为全局浮层遮挡 SeaTalk 主界面。
+- Codex app-server 启动链路会转发 MCP 启动进度与 schema 探测结果，便于在 UI 中区分配置、启动超时、工具列表为空等状态。
+
+**文档**
+
+- 更新 **`README.md`**、**`docs/guides/MCP_TOOLS.md`**、**`docs/guides/SEATALK_AGENT.md`** 与 **`docs/guides/CHROME_EXTENSION.md`**，同步 MCP 状态面板、smoke tests、sidebar overlay 行为与 3.6.13 版本号。
+
+### 测试项
+
+- `node --check src/inject/sidebar-app.js`
+- `cd seatalk-agent && npx tsc -p tsconfig.json --noEmit`
+- `cd seatalk-agent && node --import tsx --test src/mcp-status.test.ts`
+- CDP DOM 验证：`#spx-mcp-status-pop` 挂载在 `#cursor-panel` 内，`popInsidePanel=true`。
+- SeaTalk Agent worktree 启动验证：`codex-app-server` 连接成功并完成 UI 注入。
+- `git diff --check`
+- `npm run verify:hooks`
+
 ## v3.6.12 -- 2026-04-24 -- `fix`: 补齐 MCP 元数据工具并收口 Cookie 刷新弹窗
 
 **提交者**: Codex / 仓库维护者

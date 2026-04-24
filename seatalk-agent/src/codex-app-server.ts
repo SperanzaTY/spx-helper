@@ -397,9 +397,18 @@ function handleNotification(state: CodexRuntimeState, msg: any) {
       });
       return;
     }
-    case 'mcpServer/startupStatus/updated':
-      state.log(`[codex-mcp] ${params?.name || 'unknown'} => ${params?.status || 'unknown'}`);
+    case 'mcpServer/startupStatus/updated': {
+      const name = String(params?.name || 'unknown');
+      const status = String(params?.status || 'unknown');
+      const message = typeof params?.message === 'string'
+        ? params.message
+        : typeof params?.error === 'string'
+          ? params.error
+          : undefined;
+      state.log(`[codex-mcp] ${name} => ${status}${message ? ` (${message})` : ''}`);
+      state.callbacks.onMcpStartupStatus?.({ name, status, message });
       return;
+    }
     case 'error':
       state.log(`app-server error: ${params?.message || 'unknown error'}`);
       return;

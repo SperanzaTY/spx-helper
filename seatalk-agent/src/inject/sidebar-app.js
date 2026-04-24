@@ -27,6 +27,8 @@
   if (oldPopover) oldPopover.remove();
   var oldAlarmPop = document.getElementById('cursor-alarm-popover');
   if (oldAlarmPop) oldAlarmPop.remove();
+  var oldMcpPop = document.getElementById('spx-mcp-status-pop');
+  if (oldMcpPop) oldMcpPop.remove();
   document.querySelectorAll('.cursor-tooltip').forEach(function (el) { el.remove(); });
 
   var _abortCtrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
@@ -113,6 +115,10 @@
   var _railSettingsResizeHandler = null;
   var _statusRefreshTimer = null;
   var _updateJustApplied = false;
+  var mcpStatusPopEl = null;
+  var cachedMcpStatus = null;
+  var selectedMcpServer = '';
+  var mcpStatusLog = [];
 
   // Remote state
   var _watchActive = false;
@@ -599,6 +605,35 @@
     '.spx-agent-global-settings-pop .cursor-grant-toggle .gt-label { display:none; }' +
     '.spx-agent-global-settings-pop .spx-agent-settings-pop-close { border:none; background:transparent; color:#a1a1aa; cursor:pointer; font-size:16px; line-height:1; padding:2px 6px; border-radius:4px; }' +
     '.spx-agent-global-settings-pop .spx-agent-settings-pop-close:hover { background:rgba(255,255,255,0.1); color:#fff; }',
+
+    '.spx-mcp-pop { position:absolute; top:0; left:0; right:0; bottom:0; background:var(--cp-bg); z-index:10; display:none; flex-direction:column; color:var(--cp-text); overflow:hidden; }',
+    '.spx-mcp-pop.show { display:flex; }',
+    '.spx-mcp-hd { display:flex; align-items:center; padding:8px 12px; border-bottom:1px solid var(--cp-border); gap:8px; }',
+    '.spx-mcp-title { font-size:12px; font-weight:600; flex:1; color:var(--cp-text2); }',
+    '.spx-mcp-close { border:none; background:none; color:var(--cp-text-dim); font-size:14px; cursor:pointer; padding:4px 8px; border-radius:4px; }',
+    '.spx-mcp-close:hover { background:var(--cp-bg3); color:var(--cp-text2); }',
+    '.spx-mcp-actions { display:flex; gap:6px; padding:8px 10px; border-bottom:1px solid var(--cp-border); }',
+    '.spx-mcp-btn { border:1px solid var(--cp-border); background:var(--cp-bg2); color:var(--cp-text2); border-radius:5px; font-size:10px; padding:4px 8px; cursor:pointer; }',
+    '.spx-mcp-btn:hover { border-color:var(--cp-accent); color:var(--cp-text2); background:var(--cp-bg3); }',
+    '.spx-mcp-btn:disabled { opacity:.45; cursor:not-allowed; border-color:var(--cp-border); color:var(--cp-text-dim2); }',
+    '.spx-mcp-body { display:flex; flex:1; min-height:0; }',
+    '.spx-mcp-list { width:165px; border-right:1px solid var(--cp-border); overflow:auto; padding:8px; box-sizing:border-box; }',
+    '.spx-mcp-server { padding:7px 8px; border-radius:6px; cursor:pointer; border:1px solid transparent; margin-bottom:5px; }',
+    '.spx-mcp-server:hover { background:var(--cp-bg3); }',
+    '.spx-mcp-server.active { border-color:var(--cp-accent); background:var(--cp-accent-bg2); }',
+    '.spx-mcp-server-name { display:flex; align-items:center; gap:6px; font-size:11px; color:var(--cp-text2); min-width:0; }',
+    '.spx-mcp-server-name span:last-child { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }',
+    '.spx-mcp-dot { width:7px; height:7px; border-radius:50%; background:var(--cp-text-dim2); flex-shrink:0; }',
+    '.spx-mcp-dot.ok { background:var(--cp-ok); } .spx-mcp-dot.warn { background:#f59e0b; } .spx-mcp-dot.err { background:var(--cp-error); }',
+    '.spx-mcp-server-meta { margin-top:3px; font-size:9px; color:var(--cp-text-dim2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }',
+    '.spx-mcp-detail { flex:1; min-width:0; overflow:auto; padding:10px 12px; box-sizing:border-box; }',
+    '.spx-mcp-detail-title { display:flex; align-items:center; justify-content:space-between; gap:8px; font-size:12px; font-weight:600; margin-bottom:8px; }',
+    '.spx-mcp-kv { font-size:10px; color:var(--cp-text-dim); margin:4px 0; word-break:break-word; }',
+    '.spx-mcp-tool { display:flex; align-items:flex-start; gap:7px; padding:6px 0; border-top:1px solid var(--cp-border); }',
+    '.spx-mcp-tool:first-of-type { border-top:0; }',
+    '.spx-mcp-tool-name { font-size:11px; color:var(--cp-text2); word-break:break-word; }',
+    '.spx-mcp-tool-desc { font-size:10px; color:var(--cp-text-dim); margin-top:2px; line-height:1.35; }',
+    '.spx-mcp-log { max-height:66px; overflow:auto; border-top:1px solid var(--cp-border); padding:6px 10px; font-size:10px; color:var(--cp-text-dim); background:var(--cp-bg2); }',
 
     // Logs overlay
     '.cursor-logs { position:absolute; top:0; left:0; right:0; bottom:0; background:var(--cp-bg); z-index:10; display:none; flex-direction:column; }',
@@ -1401,6 +1436,19 @@
         renderGlobalAgentSettings();
       } else if (d.type === 'restart_progress') {
         appendRestartLog(d.text || '');
+      } else if (d.type === 'mcp_status_update') {
+        if (d.snapshot) cachedMcpStatus = d.snapshot;
+        if (d.error) mcpStatusLog.push('error: ' + d.error);
+        if (d.smokeResults && d.smokeResults.length) {
+          for (var mi = 0; mi < d.smokeResults.length; mi++) {
+            var mr = d.smokeResults[mi];
+            mcpStatusLog.push((mr.serverName || 'unknown') + ': ' + (mr.status || '') + ' ' + (mr.message || ''));
+          }
+        }
+        renderMcpStatus();
+      } else if (d.type === 'mcp_status_progress') {
+        mcpStatusLog.push(d.text || '');
+        renderMcpStatus();
       } else if (d.type === 'logs') {
         showLogsOverlay(d.lines || []);
       } else if (d.type === 'diagnostics') {
@@ -2059,6 +2107,138 @@
       '<div class="cursor-diag-body">' + rowsHtml + '</div>';
     ov.querySelector('.cursor-diag-back').addEventListener('click', function () { ov.classList.remove('show'); });
     panelHandle.el.appendChild(ov);
+  }
+
+  function mcpText(value) {
+    if (value === null || value === undefined) return '';
+    return escapeHtml(String(value));
+  }
+
+  function mcpDotClass(status) {
+    if (status === 'Smoke OK' || status === 'Loaded') return 'ok';
+    if (status === 'Unknown' || status === 'Disabled') return 'warn';
+    return 'err';
+  }
+
+  function formatMcpTime(ts) {
+    if (!ts) return '-';
+    var d = new Date(ts);
+    return [d.getHours(), d.getMinutes(), d.getSeconds()].map(function(n){ return n < 10 ? '0' + n : '' + n; }).join(':');
+  }
+
+  function ensureMcpStatusPop() {
+    ensurePanelOpenForOverlay();
+    if (!panelHandle || !panelHandle.el) return null;
+    if (mcpStatusPopEl && mcpStatusPopEl.isConnected) return mcpStatusPopEl;
+    var existing = panelHandle.el.querySelector('.spx-mcp-pop');
+    if (existing) {
+      mcpStatusPopEl = existing;
+      return mcpStatusPopEl;
+    }
+    var orphan = document.getElementById('spx-mcp-status-pop');
+    if (orphan && !panelHandle.el.contains(orphan)) orphan.remove();
+    mcpStatusPopEl = document.createElement('div');
+    mcpStatusPopEl.id = 'spx-mcp-status-pop';
+    mcpStatusPopEl.className = 'spx-mcp-pop';
+    mcpStatusPopEl.innerHTML =
+      '<div class="spx-mcp-hd"><button class="spx-mcp-close" type="button">←</button><span class="spx-mcp-title">MCP 状态</span></div>' +
+      '<div class="spx-mcp-actions">' +
+        '<button class="spx-mcp-btn" data-act="refresh">重新检测</button>' +
+        '<button class="spx-mcp-btn" data-act="smoke">运行 Smoke</button>' +
+        '<button class="spx-mcp-btn" data-act="reload">重载 MCP 会话</button>' +
+      '</div>' +
+      '<div class="spx-mcp-body"><div class="spx-mcp-list"></div><div class="spx-mcp-detail"></div></div>' +
+      '<div class="spx-mcp-log"></div>';
+    panelHandle.el.appendChild(mcpStatusPopEl);
+    mcpStatusPopEl.querySelector('.spx-mcp-close').addEventListener('click', closeMcpStatusPop);
+    mcpStatusPopEl.querySelector('[data-act="refresh"]').addEventListener('click', function () {
+      mcpStatusLog.push('重新检测...');
+      renderMcpStatus();
+      sendToAgent({ type: 'mcp_status_refresh' }, { requireLive: false });
+    });
+    mcpStatusPopEl.querySelector('[data-act="smoke"]').addEventListener('click', function () {
+      mcpStatusLog.push('运行 Smoke' + (selectedMcpServer ? ': ' + selectedMcpServer : '') + '...');
+      renderMcpStatus();
+      sendToAgent({ type: 'mcp_smoke_run', serverName: selectedMcpServer || '' }, { requireLive: false });
+    });
+    mcpStatusPopEl.querySelector('[data-act="reload"]').addEventListener('click', function () {
+      mcpStatusLog.push('重载 MCP 会话...');
+      renderMcpStatus();
+      sendToAgent({ type: 'mcp_reload_session' }, { requireLive: false });
+    });
+    return mcpStatusPopEl;
+  }
+
+  function closeMcpStatusPop() {
+    if (mcpStatusPopEl) mcpStatusPopEl.classList.remove('show');
+  }
+
+  function showMcpStatusPop() {
+    var pop = ensureMcpStatusPop();
+    if (!pop) return;
+    pop.classList.add('show');
+    if (!cachedMcpStatus && mcpStatusLog.length === 0) mcpStatusLog.push('读取 MCP 配置...');
+    renderMcpStatus();
+    sendToAgent({ type: 'mcp_status_get' }, { requireLive: false });
+  }
+
+  function renderMcpStatus() {
+    var pop = ensureMcpStatusPop();
+    if (!pop) return;
+    var list = pop.querySelector('.spx-mcp-list');
+    var detail = pop.querySelector('.spx-mcp-detail');
+    var logEl = pop.querySelector('.spx-mcp-log');
+    var smokeBtn = pop.querySelector('[data-act="smoke"]');
+    var reloadBtn = pop.querySelector('[data-act="reload"]');
+    var servers = (cachedMcpStatus && cachedMcpStatus.servers) || [];
+    if (!selectedMcpServer && servers.length) selectedMcpServer = servers[0].name;
+    if (smokeBtn) smokeBtn.disabled = !selectedMcpServer || !servers.length;
+    if (reloadBtn) reloadBtn.disabled = !cachedStatus.connected;
+
+    if (!servers.length) {
+      list.innerHTML = '<div class="spx-mcp-server-meta">等待状态...</div>';
+      detail.innerHTML = '<div class="spx-mcp-kv">正在读取 MCP 配置。若长时间无结果，点击“重新检测”。</div>';
+    } else {
+      list.innerHTML = servers.map(function (srv) {
+        return '<div class="spx-mcp-server ' + (srv.name === selectedMcpServer ? 'active' : '') + '" data-name="' + mcpText(srv.name) + '">' +
+          '<div class="spx-mcp-server-name"><span class="spx-mcp-dot ' + mcpDotClass(srv.status) + '"></span><span>' + mcpText(srv.name) + '</span></div>' +
+          '<div class="spx-mcp-server-meta">' + mcpText(srv.status) + ' · ' + mcpText(srv.transport) + ' · ' + (srv.toolCount || 0) + ' tools</div>' +
+          '</div>';
+      }).join('');
+
+      var selected = servers.find(function (srv) { return srv.name === selectedMcpServer; }) || servers[0];
+      selectedMcpServer = selected.name;
+      var toolsHtml = (selected.tools || []).map(function (tool) {
+        return '<div class="spx-mcp-tool">' +
+          '<span class="spx-mcp-dot ok"></span>' +
+          '<div><div class="spx-mcp-tool-name">' + mcpText(tool.name) + '</div>' +
+          '<div class="spx-mcp-tool-desc">' + mcpText(tool.description || '') + '</div></div>' +
+          '</div>';
+      }).join('');
+      if (!toolsHtml) toolsHtml = '<div class="spx-mcp-kv">No tools visible.</div>';
+
+      detail.innerHTML =
+        '<div class="spx-mcp-detail-title"><span>' + mcpText(selected.name) + '</span><span>' + mcpText(selected.status) + '</span></div>' +
+        '<div class="spx-mcp-kv">source: ' + mcpText(selected.source || '') + '</div>' +
+        '<div class="spx-mcp-kv">transport: ' + mcpText(selected.transport) + '</div>' +
+        '<div class="spx-mcp-kv">command/url: ' + mcpText(selected.commandSummary || '') + '</div>' +
+        '<div class="spx-mcp-kv">last checked: ' + formatMcpTime(selected.lastChecked) + '</div>' +
+        '<div class="spx-mcp-kv">startup: ' + mcpText(selected.startupStatus || '-') + '</div>' +
+        '<div class="spx-mcp-kv">smoke: ' + mcpText(selected.smokeStatus || 'not_configured') + '</div>' +
+        (selected.error ? '<div class="spx-mcp-kv" style="color:var(--cp-error)">error: ' + mcpText(selected.error) + '</div>' : '') +
+        '<div style="margin-top:10px">' + toolsHtml + '</div>';
+    }
+
+    list.querySelectorAll('.spx-mcp-server').forEach(function (el) {
+      el.addEventListener('click', function () {
+        selectedMcpServer = el.getAttribute('data-name') || '';
+        renderMcpStatus();
+      });
+    });
+
+    logEl.innerHTML = mcpStatusLog.slice(-8).map(function (line) {
+      return '<div>' + mcpText(line) + '</div>';
+    }).join('');
   }
 
   function formatUptime(s) {
@@ -3447,6 +3627,7 @@
             '<div class="spx-rail-dd-item" data-action="check_update"><span class="dd-icon"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg></span>检查更新</div>' +
             '<div class="spx-rail-dd-item" data-action="global_agent_settings"><span class="dd-icon"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"/><path d="M22 2L15 22l-4-9-9-4z"/></svg></span>Agent 会话设置</div>' +
             '<div class="spx-rail-dd-sep"></div>' +
+            '<div class="spx-rail-dd-item" data-action="show_mcp_status"><span class="dd-icon"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="6" rx="1"/><rect x="4" y="14" width="16" height="6" rx="1"/><path d="M8 7h.01M8 17h.01"/></svg></span>MCP 状态</div>' +
             '<div class="spx-rail-dd-item" data-action="show_diagnostics"><span class="dd-icon"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg></span>诊断信息</div>' +
             '<div class="spx-rail-dd-item" data-action="show_logs"><span class="dd-icon"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></span>查看日志</div>' +
             '<div class="spx-rail-dd-sep"></div>' +
@@ -3613,6 +3794,8 @@
         sendToAgent({ type: action }, { requireLive: false });
       } else if (action === 'show_logs') {
         sendToAgent({ type: 'get_logs' });
+      } else if (action === 'show_mcp_status') {
+        showMcpStatusPop();
       } else if (action === 'show_diagnostics') {
         sendToAgent({ type: 'get_diagnostics' });
       } else if (action === 'check_update') {
@@ -4207,6 +4390,10 @@
     settingsDd = null;
     settingsBtn = null;
     closeGlobalAgentSettingsPop();
+    closeMcpStatusPop();
+    var msp = document.getElementById('spx-mcp-status-pop');
+    if (msp) msp.remove();
+    mcpStatusPopEl = null;
     var gsp = document.getElementById('spx-agent-global-settings-pop');
     if (gsp) gsp.remove();
     globalAgentSettingsPopEl = null;

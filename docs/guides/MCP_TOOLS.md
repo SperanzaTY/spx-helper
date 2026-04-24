@@ -375,6 +375,12 @@ uvx --reinstall --from . seatalk-group-mcp --help >/dev/null
 4. **Scheduler 与 Presto History**：`get_presto_query_sql` 通过实例拿到的 **yarn_application_id 通常只绑定 Presto History 中的一条 query**；若返回 **DDL/元数据 SQL** 或明显不是主业务语句，请到 DataSuite 实例详情核对 **其它 Presto Query ID**，或直接向该工具传入 **`presto_query_id`**。工具返回中的 **`presto_sql_warning` / `presto_sql_kind`** 为启发式提示。
 5. **DataMap 与列名**：以 OpenAPI 返回的字段为准；**「列不存在」与「有列但无数据」** 需区分，勿默认某张 RI 表上必有血缘里出现的列名（可能已演进或别名不同）。
 
+### MCP 状态与 Smoke Tests
+
+SeaTalk Agent 的 MCP 状态面板会自动执行 `tools/list` 探测，显示 server 与 tool schema 是否可见。Smoke tests 需要手动点击 **运行 Smoke** 才会执行。
+
+Smoke tests 只允许只读、低成本调用。不会自动执行 SeaTalk 发送、DataMap 写入、DataStudio 创建/更新/解锁、Presto 大表查询或群管理操作。
+
 uvx 命令找不到？
 
 安装 uv 后需重启终端。手动加入 PATH：`export PATH="$HOME/.local/bin:$PATH"`，加到 `~/.zshrc` 后重启终端。
@@ -408,6 +414,10 @@ MCP 配置在 `~/.cursor/mcp.json`，新增或修改后需在 Cursor 设置中**
 ---
 
 ## 更新日志
+
+### v3.6.13
+
+- **SeaTalk Agent MCP 状态面板**：左侧 rail 齿轮可打开 MCP 状态页，查看 server / tool schema 实时状态，手动运行只读低成本 smoke tests，并重载当前 MCP 会话。
 
 ### v3.6.12
 
