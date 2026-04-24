@@ -1,61 +1,63 @@
 [mcp_servers.presto-query]
 command = "bash"
-args = ["./scripts/codex-mcp-launch.sh", "presto-query"]
+args = ["-lc", 'root="${SPX_HELPER_ROOT:-$PWD}"; script="$root/scripts/codex-mcp-launch.sh"; if [[ ! -x "$script" ]]; then echo "Set SPX_HELPER_ROOT to your spx-helper repo path (current: $root)" >&2; exit 69; fi; exec "$script" presto-query']
 cwd = "."
-env_vars = ["PRESTO_PERSONAL_TOKEN", "PRESTO_USERNAME"]
+env_vars = ["SPX_HELPER_ROOT", "PRESTO_PERSONAL_TOKEN", "PRESTO_USERNAME"]
 
 [mcp_servers.ck-query]
 command = "bash"
-args = ["./scripts/codex-mcp-launch.sh", "ck-query"]
+args = ["-lc", 'root="${SPX_HELPER_ROOT:-$PWD}"; script="$root/scripts/codex-mcp-launch.sh"; if [[ ! -x "$script" ]]; then echo "Set SPX_HELPER_ROOT to your spx-helper repo path (current: $root)" >&2; exit 69; fi; exec "$script" ck-query']
 cwd = "."
+env_vars = ["SPX_HELPER_ROOT"]
 
 [mcp_servers.spark-query]
 command = "bash"
-args = ["./scripts/codex-mcp-launch.sh", "spark-query"]
+args = ["-lc", 'root="${SPX_HELPER_ROOT:-$PWD}"; script="$root/scripts/codex-mcp-launch.sh"; if [[ ! -x "$script" ]]; then echo "Set SPX_HELPER_ROOT to your spx-helper repo path (current: $root)" >&2; exit 69; fi; exec "$script" spark-query']
 cwd = "."
-env_vars = ["LIVY_USERNAME", "LIVY_PASSWORD", "LIVY_QUEUE", "LIVY_REGION", "LIVY_URL", "LIVY_STATEMENT_TIMEOUT"]
+env_vars = ["SPX_HELPER_ROOT", "LIVY_USERNAME", "LIVY_PASSWORD", "LIVY_QUEUE", "LIVY_REGION", "LIVY_URL", "LIVY_STATEMENT_TIMEOUT"]
 
 [mcp_servers.api-trace]
 command = "bash"
-args = ["./scripts/codex-mcp-launch.sh", "api-trace"]
+args = ["-lc", 'root="${SPX_HELPER_ROOT:-$PWD}"; script="$root/scripts/codex-mcp-launch.sh"; if [[ ! -x "$script" ]]; then echo "Set SPX_HELPER_ROOT to your spx-helper repo path (current: $root)" >&2; exit 69; fi; exec "$script" api-trace']
 cwd = "."
-env_vars = ["PRESTO_PERSONAL_TOKEN", "PRESTO_USERNAME"]
+env_vars = ["SPX_HELPER_ROOT", "PRESTO_PERSONAL_TOKEN", "PRESTO_USERNAME"]
 
 [mcp_servers.seatalk-reader]
 command = "bash"
-args = ["./scripts/codex-mcp-launch.sh", "seatalk-reader"]
+args = ["-lc", 'root="${SPX_HELPER_ROOT:-$PWD}"; script="$root/scripts/codex-mcp-launch.sh"; if [[ ! -x "$script" ]]; then echo "Set SPX_HELPER_ROOT to your spx-helper repo path (current: $root)" >&2; exit 69; fi; exec "$script" seatalk-reader']
 cwd = "."
-env_vars = ["CDP_PORT"]
+env_vars = ["SPX_HELPER_ROOT", "CDP_PORT"]
 
 [mcp_servers.scheduler-query]
 command = "bash"
-args = ["./scripts/codex-mcp-launch.sh", "scheduler-query"]
+args = ["-lc", 'root="${SPX_HELPER_ROOT:-$PWD}"; script="$root/scripts/codex-mcp-launch.sh"; if [[ ! -x "$script" ]]; then echo "Set SPX_HELPER_ROOT to your spx-helper repo path (current: $root)" >&2; exit 69; fi; exec "$script" scheduler-query']
 cwd = "."
-env_vars = ["CHROME_CDP_PORT", "CHROME_AUTH_DISABLE_APPLESCRIPT"]
+env_vars = ["SPX_HELPER_ROOT", "CHROME_CDP_PORT", "CHROME_AUTH_DISABLE_APPLESCRIPT"]
 
 [mcp_servers.seatalk-group]
 command = "bash"
-args = ["./scripts/codex-mcp-launch.sh", "seatalk-group"]
+args = ["-lc", 'root="${SPX_HELPER_ROOT:-$PWD}"; script="$root/scripts/codex-mcp-launch.sh"; if [[ ! -x "$script" ]]; then echo "Set SPX_HELPER_ROOT to your spx-helper repo path (current: $root)" >&2; exit 69; fi; exec "$script" seatalk-group']
 cwd = "."
-env_vars = ["INFRABOT_TOKEN"]
+env_vars = ["SPX_HELPER_ROOT", "INFRABOT_TOKEN"]
 
 [mcp_servers.flink-query]
 command = "bash"
-args = ["./scripts/codex-mcp-launch.sh", "flink-query"]
+args = ["-lc", 'root="${SPX_HELPER_ROOT:-$PWD}"; script="$root/scripts/codex-mcp-launch.sh"; if [[ ! -x "$script" ]]; then echo "Set SPX_HELPER_ROOT to your spx-helper repo path (current: $root)" >&2; exit 69; fi; exec "$script" flink-query']
 cwd = "."
-env_vars = ["CHROME_CDP_PORT", "CHROME_AUTH_DISABLE_APPLESCRIPT"]
+env_vars = ["SPX_HELPER_ROOT", "CHROME_CDP_PORT", "CHROME_AUTH_DISABLE_APPLESCRIPT"]
 
 [mcp_servers.datamap-query]
 command = "bash"
-args = ["./scripts/codex-mcp-launch.sh", "datamap-query"]
+args = ["-lc", 'root="${SPX_HELPER_ROOT:-$PWD}"; script="$root/scripts/codex-mcp-launch.sh"; if [[ ! -x "$script" ]]; then echo "Set SPX_HELPER_ROOT to your spx-helper repo path (current: $root)" >&2; exit 69; fi; exec "$script" datamap-query']
 cwd = "."
-env_vars = ["DATAMAP_OPEN_API_TOKEN", "CHROME_CDP_PORT", "CHROME_AUTH_DISABLE_APPLESCRIPT"]
+env_vars = ["SPX_HELPER_ROOT", "DATAMAP_OPEN_API_TOKEN", "CHROME_CDP_PORT", "CHROME_AUTH_DISABLE_APPLESCRIPT"]
 
 [mcp_servers.datastudio-mcp]
 command = "bash"
-args = ["./scripts/codex-mcp-launch.sh", "datastudio-mcp"]
+args = ["-lc", 'root="${SPX_HELPER_ROOT:-$PWD}"; script="$root/scripts/codex-mcp-launch.sh"; if [[ ! -x "$script" ]]; then echo "Set SPX_HELPER_ROOT to your spx-helper repo path (current: $root)" >&2; exit 69; fi; exec "$script" datastudio-mcp']
 cwd = "."
 env_vars = [
+  "SPX_HELPER_ROOT",
   "DATASTUDIO_BASE_PATH",
   "DATASTUDIO_PROJECTS",
   "CHROME_CDP_PORT",

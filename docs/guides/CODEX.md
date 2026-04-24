@@ -134,22 +134,27 @@ export SPX_AGENT_BACKEND=codex
 - `.agents/skills/`
 
 如果你还在本机 `~/.codex/config.toml` 中配置了同名 MCP server，通常以本机配置作为真实运行入口更稳妥，适合放置私有凭证、绝对路径和个人环境差异。
+Codex Desktop 的 app-server 可能从 `/` 作为工作目录启动；仓库模板会优先读取 `SPX_HELPER_ROOT` 来定位本地仓库，因此本机配置建议为仓库内 MCP 补充这个环境变量。
 
 前提是该项目被标记为 trusted。
 
 ### 2. 确认 Python 依赖
 
-仓库内 MCP 大多是 Python 项目。首次在本机使用前，建议按需安装对应依赖，例如：
+仓库内 MCP 大多是 Python 项目。为了避免 macOS 上 arm64 / x86_64 原生 wheel 混用，Codex 默认通过 `scripts/codex-mcp-launch.sh` 使用仓库内的架构隔离 venv：
 
 ```bash
-python3 -m pip install -e ./mcp-tools/chrome-auth
-python3 -m pip install -e ./mcp-tools/presto-query
-python3 -m pip install -e ./mcp-tools/ck-query
-python3 -m pip install -e ./mcp-tools/scheduler-query
-python3 -m pip install -e ./mcp-tools/flink-query
+bash ./scripts/setup-mcp-env.sh
 ```
 
-如果只使用部分 MCP，就只安装对应目录。
+该脚本会创建 `.mcp-venvs/<arch>-py<version>/`，例如 `.mcp-venvs/arm64-py3.12/`，并一次性安装所有仓库内 MCP。不同 CPU 架构会落到不同目录，避免出现 `rpds ... incompatible architecture` 这类错误。
+
+要求：
+
+- Python 3.12+（`datastudio-mcp` 需要 3.12）
+- 如需指定解释器：`PYTHON_BIN=/path/to/python3.12 bash ./scripts/setup-mcp-env.sh`
+- 如需重建环境：`bash ./scripts/setup-mcp-env.sh --force`
+
+`scripts/codex-mcp-launch.sh` 默认会在 venv 缺失时自动执行初始化。若不希望启动 MCP 时自动安装依赖，可设置 `SPX_MCP_AUTO_SETUP=0`，此时会直接提示手动执行 `setup-mcp-env.sh`。
 
 ### 3. 检查启动脚本
 
@@ -181,6 +186,7 @@ bash ./scripts/codex-mcp-launch.sh --list
 - Token、密码、PAT、Google Service Account 路径
 - 本机特有的 Python 路径，例如 `/opt/anaconda3/bin/python3`
 - 本机特有目录，例如 `DATASTUDIO_BASE_PATH`
+- 本机仓库绝对路径：`SPX_HELPER_ROOT = "/path/to/spx-helper"`
 
 仓库中的 `.codex/config.toml` 更适合作为团队共享模板；`~/.codex/config.toml` 负责让你自己的机器直接可用。
 

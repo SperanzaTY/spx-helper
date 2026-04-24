@@ -88,45 +88,51 @@ v3.5.17 起补充：
 
 已克隆 **spx-helper** 的开发者应使用**本机仓库路径**配置 `~/.cursor/mcp.json`：改 MCP 代码后**无需等 release**、也**不必**每次从 Git 拉 uv 包解析依赖。
 
-**一次安装（对同一个 `python3`）**：先装共享库，再按需装各工具子目录。
+**一次安装（推荐）**：创建仓库内、按 CPU 架构隔离的 MCP venv，并一次性安装所有仓库内 MCP。
 
 ```bash
 SPX_ROOT="/path/to/spx-helper"   # 换成你的仓库根目录
+cd "$SPX_ROOT"
 
-python3 -m pip install -e "$SPX_ROOT/mcp-tools/chrome-auth"
-
-# 按需执行，例如只开发 Flink / Scheduler：
-python3 -m pip install -e "$SPX_ROOT/mcp-tools/flink-query"
-python3 -m pip install -e "$SPX_ROOT/mcp-tools/scheduler-query"
-python3 -m pip install -e "$SPX_ROOT/mcp-tools/datamap-query"
-# 其它子目录：presto-query、ck-query、spark-query、api-trace、seatalk-reader、seatalk-group 等同理
+bash scripts/setup-mcp-env.sh
 ```
 
-**依赖 chrome-auth 的 MCP**（scheduler-query、datamap-query、flink-query）：在 `mcp.json` 里用 `**python3` + 入口脚本** + `**PYTHONPATH` 指向 `mcp-tools/chrome-auth`** 即可（将路径换成你的 `SPX_ROOT`）：
+这个脚本会创建 `.mcp-venvs/<arch>-py<version>/`，例如 `.mcp-venvs/arm64-py3.12/`。这样 Apple Silicon 和 Intel / Rosetta 环境会使用不同 venv，避免系统 Python 里残留的 x86_64 wheel 被 arm64 Python 加载。安装和 import 校验成功后，脚本会写入 `.spx-mcp-ready` 标记；启动器会同时检查这个标记和核心依赖，发现半初始化 venv 时会自动补装或给出明确错误。
+
+要求与常用参数：
+
+- Python 3.12+（`datastudio-mcp` 需要 3.12）
+- 指定解释器：`PYTHON_BIN=/path/to/python3.12 bash scripts/setup-mcp-env.sh`
+- 强制重建：`bash scripts/setup-mcp-env.sh --force`
+
+**本地仓库 MCP 配置（推荐）**：`scripts/codex-mcp-launch.sh` 虽然名字里带 Codex，但它是通用的仓库内 MCP 启动器，也可用于 Cursor。启动器默认优先使用上面的架构隔离 venv；如果 venv 不存在，会自动初始化。若希望禁止启动时自动安装依赖，可在环境变量里设置 `SPX_MCP_AUTO_SETUP=0`。
+
+Codex Desktop 的 app-server 可能从 `/` 作为工作目录启动，因此不要依赖 `cwd = "."` + `./scripts/...`。本机真实配置应使用仓库绝对路径；项目内 `.codex/config.toml` 修改后，需要重启 Codex Desktop 或新开会话，当前会话不会热加载 MCP schema。
 
 ```json
 "scheduler-query": {
-  "command": "python3",
-  "args": ["/path/to/spx-helper/mcp-tools/scheduler-query/scheduler_mcp_server.py"],
-  "env": { "PYTHONPATH": "/path/to/spx-helper/mcp-tools/chrome-auth" }
+  "command": "bash",
+  "args": ["/path/to/spx-helper/scripts/codex-mcp-launch.sh", "scheduler-query"]
 },
 "flink-query": {
-  "command": "python3",
-  "args": ["/path/to/spx-helper/mcp-tools/flink-query/flink_mcp_server.py"],
-  "env": { "PYTHONPATH": "/path/to/spx-helper/mcp-tools/chrome-auth" }
+  "command": "bash",
+  "args": ["/path/to/spx-helper/scripts/codex-mcp-launch.sh", "flink-query"]
 },
 "datamap-query": {
-  "command": "python3",
-  "args": ["/path/to/spx-helper/mcp-tools/datamap-query/datamap_mcp_server.py"],
-  "env": { "PYTHONPATH": "/path/to/spx-helper/mcp-tools/chrome-auth" }
+  "command": "bash",
+  "args": ["/path/to/spx-helper/scripts/codex-mcp-launch.sh", "datamap-query"]
+},
+"seatalk-reader": {
+  "command": "bash",
+  "args": ["/path/to/spx-helper/scripts/codex-mcp-launch.sh", "seatalk-reader"]
 }
 ```
 
-前提：已对对应子目录执行过 `python3 -m pip install -e .`，以便装上 `mcp`、`requests` 等依赖。**备选**：若 `flink-mcp`、`scheduler-mcp` 等已在 PATH 中，可改为 `"command": "flink-mcp", "args": []`（建议使用 `which flink-mcp` 的绝对路径，避免 Cursor 找不到 PATH）。
+可用的 server 名称可通过下面命令查看：
 
-**不依赖 chrome-auth 的 MCP**（presto-query、ck-query、spark-query、api-trace、seatalk-reader、seatalk-group）：同样可用 `**python3` + 本机 `*_mcp_server.py` 绝对路径**；若已 `pip install -e`，也可用各包在 `pyproject.toml` 里声明的入口命令名。详见各工具目录下的 `README.md`。
-
-**datastudio-mcp**：使用 `cwd` + `python -m` 等方式，见 `mcp-tools/datastudio-mcp/README.md`。
+```bash
+bash scripts/codex-mcp-launch.sh --list
+```
 
 保存 `~/.cursor/mcp.json` 后，在 Cursor **Settings → MCP** 中**刷新**或**关闭再开启**对应服务。
 
@@ -380,9 +386,18 @@ MCP 一直红点/连接失败？
 3. 点击 MCP 名称旁的错误信息查看详细日志
 4. 终端手动运行 MCP 命令验证
 
-Python 版本不兼容？
+Python / 架构不兼容？
 
-MCP 工具需要 Python 3.10+。通过 uv 安装：`uv python install 3.12`
+仓库内全量 MCP 需要 Python 3.12+。本地仓库方式请运行：
+
+```bash
+cd /path/to/spx-helper
+bash scripts/setup-mcp-env.sh --force
+```
+
+如果看到 `mach-o file, but is an incompatible architecture`、`have 'x86_64', need 'arm64'` 等错误，说明某个全局 Python 环境混入了另一种 CPU 架构的原生 wheel。不要继续对系统 Python 执行零散 `pip install`；改用上面的 `.mcp-venvs/<arch>-py<version>/` 隔离环境。免克隆 release 方式则建议用 `uvx`，必要时先执行 `uv python install 3.12`。
+
+如果 venv 目录存在但所有 Python MCP 都在启动阶段报 `ModuleNotFoundError`，通常是上次安装被中断导致的半初始化环境。运行 `bash scripts/setup-mcp-env.sh --force` 重建即可；新版启动器也会在 `.spx-mcp-ready` 缺失或核心依赖校验失败时自动触发 setup。
 
 ---
 
@@ -393,6 +408,12 @@ MCP 配置在 `~/.cursor/mcp.json`，新增或修改后需在 Cursor 设置中**
 ---
 
 ## 更新日志
+
+### v3.6.11
+
+- **MCP 启动链路**：新增仓库内架构隔离 venv 初始化脚本，`codex-mcp-launch.sh` 会检查 `.spx-mcp-ready` 与核心依赖 import，避免半初始化 venv 让所有 Python MCP 同时不可用。
+- **Codex Desktop**：仓库 `.codex/config.toml` 改为通过 `SPX_HELPER_ROOT` 定位本地仓库，避免 Desktop app-server 从 `/` 启动时将 `cwd = "."` 解析错导致本地 MCP 起不来。
+- **DataMap MCP**：补充 wheel 文件选择配置，修复全量 editable install 时 datamap-query 无法判断打包文件的问题。
 
 ### v3.6.10
 

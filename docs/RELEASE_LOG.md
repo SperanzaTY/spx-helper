@@ -6,6 +6,36 @@
 
 ---
 
+## v3.6.11 -- 2026-04-24 -- `fix`: 修复 Codex Desktop 本地 MCP 启动链路
+
+**提交者**: Codex / 仓库维护者
+**Commit Type**: fix（PATCH **3.6.10 → 3.6.11**）
+
+### 变更说明
+
+**MCP 工具链**
+
+- 新增 **`scripts/setup-mcp-env.sh`**，统一创建 `.mcp-venvs/<arch>-py<version>/` 仓库内虚拟环境，并一次性安装所有仓库内 MCP，避免 macOS arm64 / x86_64 原生 wheel 混用。
+- **`scripts/codex-mcp-launch.sh`** 默认优先使用上述架构隔离 venv；会同时检查 `.spx-mcp-ready` 与核心依赖 import，发现半初始化 venv 时自动补装，或在 `SPX_MCP_AUTO_SETUP=0` 时给出明确修复命令。
+- **`.codex/config.toml`** 不再依赖 `cwd = "."` + `./scripts/...` 直接定位仓库；仓库模板通过 `SPX_HELPER_ROOT` 定位本地仓库，避免 Codex Desktop app-server 从 `/` 启动时本地 MCP 全量不可用。
+- **`mcp-tools/datamap-query/pyproject.toml`** 补充 hatchling wheel 文件选择配置，修复全量 editable install 时无法判断打包文件的问题。
+- `.gitignore` 忽略 `.mcp-venvs/`，避免本地依赖环境进入版本控制。
+
+**文档**
+
+- 更新 **`README.md`**、**`docs/guides/CODEX.md`**、**`docs/guides/MCP_TOOLS.md`**、**`docs/guides/SEATALK_AGENT.md`**、**`docs/guides/CHROME_EXTENSION.md`** 与 **`mcp-tools/datamap-query/README.md`**，同步 3.6.11 版本、架构隔离 venv、`SPX_HELPER_ROOT` 与 Cursor / SeaTalk MCP 配置示例。
+
+### 测试项
+
+- `bash -n scripts/setup-mcp-env.sh scripts/codex-mcp-launch.sh`
+- `bash scripts/setup-mcp-env.sh`
+- `bash scripts/codex-mcp-launch.sh --list`
+- `SPX_MCP_AUTO_SETUP=0 bash scripts/codex-mcp-launch.sh seatalk-reader </dev/null`
+- 按 `codex mcp get --json` 合并后的配置，从 `/` 工作目录验证本地 10 个 MCP server 入口均可启动：`presto-query`、`ck-query`、`spark-query`、`api-trace`、`seatalk-reader`、`scheduler-query`、`seatalk-group`、`flink-query`、`datamap-query`、`datastudio-mcp`
+- 当前 Codex 会话 smoke test：`presto-query SELECT 1`、`ck-query SELECT 1`、`spark-query SELECT 1` 语法验证、`seatalk-reader list_seatalk_chats`
+- `python3 -m py_compile` 覆盖仓库内 MCP server 入口文件
+- `npm run verify:hooks`
+
 ## v3.6.10 -- 2026-04-23 -- `fix`: 修复 Presto 直接脚本调用与 SeaTalk 历史恢复
 
 **提交者**: Codex / 仓库维护者  

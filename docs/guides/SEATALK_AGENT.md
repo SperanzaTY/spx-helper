@@ -158,17 +158,27 @@ npm install
 
 ### 2. Cursor 里的 SeaTalk MCP（seatalk-reader / seatalk-group）
 
-侧边栏发消息、读会话等能力在 Agent 注入脚本里；**在 Cursor Chat / Agent 里调 MCP 工具**则走 `~/.cursor/mcp.json` 的 **uvx** 配置。
+侧边栏发消息、读会话等能力在 Agent 注入脚本里；**在 Cursor Chat / Agent 里调 MCP 工具**则走 `~/.cursor/mcp.json` 的 MCP 配置。
 
 - **必做**：Cursor → **Settings → MCP**，对 **seatalk-reader**、**seatalk-group**（以及本次有更新的其他 MCP）各 **关闭再开启** 一次，否则会沿用旧子进程。
-- **推荐（已克隆本仓库时，刷新最快）**：用**本地路径**预热 uv 缓存，避免仅从 GitLab 拉取时 `uvx --reinstall` 卡住一到数分钟：
+- **推荐（已克隆本仓库时，刷新最快）**：先初始化仓库内架构隔离 MCP venv，避免 macOS arm64 / x86_64 Python wheel 混用：
 
 ```bash
-cd spx-helper/mcp-tools/seatalk-reader
-uvx --reinstall --from . seatalk-reader-mcp --help >/dev/null
+cd spx-helper
+bash scripts/setup-mcp-env.sh
+```
 
-cd ../seatalk-group
-uvx --reinstall --from . seatalk-group-mcp --help >/dev/null
+本地 `~/.cursor/mcp.json` 可直接用仓库启动器：
+
+```json
+"seatalk-reader": {
+  "command": "bash",
+  "args": ["/path/to/spx-helper/scripts/codex-mcp-launch.sh", "seatalk-reader"]
+},
+"seatalk-group": {
+  "command": "bash",
+  "args": ["/path/to/spx-helper/scripts/codex-mcp-launch.sh", "seatalk-group"]
+}
 ```
 
 若 `mcp.json` 里仍是 `git+https://git.garena.com/.../spx-helper@release#subdirectory=mcp-tools/...`，也可在终端对同一 URL 执行 `uvx --reinstall --from 'git+...'` **强制重装**，但依赖网络与 Git，**往往比 `--from .` 慢很多**。
@@ -810,6 +820,10 @@ npm start
 ---
 
 ## 更新日志
+
+### v3.6.11
+
+- **SeaTalk MCP 配置**：推荐先执行 `bash scripts/setup-mcp-env.sh` 初始化仓库内架构隔离 venv，再用 `scripts/codex-mcp-launch.sh` 启动 `seatalk-reader` / `seatalk-group`，避免 Cursor / Codex 沿用半初始化 Python 环境。
 
 ### v3.6.10
 

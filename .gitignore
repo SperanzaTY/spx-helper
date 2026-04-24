@@ -47,6 +47,7 @@ __pycache__/
 *.egg-info/
 .venv/
 venv/
+.mcp-venvs/
 
 # SeaTalk Agent runtime
 .last-session.json

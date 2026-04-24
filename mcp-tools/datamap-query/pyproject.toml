@@ -15,3 +15,7 @@ dependencies = [
 
 [project.scripts]
 datamap-mcp = "datamap_mcp_server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]
+only-include = ["datamap_mcp_server.py"]
