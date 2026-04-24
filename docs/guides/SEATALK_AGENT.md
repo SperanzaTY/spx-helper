@@ -821,6 +821,10 @@ npm start
 
 ## 更新日志
 
+### v3.6.12
+
+- **seatalk-send**：发送前按目标会话类型和 id 校验当前选中会话，远距离私聊会优先使用 SeaTalk 内部 `actionSelectChatSession` 选择，减少虚拟列表未渲染时发不出去或选错会话的风险。
+
 ### v3.6.11
 
 - **SeaTalk MCP 配置**：推荐先执行 `bash scripts/setup-mcp-env.sh` 初始化仓库内架构隔离 venv，再用 `scripts/codex-mcp-launch.sh` 启动 `seatalk-reader` / `seatalk-group`，避免 Cursor / Codex 沿用半初始化 Python 环境。

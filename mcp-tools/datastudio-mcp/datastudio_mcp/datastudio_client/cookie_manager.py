@@ -18,6 +18,7 @@ from cryptography.fernet import Fernet
 import logging
 
 try:
+    from chrome_auth import get_auth as _chrome_auth_get_auth
     from chrome_auth import get_cookies as _chrome_auth_get_cookies
     _HAS_CHROME_AUTH = True
 except ImportError:
@@ -42,11 +43,16 @@ class CookieManager:
         初始化Cookie管理器
         
         Args:
-            config_dir: 配置文件目录，默认为当前目录下的.config
+            config_dir: 配置文件目录，默认为用户目录下的可写 .config
             environment: 默认环境名称 ('shopee', 'ldn')，如果不指定则使用'shopee'
         """
-        self.config_dir = Path(config_dir or ".config")
-        self.config_dir.mkdir(exist_ok=True)
+        default_config_dir = Path.home() / ".spx_helper" / "datastudio-mcp" / ".config"
+        self.config_dir = Path(
+            config_dir
+            or os.getenv("DATASTUDIO_MCP_CONFIG_DIR")
+            or default_config_dir
+        ).expanduser()
+        self.config_dir.mkdir(parents=True, exist_ok=True)
         
         self.cookie_file = self.config_dir / "cookies.json"
         self.encrypted_cookie_file = self.config_dir / "cookies.enc"
@@ -235,7 +241,13 @@ class CookieManager:
             self._save_cookies()
         logger.info(f"已更新环境 '{env}' 的 {len(new_cookies)} 个cookies")
     
-    def import_from_browser(self, browser: str = 'chrome', domain: str = None, environment: str = None) -> bool:
+    def import_from_browser(
+        self,
+        browser: str = 'chrome',
+        domain: str = None,
+        environment: str = None,
+        auth_failed: bool = False,
+    ) -> bool:
         """
         从浏览器导入cookies（优先使用 chrome-auth 共享库）
         
@@ -243,6 +255,7 @@ class CookieManager:
             browser: 浏览器类型 ('chrome', 'firefox', 'safari', 'edge')
             domain: 目标域名，如果不指定则使用environment对应的域名
             environment: 环境名称 ('shopee' or 'ldn')，如果指定则从配置中获取域名
+            auth_failed: 调用方已收到 401/403 时设为 True，允许 chrome-auth 做强制 SSO 续期
             
         Returns:
             导入是否成功
@@ -261,7 +274,10 @@ class CookieManager:
             new_cookies = {}
 
             if browser == 'chrome' and _HAS_CHROME_AUTH:
-                new_cookies = _chrome_auth_get_cookies(domain=domain, force=True)
+                auth = _chrome_auth_get_auth(domain, force=auth_failed, auth_failed=auth_failed)
+                new_cookies = auth.cookies if auth and auth.cookies else {}
+                if not new_cookies:
+                    new_cookies = _chrome_auth_get_cookies(domain=domain, force=auth_failed)
                 if new_cookies:
                     logger.info(f"通过 chrome-auth 获取了 {len(new_cookies)} 个 {domain} cookies")
             
@@ -394,4 +410,4 @@ class CookieManager:
                 continue
         
         logger.error("所有浏览器刷新尝试都失败了")
-        return False 
+        return False

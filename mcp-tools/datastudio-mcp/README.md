@@ -10,6 +10,8 @@
 - 🔄 **更新文件**：更新 DataStudio 中已存在的资产
 - 🔓 **解锁文件**：解锁被锁定的 DataStudio 文件
 - 📋 **列出资产**：列出指定路径下的所有资产
+- 🔎 **搜索资产**：按名称/路径搜索 DataStudio 资产，可选搜索文件内容
+- 👀 **读取资产内容**：按 `assetId` 读取 DataStudio SQL / 脚本内容，支持行范围
 - 🍪 **刷新 Cookie**：自动从浏览器刷新认证 Cookie
 - 🌍 **多环境支持**：自动支持 Shopee DataSuite 和 Lenteradana DataSuite（根据project_code自动判断环境）
 
@@ -72,7 +74,12 @@ pip install fastmcp PyJWT cryptography python-dateutil requests browser-cookie3
    - 示例：`spx_mart,credit_mart,credit_fund`
    - `ldn` 项目自动使用 Lenteradana 环境，其他使用 Shopee 环境
 
-3. **目录结构示例**：
+3. **DATASTUDIO_MCP_CONFIG_DIR**（可选）：Cookie 缓存与加密 key 目录
+   - 默认：`~/.spx_helper/datastudio-mcp/.config`
+   - 需要放到自定义可写目录时配置该环境变量
+   - 不要使用只读工作目录下的相对 `.config`
+
+4. **目录结构示例**：
    ```
    /Users/myname/datastudio_code/
    ├── spx_mart/
@@ -140,6 +147,43 @@ pip install fastmcp PyJWT cryptography python-dateutil requests browser-cookie3
 - 用于解锁被其他用户或会话锁定的文件
 - 解锁后可能会丢失其他用户未保存的修改，请谨慎使用
 
+### 6. 搜索资产
+```
+搜索 DataStudio 项目 spx_datamart 中名称或路径包含 fleet_order 的资产
+```
+
+对应 MCP 工具：
+
+```text
+search_datastudio_assets(
+  keyword="fleet_order",
+  project_code="spx_datamart",
+  path="//Templates/",
+  max_results=20,
+  search_content=false
+)
+```
+
+如果需要搜索 SQL 内容，可设置 `search_content=true`，建议同时传 `path` 限定目录，避免读取过多文件。
+
+### 7. 读取资产内容
+```
+读取 DataStudio asset_id 11544312，项目 spx_datamart
+```
+
+对应 MCP 工具：
+
+```text
+read_datastudio_asset(
+  asset_id=11544312,
+  project_code="spx_datamart",
+  start_line=1,
+  limit=500
+)
+```
+
+该工具直接走 DataStudio `file/detail` 后端接口，不依赖浏览器当前是否打开该文件。
+
 
 ---
 
@@ -189,4 +233,3 @@ pip install fastmcp PyJWT cryptography python-dateutil requests browser-cookie3
 
 - GitLab: https://git.garena.com/shopee/seamoney-data/data-mart/datastudio_mcp
 - Issues: https://git.garena.com/shopee/seamoney-data/data-mart/datastudio_mcp/-/issues
-

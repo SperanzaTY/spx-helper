@@ -147,7 +147,11 @@ class DataStudioAPIClient:
                 # 检查响应状态
                 if response.status_code == 401:
                     logger.warning(f"收到401未授权响应，尝试刷新cookie（环境: {self.environment}）")
-                    if self.auto_refresh and self.cookie_manager.import_from_browser('chrome', environment=self.environment):
+                    if self.auto_refresh and self.cookie_manager.import_from_browser(
+                        'chrome',
+                        environment=self.environment,
+                        auth_failed=True,
+                    ):
                         self._update_session_cookies()
                         continue
                     else:
@@ -163,7 +167,11 @@ class DataStudioAPIClient:
                 
                 elif response.status_code == 403:
                     logger.warning(f"收到403禁止访问响应，可能需要更新CSRF token（环境: {self.environment}）")
-                    if self.auto_refresh and self.cookie_manager.import_from_browser('chrome', environment=self.environment):
+                    if self.auto_refresh and self.cookie_manager.import_from_browser(
+                        'chrome',
+                        environment=self.environment,
+                        auth_failed=True,
+                    ):
                         self._update_session_cookies()
                         continue
                     else:
@@ -258,8 +266,7 @@ class DataStudioAPIClient:
             'expiry_info': expiry_info,
             'total_cookies': len(self.cookie_manager.get_cookies())
         }
-    
-    
+
     def enable_auto_refresh(self, enabled: bool = True) -> None:
         """
         启用或禁用自动刷新
@@ -281,5 +288,3 @@ class DataStudioAPIClient:
         self.max_retries = max_retries
         self.retry_delay = retry_delay
         logger.info(f"重试配置已更新: 最大重试{max_retries}次，延迟{retry_delay}秒")
-    
-    

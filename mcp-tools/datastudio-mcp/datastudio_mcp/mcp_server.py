@@ -9,6 +9,39 @@ from .datastudio_client.datastudio_util import DataStudioUtil
 # 创建 MCP 服务器
 mcp = FastMCP("DataStudio MCP Server")
 
+DEFAULT_SEARCH_ROOTS = [
+    "//Workflows/",
+    "//Scheduled Tasks/",
+    "//Manual Tasks/",
+    "//Templates/",
+]
+
+
+def _json_result(payload) -> str:
+    return json.dumps(payload, ensure_ascii=False, indent=2)
+
+
+def _extract_detail_data(detail):
+    if isinstance(detail, dict) and isinstance(detail.get("data"), dict):
+        return detail["data"]
+    return detail if isinstance(detail, dict) else {}
+
+
+def _line_window(content: str, start_line: int = 1, limit: int = 500):
+    lines = (content or "").splitlines()
+    total = len(lines)
+    start_line = max(1, int(start_line or 1))
+    limit = max(1, min(int(limit or 500), 5000))
+    end_line = min(total, start_line + limit - 1)
+    selected = lines[start_line - 1:end_line] if total else []
+    return {
+        "content": "\n".join(selected),
+        "lineStart": start_line if total else 0,
+        "lineEnd": end_line if total else 0,
+        "totalLines": total,
+        "truncated": end_line < total,
+    }
+
 def _determine_environment(project_code: str) -> str:
     """
     根据project_code自动判断环境
@@ -191,6 +224,152 @@ def refresh_cookies_from_browser(browser: str = "chrome", environment: str = "sh
         
     except Exception as e:
         return f"刷新 Cookie 失败: {str(e)}"
+
+
+@mcp.tool()
+def read_datastudio_asset(
+    asset_id: int,
+    project_code: str,
+    start_line: int = 1,
+    limit: int = 500,
+    include_metadata: bool = True,
+) -> str:
+    """
+    按 assetId 读取 DataStudio 文件内容。
+
+    用途:
+        - 让 agent 查看现有 SQL / Shell / Python 任务内容
+        - 替代依赖浏览器当前打开文件的前端 read_asset_content
+
+    参数:
+        asset_id: DataStudio assetId
+        project_code: DataStudio 项目代码，例如 spx_datamart
+        start_line: 起始行，默认 1
+        limit: 最多返回行数，默认 500，最大 5000
+        include_metadata: 是否返回 asset 元信息，默认 True
+    """
+    try:
+        util = get_util_for_project(project_code)
+        detail = util.get_file_detail(asset_id, project_code)
+        data = _extract_detail_data(detail)
+        content = data.get("content") or ""
+        window = _line_window(content, start_line=start_line, limit=limit)
+        result = {
+            "success": True,
+            "project_code": project_code,
+            "assetId": asset_id,
+            **window,
+        }
+        if include_metadata:
+            result["metadata"] = {
+                "assetName": data.get("assetName") or data.get("name"),
+                "assetType": data.get("assetType"),
+                "assetRoot": data.get("assetRoot"),
+                "idcRegion": data.get("idcRegion"),
+                "currentVersion": data.get("currentVersion"),
+                "lockHolder": data.get("lockHolder") or data.get("lockHolderAccount"),
+                "updatedBy": data.get("updatedBy") or data.get("updateBy"),
+                "updatedTime": data.get("updatedTime") or data.get("updateTime"),
+            }
+        return _json_result(result)
+    except Exception as e:
+        return _json_result({"success": False, "error": str(e)})
+
+
+@mcp.tool()
+def search_datastudio_assets(
+    keyword: str,
+    project_code: str,
+    path: str = "",
+    max_results: int = 20,
+    search_content: bool = False,
+    max_assets_to_scan: int = 200,
+) -> str:
+    """
+    搜索 DataStudio 资产。
+
+    默认按资产名和路径搜索；如需搜索 SQL 内容，可设置 search_content=true，
+    但会逐个读取文件详情，建议配合 path 限定目录。
+
+    参数:
+        keyword: 搜索关键词，例如 fleet_order
+        project_code: DataStudio 项目代码，例如 spx_datamart
+        path: 可选路径，例如 //Templates/spx_datamart/；为空时搜索常用根目录
+        max_results: 最多返回结果数，默认 20，最大 100
+        search_content: 是否搜索文件内容，默认 False
+        max_assets_to_scan: search_content=true 时最多读取多少个资产，默认 200
+    """
+    keyword = (keyword or "").strip()
+    if not keyword:
+        return _json_result({"success": False, "error": "keyword 不能为空"})
+
+    try:
+        util = get_util_for_project(project_code)
+        roots = [path] if path else DEFAULT_SEARCH_ROOTS
+        assets = []
+        errors = []
+        for root in roots:
+            try:
+                assets.extend(util.get_leaf_assets_by_path(root, project_code))
+            except Exception as exc:
+                errors.append({"path": root, "error": str(exc)})
+
+        keyword_lower = keyword.lower()
+        max_results = max(1, min(int(max_results), 100))
+        max_assets_to_scan = max(1, min(int(max_assets_to_scan), 2000))
+        hits = []
+        scanned_content = 0
+
+        for asset in assets:
+            if len(hits) >= max_results:
+                break
+            name = str(asset.get("name") or "")
+            asset_path = str(asset.get("path") or "")
+            haystack = f"{name}\n{asset_path}".lower()
+            match_type = None
+            snippet = ""
+
+            if keyword_lower in haystack:
+                match_type = "name_or_path"
+            elif search_content and scanned_content < max_assets_to_scan:
+                scanned_content += 1
+                try:
+                    detail = util.get_file_detail(int(asset.get("id")), project_code)
+                    data = _extract_detail_data(detail)
+                    content = str(data.get("content") or "")
+                    idx = content.lower().find(keyword_lower)
+                    if idx >= 0:
+                        match_type = "content"
+                        start = max(0, idx - 160)
+                        end = min(len(content), idx + len(keyword) + 240)
+                        snippet = content[start:end].replace("\n", "\\n")
+                except Exception:
+                    pass
+
+            if match_type:
+                hits.append({
+                    "assetId": asset.get("id"),
+                    "assetName": name,
+                    "assetType": asset.get("type"),
+                    "path": asset_path,
+                    "matchType": match_type,
+                    "snippet": snippet,
+                })
+
+        return _json_result({
+            "success": True,
+            "project_code": project_code,
+            "keyword": keyword,
+            "path": path or "(common roots)",
+            "totalAssetsLoaded": len(assets),
+            "scannedContent": scanned_content,
+            "returned": len(hits),
+            "hits": hits,
+            "errors": errors,
+        })
+    except Exception as e:
+        return _json_result({"success": False, "error": str(e)})
+
 
 @mcp.tool()
 def create_file(local_file_path: str, asset_type: int, project_code: str) -> str:

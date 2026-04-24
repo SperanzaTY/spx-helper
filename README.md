@@ -2,7 +2,7 @@
 
 > **Shopee 大数据开发助手** — Chrome 扩展 + MCP 工具套件 + SeaTalk AI Agent
 
-[![Version](https://img.shields.io/badge/version-3.6.11-blue.svg)](https://github.com/SperanzaTY/spx-helper/releases)
+[![Version](https://img.shields.io/badge/version-3.6.12-blue.svg)](https://github.com/SperanzaTY/spx-helper/releases)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 SPX Helper 是一套为 Shopee 大数据开发工程师打造的效率工具集，包含四个核心模块：
@@ -137,6 +137,7 @@ GitHub（备份）  ：https://github.com/SperanzaTY/spx-helper
 
 ## 更新日志
 
+- **v3.6.12**：**MCP 元数据能力补齐**：presto-query 新增表搜索、表元数据、安全预览、字段枚举、SQL review / explain，并拦截 `DESCRIBE` / `information_schema` 误用；datastudio-mcp 新增资产搜索与按 assetId 读取内容；chrome-auth 默认不再在 CDP 失败时自动打开 Chrome；SeaTalk 发送注入修复远距离私聊会话选择。发版说明见 [docs/RELEASE_LOG.md](docs/RELEASE_LOG.md)。
 - **v3.6.11**：**MCP 启动链路**改为仓库内架构隔离 venv，并用 `.spx-mcp-ready` + 核心 import 校验避免半初始化环境；Codex Desktop 下本地 MCP 通过 `SPX_HELPER_ROOT` 定位仓库，避免 `cwd="."` 被解析到 `/` 后全量不可用。发版说明见 [docs/RELEASE_LOG.md](docs/RELEASE_LOG.md)。
 - **v3.6.10**：**seatalk-agent** 历史对话恢复会保留工具调用卡片与消息上下文，并增强长文本/表格换行避免侧栏横向溢出；**presto-query** 直接查询脚本补齐可执行权限，可用 `./mcp-tools/presto-query/query_presto.py "SELECT 1"` 直接调用；**pre-push** 增加 release 通知草稿未跟踪与版本号校验。发版说明见 [docs/RELEASE_LOG.md](docs/RELEASE_LOG.md)。
 - **v3.6.9**：**seatalk-agent** 修复工作区切换链路：异常退出后自动拉起，连接状态按真实后端可交互性显示；工作区选择器支持删除历史 / 隐藏本机项目，列表与“浏览...”切换成功后会自动关闭并回到对话页，当前工作区不再显示删除按钮。发版说明见 [docs/RELEASE_LOG.md](docs/RELEASE_LOG.md)。

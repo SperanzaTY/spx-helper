@@ -570,6 +570,13 @@ def _chrome_app_name() -> str:
     return os.environ.get("CHROME_AUTH_BROWSER_APP", "Google Chrome").strip() or "Google Chrome"
 
 
+def _browser_open_fallback_enabled() -> bool:
+    """Whether SSO refresh may open a real browser window/tab after CDP fails."""
+    if os.environ.get("CHROME_AUTH_DISABLE_BROWSER_OPEN", "").strip():
+        return False
+    return os.environ.get("CHROME_AUTH_ALLOW_BROWSER_OPEN", "").strip() in {"1", "true", "TRUE", "yes", "YES"}
+
+
 def _refresh_via_open_background_macos(url: str, wait_seconds: int = 8) -> bool:
     """macOS: open URL in Chrome without bringing the app to the foreground (`open -g`).
 
@@ -653,12 +660,18 @@ def refresh_session(
 
     Strategy chain (best first):
       1. CDP hidden tab on every reachable port (needs --remote-debugging-port; no focus steal)
-      2. macOS ``open -g`` — background Chrome open (no focus steal; may leave a tab)
-      3. AppleScript visible tab (last resort; set CHROME_AUTH_DISABLE_APPLESCRIPT=1 to skip)
+      2. Optional browser-open fallback when CHROME_AUTH_ALLOW_BROWSER_OPEN=1:
+         macOS ``open -g`` and then AppleScript.
     """
     wait = max(8, int(timeout))
     if _try_cdp_refresh(url, cdp_port, timeout):
         return True
+    if not _browser_open_fallback_enabled():
+        logger.info(
+            "refresh_session: CDP refresh failed and browser-open fallback is disabled "
+            "(set CHROME_AUTH_ALLOW_BROWSER_OPEN=1 to enable old fallback behavior)"
+        )
+        return False
     if _refresh_via_open_background_macos(url, wait_seconds=wait):
         return True
     return _refresh_via_applescript(url, wait_seconds=wait)

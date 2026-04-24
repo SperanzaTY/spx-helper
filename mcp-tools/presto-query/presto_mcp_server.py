@@ -53,6 +53,10 @@ if not DEFAULT_USERNAME:
 mcp = FastMCP("presto-query")
 
 BASE_URL = "https://open-api.datasuite.shopee.io/dataservice/personal"
+DATASUITE_BASE_URL = "https://datasuite.shopee.io"
+DATAMAP_API_PREFIX = "/datamap/api/v3"
+DATASTUDIO_API_PREFIX = "/datastudio/api/v1"
+DATASUITE_DOMAIN = "datasuite.shopee.io"
 
 
 _METADATA_PATTERNS = [
@@ -93,6 +97,266 @@ def _normalize_idc(idc: str) -> str:
     if normalized not in {'sg', 'us'}:
         raise ValueError("idc 仅支持 `sg` 或 `us`，默认 `sg`")
     return normalized.upper()
+
+
+def _normalize_metadata_idc(idc: str) -> Tuple[str, str]:
+    """Return (DataStudio idcRegion, DataMap qualifiedName IDC suffix)."""
+    normalized = (idc or DEFAULT_IDC or 'sg').strip().lower()
+    if normalized in {'sg', 'singapore', ''}:
+        return "SG", ""
+    if normalized in {'us', 'useast', 'us-east', 'useast1'}:
+        return "USEast", "USEast"
+    raise ValueError("idc 仅支持 `sg` 或 `us`/`USEast`，默认 `sg`")
+
+
+def _parse_table_ref(table_ref: str) -> Tuple[str, str]:
+    """Parse database.table. Presto metadata lookup requires an explicit schema."""
+    cleaned = table_ref.strip().strip("`").strip()
+    cleaned = cleaned.replace('"', '').replace('`', '')
+    parts = [p for p in cleaned.split('.') if p]
+    if len(parts) == 2:
+        return parts[0], parts[1]
+    if len(parts) == 3:
+        return parts[1], parts[2]
+    raise ValueError("table_ref 必须包含 schema，例如 `spx_datamart.dwd_spx_fleet_order_di_id`")
+
+
+def _qualified_name(database: str, table: str, engine: str = "hive", env: str = "prod", idc: str = "") -> str:
+    env_part = f"{env}#{idc}" if idc else env
+    return f"{engine}@{env_part}@{database}@{table}"
+
+
+def _load_datasuite_cookies() -> Dict[str, str]:
+    """Load DataSuite cookies using the shared chrome-auth package when available."""
+    try:
+        from chrome_auth import get_auth  # type: ignore
+
+        result = get_auth(DATASUITE_DOMAIN)
+        if result.ok and result.cookies:
+            return result.cookies
+    except Exception:
+        pass
+
+    try:
+        import browser_cookie3  # type: ignore
+
+        jar = browser_cookie3.chrome(domain_name=DATASUITE_DOMAIN)
+        cookies = {c.name: c.value for c in jar}
+        if cookies:
+            return cookies
+    except Exception as exc:
+        raise RuntimeError(
+            "无法读取 DataSuite 登录态。请用仓库统一 launcher 启动 MCP："
+            "`bash scripts/codex-mcp-launch.sh presto-query`，或先运行 "
+            "`bash scripts/setup-mcp-env.sh` 后重启 MCP。"
+        ) from exc
+
+    raise RuntimeError(
+        f"没有找到 {DATASUITE_DOMAIN} 的 Chrome Cookie。请先在 Chrome 打开 "
+        f"{DATASUITE_BASE_URL}/studio 并确认已登录。"
+    )
+
+
+def _datasuite_get(path: str, params: dict, *, prefix: str) -> Any:
+    cookies = _load_datasuite_cookies()
+    headers = {
+        "accept": "application/json, text/plain, */*",
+        "referer": f"{DATASUITE_BASE_URL}/studio",
+        "user-agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36"
+        ),
+    }
+    if "CSRF-TOKEN" in cookies:
+        headers["x-csrf-token"] = cookies["CSRF-TOKEN"]
+
+    resp = requests.get(
+        f"{DATASUITE_BASE_URL}{prefix}{path}",
+        params=params,
+        cookies=cookies,
+        headers=headers,
+        timeout=30,
+    )
+    if resp.status_code in (401, 403):
+        raise RuntimeError(
+            f"DataSuite 认证失败 ({resp.status_code})。请刷新 Chrome 中的 "
+            f"{DATASUITE_BASE_URL}/studio 登录态后重启 MCP。"
+        )
+    resp.raise_for_status()
+    body = resp.json()
+    if isinstance(body, dict) and "success" in body:
+        if not body.get("success"):
+            raise RuntimeError(f"DataSuite API error {body.get('code')}: {body.get('message') or body.get('msg')}")
+        return body.get("data")
+    return body
+
+
+def _format_bytes(value: Any) -> str:
+    try:
+        size = float(value)
+    except (TypeError, ValueError):
+        return str(value or "")
+    units = ["B", "KB", "MB", "GB", "TB", "PB"]
+    for unit in units:
+        if size < 1024 or unit == units[-1]:
+            return f"{size:.2f} {unit}" if unit != "B" else f"{int(size)} B"
+        size /= 1024
+
+
+def _metadata_guidance(stmt_type: str, sql: str) -> str:
+    return (
+        f"❌ 不要用 `query_presto` 执行 {stmt_type} 元数据语句。\n\n"
+        f"{_format_sql_block(sql)}\n\n"
+        "DataSuite Personal Presto API 对 `DESCRIBE` / `SHOW` / `information_schema` 支持不稳定，"
+        "经常返回空结果或报错。请改用 MCP 工具：\n\n"
+        "- 本 MCP 已提供: `get_presto_table_metadata(table_ref=\"schema.table\", idc=\"sg\")`\n"
+        "- 若单独启用了 DataMap MCP，也可以用: `datamap-query.get_table_info` / `get_table_detail`\n\n"
+        "拿到字段后，再用 `query_presto` 执行业务 SELECT。"
+    )
+
+
+def _looks_like_table_discovery_sql(sql: str) -> bool:
+    """Detect SELECTs that use Presto metadata tables to search table names."""
+    normalized = re.sub(r"\s+", " ", sql.strip().rstrip(";").lower())
+    metadata_sources = (
+        "information_schema.tables",
+        "information_schema.columns",
+        "system.jdbc.tables",
+        "system.jdbc.columns",
+    )
+    if not any(source in normalized for source in metadata_sources):
+        return False
+    table_lookup_terms = (
+        "table_name",
+        "table_schema",
+        "column_name",
+        "regexp_like",
+        " like ",
+        " ilike ",
+    )
+    return any(term in normalized for term in table_lookup_terms)
+
+
+def _extract_table_search_hint(sql: str) -> str:
+    patterns = [
+        r"(?:lower\s*\(\s*)?table_name(?:\s*\))?\s+(?:i?like)\s+['\"]%?([^%'\"\s]+)",
+        r"regexp_like\s*\(\s*(?:lower\s*\(\s*)?table_name(?:\s*\))?\s*,\s*['\"]([^'\"]+)",
+        r"table_name\s*=\s*['\"]([^'\"]+)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, sql, re.IGNORECASE)
+        if match:
+            return match.group(1).strip()
+    return ""
+
+
+def _table_search_guidance(sql: str) -> str:
+    keyword = _extract_table_search_hint(sql)
+    example = f'keyword="{keyword}"' if keyword else 'keyword="fleet_order"'
+    return (
+        "❌ 不要用 `query_presto` 查询 `information_schema` / `system.jdbc` 来按关键字找表。\n\n"
+        f"{_format_sql_block(sql)}\n\n"
+        "这类 SQL 在 DataSuite Personal Presto API 上容易慢、空结果或行为不稳定。"
+        "请改用 MCP 表搜索工具，它走 DataStudio metadata search：\n\n"
+        f"- `search_presto_tables({example}, schema=\"spx_datamart\", idc=\"sg\")`\n"
+        "- 找到候选表后，再用 `get_presto_table_metadata(table_ref=\"schema.table\")` 查看字段和分区。\n"
+    )
+
+
+def _validate_identifier(identifier: str, label: str = "identifier") -> str:
+    cleaned = (identifier or "").strip().strip('"').strip("`")
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", cleaned):
+        raise ValueError(f"{label} 只能包含字母、数字、下划线，且不能以数字开头: {identifier}")
+    return cleaned
+
+
+def _quote_identifier(identifier: str) -> str:
+    return f'"{_validate_identifier(identifier)}"'
+
+
+def _format_table_name(database: str, table: str) -> str:
+    return f"{_quote_identifier(database)}.{_quote_identifier(table)}"
+
+
+def _parse_column_list(columns: str) -> List[str]:
+    columns = (columns or "").strip()
+    if not columns or columns == "*":
+        return ["*"]
+    parsed = []
+    for col in columns.split(","):
+        parsed.append(_validate_identifier(col.strip(), "column"))
+    return parsed
+
+
+def _validate_sql_filter(filter_sql: str, label: str = "filter") -> str:
+    cleaned = (filter_sql or "").strip()
+    if not cleaned:
+        return ""
+    forbidden = [";", "--", "/*", "*/"]
+    if any(token in cleaned for token in forbidden):
+        raise ValueError(f"{label} 不允许包含分号或 SQL 注释")
+    if re.search(r"\b(insert|update|delete|drop|alter|create|grant|revoke|truncate|merge)\b", cleaned, re.IGNORECASE):
+        raise ValueError(f"{label} 只能是 WHERE 条件片段，不能包含写操作或 DDL")
+    return cleaned
+
+
+async def _get_table_columns_for_metadata(table_ref: str, idc: str) -> Tuple[str, str, str, List[Dict[str, Any]]]:
+    database, table = _parse_table_ref(table_ref)
+    idc_region, _ = _normalize_metadata_idc(idc)
+    columns = await asyncio.to_thread(
+        _datasuite_get,
+        "/metadata/queryColumn",
+        {
+            "schema": database,
+            "tableName": table,
+            "storageType": "HIVE",
+            "idcRegion": idc_region,
+        },
+        prefix=DATASTUDIO_API_PREFIX,
+    )
+    return database, table, idc_region, columns if isinstance(columns, list) else []
+
+
+def _partition_columns(columns: List[Dict[str, Any]]) -> List[str]:
+    return [str(c.get("name")) for c in columns if c.get("isPartition") and c.get("name")]
+
+
+def _filter_mentions_any_column(filter_sql: str, columns: List[str]) -> bool:
+    lowered = filter_sql.lower()
+    return any(re.search(rf"\b{re.escape(col.lower())}\b", lowered) for col in columns)
+
+
+def _first_referenced_table(sql: str) -> Optional[str]:
+    match = re.search(
+        r"\bfrom\s+([A-Za-z_][\w]*\.[A-Za-z_][\w]*(?:\.[A-Za-z_][\w]*)?)",
+        sql,
+        re.IGNORECASE,
+    )
+    return match.group(1) if match else None
+
+
+def _format_review_result(dimensions: List[Dict[str, Any]], score: int, passed: bool) -> str:
+    total_issues = sum(len(d.get("issues", [])) for d in dimensions)
+    lines = [
+        "# Presto SQL Review",
+        "",
+        f"- **overall_score**: {score}/100",
+        f"- **passed**: {str(passed).lower()}",
+        f"- **total_issues**: {total_issues}",
+        "",
+    ]
+    for dim in dimensions:
+        lines.append(f"## {dim['name']} - {dim['status']}")
+        issues = dim.get("issues") or []
+        if not issues:
+            lines.append("- No issues found.")
+        for issue in issues:
+            lines.append(
+                f"- [{issue.get('severity', 'info')}] {issue.get('description', '')} "
+                f"Suggestion: {issue.get('suggestion', '')}"
+            )
+        lines.append("")
+    return "\n".join(lines).strip()
 
 
 def _format_sql_block(sql: str) -> str:
@@ -203,6 +467,441 @@ def _write_full_result_json(
 # 返回类型使用 Any：FastMCP + Pydantic 2.10 对裸注解 -> str 会触发
 # create_model(..., result=str) 的 PydanticUserError（见 issue：非 Annotated 的 result 字段）
 @mcp.tool()
+async def search_presto_tables(
+    keyword: str,
+    schema: str = "",
+    idc: str = DEFAULT_IDC,
+    max_results: int = 20,
+    include_descriptions: bool = True,
+) -> Any:
+    """按关键字搜索 Presto/Hive 表。Agent 不要用 information_schema/LIKE 查表，改用此工具。
+
+    用途:
+    - 用户只给了表名关键词时，搜索相似表名
+    - 在生成 SQL 前确认候选 schema.table
+    - 替代 `SELECT ... FROM information_schema.tables WHERE table_name LIKE ...`
+
+    Args:
+        keyword: 表名或描述关键词，例如 `fleet_order`
+        schema: 可选 schema 过滤，例如 `spx_datamart`
+        idc: IDC，支持 `sg` 或 `us`/`USEast`，默认跟随 PRESTO_IDC/PRESTO_REGION
+        max_results: 最多展示结果数，默认 20，最大 100
+        include_descriptions: 是否展示表描述，默认 True
+    """
+    keyword = (keyword or "").strip()
+    schema = (schema or "").strip()
+    if not keyword:
+        return "❌ 参数错误: keyword 不能为空。示例: `search_presto_tables(keyword=\"fleet_order\", schema=\"spx_datamart\")`"
+
+    try:
+        idc_region, _ = _normalize_metadata_idc(idc)
+        page_size = max(1, min(int(max_results), 100))
+        params = {
+            "keyWord": keyword,
+            "pageNo": 1,
+            "pageSize": page_size,
+            "idcRegion": idc_region,
+        }
+        if schema:
+            params["schema"] = schema
+
+        data = await asyncio.to_thread(
+            _datasuite_get,
+            "/metadata/search",
+            params,
+            prefix=DATASTUDIO_API_PREFIX,
+        )
+        data = data if isinstance(data, dict) else {}
+        hits = data.get("highlightedTables") or data.get("items") or []
+        total = data.get("total", len(hits))
+
+        lines = [
+            f"# Search Presto Tables: {keyword}",
+            "",
+            f"- **idcRegion**: {idc_region}",
+            f"- **schema filter**: {schema or '(none)'}",
+            f"- **total matches**: {total}",
+            f"- **shown**: {len(hits)}",
+            "",
+            "| # | Table | Type | Region | Status | Size | Query Count | PIC |",
+            "| --- | --- | --- | --- | --- | --- | --- | --- |",
+        ]
+        for idx, hit in enumerate(hits, 1):
+            entity = hit.get("tableEntity") if isinstance(hit, dict) else {}
+            entity = entity if isinstance(entity, dict) else {}
+            table_schema = entity.get("schema") or ""
+            table_name = entity.get("name") or ""
+            pics = entity.get("technicalPIC") or entity.get("pic") or []
+            if isinstance(pics, str):
+                pic_text = pics
+            else:
+                pic_text = ", ".join(str(pic) for pic in pics[:3])
+            lines.append(
+                f"| {idx} | `{table_schema}.{table_name}` | {entity.get('tableType') or ''} | "
+                f"{entity.get('tableRegion') or ''} | {entity.get('tableStatus') or ''} | "
+                f"{entity.get('dataSize') or ''} | {entity.get('queryCount') or ''} | {pic_text} |"
+            )
+            if include_descriptions and entity.get("description"):
+                desc = str(entity.get("description") or "").replace("\n", " ").strip()
+                if len(desc) > 260:
+                    desc = desc[:257] + "..."
+                lines.append(f"|  | Description |  |  |  |  |  | {desc.replace('|', '/')} |")
+
+        if not hits:
+            lines.append("")
+            lines.append("未找到匹配表。可以放宽 schema 过滤或换一个关键词。")
+        else:
+            lines.append("")
+            lines.append("下一步: 对候选表调用 `get_presto_table_metadata(table_ref=\"schema.table\")` 查看字段和分区。")
+
+        return "\n".join(lines)
+    except Exception as e:
+        return (
+            f"❌ 搜索表失败: {e}\n\n"
+            "如果是登录态问题，请在 Chrome 打开 DataStudio/DataMap 确认已登录后重启 MCP。"
+        )
+
+
+@mcp.tool()
+async def get_presto_table_metadata(
+    table_ref: str,
+    idc: str = DEFAULT_IDC,
+    include_column_descriptions: bool = True,
+    max_columns: int = 200,
+) -> Any:
+    """获取 Presto/Hive 表元数据。Agent 不要用 DESCRIBE/SHOW，改用此工具。
+
+    用途:
+    - 查看字段名、字段类型、分区字段、字段描述
+    - 查看表描述、HDFS 路径、表大小、更新频率、Owner/PIC、最近查询量
+    - 在生成 SELECT 前确认 schema，避免 `DESCRIBE table` 在 DataSuite Presto API 中报错
+
+    Args:
+        table_ref: 表名，必须包含 schema，例如 `spx_datamart.dwd_spx_fleet_order_di_id`
+        idc: IDC，支持 `sg` 或 `us`/`USEast`，默认跟随 PRESTO_IDC/PRESTO_REGION
+        include_column_descriptions: 是否返回字段描述，默认 True
+        max_columns: 最多展示字段数，默认 200
+    """
+    try:
+        database, table = _parse_table_ref(table_ref)
+        idc_region, qn_idc = _normalize_metadata_idc(idc)
+        qn = _qualified_name(database, table, idc=qn_idc)
+
+        info = await asyncio.to_thread(
+            _datasuite_get,
+            f"/dataWarehouse/HIVE/info",
+            {"qualifiedName": qn},
+            prefix=DATAMAP_API_PREFIX,
+        )
+        detail = await asyncio.to_thread(
+            _datasuite_get,
+            f"/dataWarehouse/HIVE/expandDetail",
+            {"qualifiedName": qn},
+            prefix=DATAMAP_API_PREFIX,
+        )
+        columns = await asyncio.to_thread(
+            _datasuite_get,
+            "/metadata/queryColumn",
+            {
+                "schema": database,
+                "tableName": table,
+                "storageType": "HIVE",
+                "idcRegion": idc_region,
+            },
+            prefix=DATASTUDIO_API_PREFIX,
+        )
+
+        info = info if isinstance(info, dict) else {}
+        detail = detail if isinstance(detail, dict) else {}
+        columns = columns if isinstance(columns, list) else []
+        max_columns = max(1, min(max_columns, 2000))
+        shown_columns = columns[:max_columns]
+        partition_columns = [c.get("name", "") for c in columns if c.get("isPartition")]
+        technical_pics = (
+            info.get("technicalPIC")
+            or detail.get("displayTechnicalPIC")
+            or detail.get("techPics")
+            or []
+        )
+
+        lines = [
+            f"# {database}.{table}",
+            "",
+            f"- **idcRegion**: {idc_region}",
+            f"- **description**: {info.get('description') or detail.get('description') or ''}",
+            f"- **location**: {info.get('hdfsPath') or ''}",
+            f"- **dataSize**: {_format_bytes(info.get('tableSize'))}",
+            f"- **tableStatus**: {info.get('tableStatus') or ''}",
+            f"- **warehouseLayer**: {info.get('dataWarehouseLayer') or ''}",
+            f"- **marketRegion**: {info.get('region') or detail.get('region') or ''}",
+            f"- **updateFrequency**: {(info.get('updateFrequency') or {}).get('frequency') or info.get('updateFrequency') or ''}",
+            f"- **lastUpdateTime**: {info.get('lastUpdateTime') or detail.get('lastUpdateTime') or ''}",
+            f"- **taskOwner**: {info.get('taskOwner') or detail.get('taskOwner') or ''}",
+            f"- **technicalPIC**: {', '.join(technical_pics)}",
+            f"- **last7daysQueryCount**: {info.get('last7daysQueryCount') or detail.get('last7daysQueryCount') or ''}",
+            f"- **partitionColumns**: {', '.join(partition_columns) if partition_columns else '(none)'}",
+            "",
+        ]
+
+        if include_column_descriptions:
+            lines.append("| Column | Type | Partition | Description |")
+            lines.append("| --- | --- | --- | --- |")
+            for col in shown_columns:
+                lines.append(
+                    f"| {col.get('name', '')} | {col.get('dataType', '')} | "
+                    f"{'Yes' if col.get('isPartition') else 'No'} | "
+                    f"{str(col.get('description') or '').replace('|', '/')} |"
+                )
+        else:
+            lines.append("| Column | Type | Partition |")
+            lines.append("| --- | --- | --- |")
+            for col in shown_columns:
+                lines.append(
+                    f"| {col.get('name', '')} | {col.get('dataType', '')} | "
+                    f"{'Yes' if col.get('isPartition') else 'No'} |"
+                )
+
+        if len(columns) > len(shown_columns):
+            lines.append("")
+            lines.append(f"... truncated: showing {len(shown_columns)} of {len(columns)} columns. Increase max_columns if needed.")
+
+        return "\n".join(lines)
+    except Exception as e:
+        return (
+            f"❌ 获取表元数据失败: {e}\n\n"
+            "请确认表名包含 schema，例如 `spx_datamart.dwd_spx_fleet_order_di_id`。"
+            "如果是登录态问题，请在 Chrome 打开 DataStudio/DataMap 确认已登录后重启 MCP。"
+        )
+
+
+@mcp.tool()
+async def preview_presto_table_data(
+    table_ref: str,
+    columns: str = "*",
+    partition_filter: str = "",
+    where_filter: str = "",
+    limit: int = 10,
+    idc: str = DEFAULT_IDC,
+    require_partition_filter: bool = True,
+) -> Any:
+    """安全预览 Presto/Hive 表数据。
+
+    Agent 不要直接生成 `SELECT * FROM huge_table LIMIT 10`。先用此工具，它会：
+    - 自动加 LIMIT
+    - 校验字段名和 filter 片段
+    - 对分区表默认要求 partition_filter，避免误扫大表
+
+    Args:
+        table_ref: schema.table，例如 `spx_datamart.dwd_spx_fleet_order_di_id`
+        columns: 逗号分隔字段名，默认 `*`
+        partition_filter: 分区过滤条件片段，例如 `grass_date = '2026-04-24'`
+        where_filter: 额外过滤条件片段，例如 `display_status = 1`
+        limit: 返回行数，默认 10，最大 100
+        idc: IDC，支持 `sg` 或 `us`
+        require_partition_filter: 分区表是否强制要求 partition_filter，默认 True
+    """
+    try:
+        database, table, idc_region, metadata_columns = await _get_table_columns_for_metadata(table_ref, idc)
+        partitions = _partition_columns(metadata_columns)
+        partition_filter = _validate_sql_filter(partition_filter, "partition_filter")
+        where_filter = _validate_sql_filter(where_filter, "where_filter")
+
+        if require_partition_filter and partitions and not _filter_mentions_any_column(partition_filter, partitions):
+            return (
+                "❌ 该表是分区表，预览前必须提供 partition_filter，避免误扫大表。\n\n"
+                f"- table: `{database}.{table}`\n"
+                f"- partition columns: {', '.join(partitions)}\n"
+                "示例: `preview_presto_table_data(table_ref=\"schema.table\", partition_filter=\"grass_date = '2026-04-24'\")`"
+            )
+
+        selected_columns = _parse_column_list(columns)
+        select_sql = "*" if selected_columns == ["*"] else ", ".join(_quote_identifier(c) for c in selected_columns)
+        filters = [f for f in [partition_filter, where_filter] if f]
+        where_sql = f" WHERE {' AND '.join(f'({f})' for f in filters)}" if filters else ""
+        limit = max(1, min(int(limit), 100))
+        sql = f"SELECT {select_sql} FROM {_format_table_name(database, table)}{where_sql} LIMIT {limit}"
+        return await query_presto(sql=sql, idc=idc, max_rows=limit)
+    except Exception as e:
+        return f"❌ 预览表数据失败: {e}"
+
+
+@mcp.tool()
+async def get_presto_column_distinct_values(
+    table_ref: str,
+    column_name: str,
+    partition_filter: str = "",
+    where_filter: str = "",
+    limit: int = 20,
+    idc: str = DEFAULT_IDC,
+    require_partition_filter: bool = True,
+) -> Any:
+    """查看某个字段的 Top N 枚举值/分布。
+
+    用途:
+    - 在写 WHERE 前确认字段值长什么样
+    - 替代 agent 直接猜状态值、类型值、枚举值
+    - 分区表默认要求 partition_filter，避免全表 GROUP BY
+
+    Args:
+        table_ref: schema.table
+        column_name: 字段名
+        partition_filter: 分区过滤条件片段，例如 `grass_date = '2026-04-24'`
+        where_filter: 额外过滤条件片段
+        limit: Top N，默认 20，最大 100
+        idc: IDC，支持 `sg` 或 `us`
+        require_partition_filter: 分区表是否强制要求 partition_filter，默认 True
+    """
+    try:
+        database, table, _, metadata_columns = await _get_table_columns_for_metadata(table_ref, idc)
+        valid_columns = {str(c.get("name")) for c in metadata_columns if c.get("name")}
+        column_name = _validate_identifier(column_name, "column_name")
+        if valid_columns and column_name not in valid_columns:
+            sample = ", ".join(sorted(list(valid_columns))[:30])
+            return f"❌ 字段 `{column_name}` 不在 `{database}.{table}` 元数据中。可用字段示例: {sample}"
+
+        partitions = _partition_columns(metadata_columns)
+        partition_filter = _validate_sql_filter(partition_filter, "partition_filter")
+        where_filter = _validate_sql_filter(where_filter, "where_filter")
+        if require_partition_filter and partitions and not _filter_mentions_any_column(partition_filter, partitions):
+            return (
+                "❌ 该表是分区表，统计字段分布前必须提供 partition_filter，避免全表 GROUP BY。\n\n"
+                f"- table: `{database}.{table}`\n"
+                f"- partition columns: {', '.join(partitions)}"
+            )
+
+        filters = [f for f in [partition_filter, where_filter] if f]
+        where_sql = f" WHERE {' AND '.join(f'({f})' for f in filters)}" if filters else ""
+        limit = max(1, min(int(limit), 100))
+        col_sql = _quote_identifier(column_name)
+        sql = (
+            f"SELECT {col_sql} AS value, COUNT(*) AS cnt "
+            f"FROM {_format_table_name(database, table)}"
+            f"{where_sql} "
+            f"GROUP BY {col_sql} "
+            f"ORDER BY cnt DESC "
+            f"LIMIT {limit}"
+        )
+        return await query_presto(sql=sql, idc=idc, max_rows=limit)
+    except Exception as e:
+        return f"❌ 获取字段枚举值失败: {e}"
+
+
+@mcp.tool()
+async def review_presto_sql(sql: str, table_context: str = "", idc: str = DEFAULT_IDC) -> Any:
+    """规则化 review Presto SQL，检查常见正确性和性能风险，不执行 SQL。"""
+    sql_clean = sql.strip().rstrip(";").strip()
+    dimensions = [
+        {"name": "Correctness", "status": "pass", "issues": []},
+        {"name": "Security", "status": "pass", "issues": []},
+        {"name": "Performance", "status": "pass", "issues": []},
+        {"name": "Standards", "status": "pass", "issues": []},
+    ]
+
+    def add(dim_name: str, severity: str, description: str, suggestion: str) -> None:
+        for dim in dimensions:
+            if dim["name"] == dim_name:
+                dim["issues"].append({
+                    "severity": severity,
+                    "description": description,
+                    "suggestion": suggestion,
+                })
+                dim["status"] = "error" if severity in {"high", "critical"} else "warning"
+                return
+
+    if not re.match(r"^\s*(select|with|explain)\b", sql_clean, re.IGNORECASE):
+        add("Security", "high", "SQL is not a read-only SELECT/WITH/EXPLAIN statement.", "Only run read-only analytical SQL through Presto MCP.")
+    if re.search(r"\b(insert|update|delete|drop|alter|create|grant|revoke|truncate|merge)\b", sql_clean, re.IGNORECASE):
+        add("Security", "critical", "SQL contains write operation or DDL keyword.", "Remove write/DDL operations; this MCP is for read-only analysis.")
+    if re.search(r"select\s+\*", sql_clean, re.IGNORECASE):
+        add("Performance", "medium", "SELECT * is used and may fetch unnecessary columns.", "Select only required columns.")
+    if not re.search(r"\blimit\s+\d+\b", sql_clean, re.IGNORECASE):
+        add("Performance", "medium", "No LIMIT detected.", "Add LIMIT for exploration queries.")
+    if re.search(r"\binformation_schema\.|system\.jdbc\.", sql_clean, re.IGNORECASE):
+        add("Performance", "high", "SQL queries Presto metadata tables directly.", "Use search_presto_tables or get_presto_table_metadata instead.")
+
+    table_ref = _first_referenced_table(sql_clean)
+    if table_ref and "information_schema" not in table_ref.lower():
+        try:
+            _, _, _, metadata_columns = await _get_table_columns_for_metadata(table_ref, idc)
+            partitions = _partition_columns(metadata_columns)
+            if partitions and not _filter_mentions_any_column(sql_clean, partitions):
+                add(
+                    "Performance",
+                    "high",
+                    f"No partition filter detected for partitioned table `{table_ref}`.",
+                    f"Add partition predicate on: {', '.join(partitions)}.",
+                )
+        except Exception:
+            pass
+
+    if re.search(r"\bwhere\b", sql_clean, re.IGNORECASE) is None and table_ref:
+        add("Performance", "medium", "No WHERE clause detected.", "Add selective filters, especially date/partition filters.")
+    if re.search(r"\b[A-Z]{2,}\b", sql_clean) and re.search(r"\bselect\b", sql_clean):
+        add("Standards", "info", "Mixed SQL keyword casing detected.", "Use a consistent style; uppercase keywords and lowercase identifiers are preferred.")
+
+    score = 100
+    severity_penalty = {"critical": 35, "high": 25, "medium": 10, "low": 5, "info": 2}
+    for dim in dimensions:
+        for issue in dim["issues"]:
+            score -= severity_penalty.get(issue.get("severity"), 2)
+    score = max(0, score)
+    passed = all(
+        issue.get("severity") not in {"critical", "high"}
+        for dim in dimensions
+        for issue in dim["issues"]
+    )
+    result = _format_review_result(dimensions, score, passed)
+    if table_context:
+        result += f"\n\n## Provided Table Context\n{table_context.strip()}"
+    return result
+
+
+@mcp.tool()
+async def explain_presto_sql(
+    sql: str,
+    idc: str = DEFAULT_IDC,
+    explain_type: str = "DISTRIBUTED",
+    max_rows: int = 50,
+) -> Any:
+    """执行 Presto EXPLAIN，查看 query plan / scan 风险。"""
+    sql_clean = sql.strip().rstrip(";").strip()
+    if not re.match(r"^\s*(select|with|explain)\b", sql_clean, re.IGNORECASE):
+        return "❌ 只支持对 SELECT/WITH/EXPLAIN 做 query plan 分析。"
+    if re.match(r"^\s*explain\b", sql_clean, re.IGNORECASE):
+        explain_sql = sql_clean
+    else:
+        explain_type = explain_type.strip().upper()
+        if explain_type not in {"LOGICAL", "DISTRIBUTED", "VALIDATE", "IO"}:
+            return "❌ explain_type 仅支持 LOGICAL / DISTRIBUTED / VALIDATE / IO"
+        explain_sql = f"EXPLAIN (TYPE {explain_type}) {sql_clean}"
+    return await query_presto(sql=explain_sql, idc=idc, max_rows=max(1, min(int(max_rows), 200)))
+
+
+@mcp.tool()
+async def execute_datastudio_adhoc_query(
+    content: str,
+    engine_name: str = "prestosql",
+    idc: str = DEFAULT_IDC,
+    max_rows: int = 100,
+    max_wait_seconds: int = DEFAULT_MAX_WAIT_SECONDS,
+) -> Any:
+    """执行 ad-hoc SQL。
+
+    当前实现复用 DataSuite Personal Presto API 的稳定执行链路，适用于 `prestosql`。
+    DataStudio 页面内置 Agent 的 adhoc submit endpoint 仍可继续逆向；在 payload 完全稳定前，
+    MCP 不伪造前端 asset/editor 上下文。
+    """
+    if engine_name.lower() not in {"presto", "prestosql", "presto sql"}:
+        return "❌ 当前只支持 prestosql。Spark/ClickHouse adhoc 需要单独实现对应 DataStudio 执行链路。"
+    return await query_presto(
+        sql=content,
+        idc=idc,
+        max_rows=max_rows,
+        max_wait_seconds=max_wait_seconds,
+    )
+
+
+@mcp.tool()
 async def query_presto(
     sql: str,
     username: str = DEFAULT_USERNAME,
@@ -225,8 +924,8 @@ async def query_presto(
 
     注意:
     - 只支持只读 SELECT 查询
-    - SHOW / DESCRIBE 等元数据命令在此 API 中支持不完整，可能返回错误或空结果。
-      建议改用 SELECT * FROM table LIMIT 1 查看字段，或用 information_schema 查元数据。
+    - 不要用 SHOW / DESCRIBE / information_schema 查元数据；请调用 `get_presto_table_metadata`
+    - 不要用 information_schema.tables LIKE 按关键字找表；请调用 `search_presto_tables`
     - DDL 语句（CREATE / ALTER / DROP）不被支持
     - 每次最多返回 2000 行（可通过 max_rows 参数限制）
     - 默认查询等待超时时间为 10 分钟，可通过 `max_wait_seconds` 调整
@@ -260,13 +959,10 @@ async def query_presto(
         )
 
     if sql_category == "METADATA":
-        metadata_warning = (
-            f"\n⚠️ 注意: {sql_stmt_type} 是元数据查询，DataSuite API 对此类语句支持不完整，可能返回错误。"
-            f"\n建议改用等效 SELECT:"
-            f"\n  - DESCRIBE table → SELECT * FROM table LIMIT 1"
-            f"\n  - SHOW TABLES → SELECT table_name FROM information_schema.tables WHERE table_schema='xxx'"
-            f"\n  - SHOW COLUMNS → SELECT column_name, data_type FROM information_schema.columns WHERE table_name='xxx'"
-        )
+        return _metadata_guidance(sql_stmt_type or "METADATA", sql)
+
+    if sql_category == "SELECT" and _looks_like_table_discovery_sql(sql):
+        return _table_search_guidance(sql)
 
     end_user = username if '@' in username else f"{username}@shopee.com"
     try:

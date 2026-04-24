@@ -1,7 +1,7 @@
 // SeaTalk programmatic send — extract React Fiber actions & expose __seatalkSend()
 // Based on seatalk-enhance's proven approach, adapted for seatalk-agent.
 (function () {
-  var SEND_SCRIPT_VERSION = 9;
+  var SEND_SCRIPT_VERSION = 10;
   if (window.__seatalkSendVersion >= SEND_SCRIPT_VERSION) return;
   window.__seatalkSendVersion = SEND_SCRIPT_VERSION;
 
@@ -80,8 +80,58 @@
   /** 与 cachedActions 对应的会话，如 "group-123"；与当前选中不一致时必须丢弃缓存 */
   var cachedActionsSessionKey = null;
 
+  function typeNormalized(type) {
+    type = String(type || '').toLowerCase();
+    return type === 'group' ? 'group' : 'buddy';
+  }
+
   function sessionKeyNormalized(type, id) {
-    return String(type).toLowerCase() + '-' + id;
+    return typeNormalized(type) + '-' + id;
+  }
+
+  function selectedSessionMatches(sessType, sessIdNum) {
+    var idStr = String(sessIdNum);
+    var wantKey = sessionKeyNormalized(sessType, sessIdNum);
+    try {
+      var sel = window.store.getState().messages.selectedSession;
+      return !!sel && String(sel.id) === idStr && sessionKeyNormalized(sel.type, sel.id) === wantKey;
+    } catch (_) {}
+    return false;
+  }
+
+  function waitForSelectedSession(sessType, sessIdNum) {
+    return new Promise(function (resolve, reject) {
+      var attempts = 0;
+      var timer = setInterval(function () {
+        if (selectedSessionMatches(sessType, sessIdNum)) {
+          clearInterval(timer);
+          resolve();
+          return;
+        }
+        if (++attempts >= 25) {
+          clearInterval(timer);
+          reject(new Error('session "' + sessionKeyNormalized(sessType, sessIdNum) + '" was not selected'));
+        }
+      }, 120);
+    });
+  }
+
+  function getSessionFromStore(sessType, sessIdNum) {
+    try {
+      var s = window.store.getState();
+      var sl = (s.messages && s.messages.sessionList) || [];
+      var sessions = sl.length > 0 ? sl : (s.messages && s.messages.sessions) || [];
+      var sid = parseInt(sessIdNum, 10);
+      for (var i = 0; i < sessions.length; i++) {
+        var raw = sessions[i];
+        var sess = raw && (raw.session || raw);
+        if (!sess) continue;
+        if (String(sess.id) === String(sid) && typeNormalized(sess.type) === typeNormalized(sessType)) {
+          return { type: typeNormalized(sess.type), id: sid };
+        }
+      }
+    } catch (_) {}
+    return { type: typeNormalized(sessType), id: parseInt(sessIdNum, 10) };
   }
 
   function extractActions() {
@@ -115,13 +165,7 @@
   function ensureActions(sessType, sessIdNum) {
     var idStr = String(sessIdNum);
     var wantKey = sessionKeyNormalized(sessType, sessIdNum);
-    var selectedOk = false;
-    try {
-      var sel = window.store.getState().messages.selectedSession;
-      if (sel && String(sel.id) === idStr) {
-        selectedOk = sessionKeyNormalized(sel.type, sel.id) === wantKey;
-      }
-    } catch (_) { selectedOk = false; }
+    var selectedOk = selectedSessionMatches(sessType, sessIdNum);
 
     if (cachedActions && cachedActionsSessionKey === wantKey && selectedOk) {
       return Promise.resolve(cachedActions);
@@ -130,7 +174,7 @@
     cachedActions = null;
     cachedActionsSessionKey = null;
 
-    return navigateToSession(idStr).then(function () {
+    return navigateToSession(sessType, idStr).then(function () {
       return new Promise(function (resolve, reject) {
         var attempts = 0;
         var timer = setInterval(function () {
@@ -151,46 +195,66 @@
     });
   }
 
-  function navigateToSession(sessionId) {
+  function navigateToSession(sessType, sessionId) {
     var item = document.querySelector(
       '.messages-chat-session-list-item[data-id="' + sessionId + '"]'
     );
     if (item) {
       item.click();
-      return Promise.resolve();
+      return waitForSelectedSession(sessType, sessionId).catch(function () {});
     }
     // 列表里暂时看不到目标时，尝试从当前已打开的编辑器拿到 moveToTop（不依赖过期的 cachedActions）
-    if (!cachedActions || typeof cachedActions.actionMoveChatSessionToTop !== 'function') {
+    if (!cachedActions || (typeof cachedActions.actionMoveChatSessionToTop !== 'function' && typeof cachedActions.actionSelectChatSession !== 'function')) {
       var boot = extractActions();
-      if (boot && typeof boot.actionMoveChatSessionToTop === 'function') cachedActions = boot;
+      if (boot) cachedActions = boot;
     }
-    // Session not visible in virtualized list — use actionMoveChatSessionToTop
-    // to pull it into the rendered area, then click it.
+    // Session not visible in the virtualized list. Select it via SeaTalk's
+    // own action first; the DOM list may never render a far-away buddy row.
+    if (cachedActions && typeof cachedActions.actionSelectChatSession === 'function') {
+      try {
+        var target = getSessionFromStore(sessType, sessionId);
+        if (cachedActions && typeof cachedActions.actionMoveChatSessionToTop === 'function') {
+          cachedActions.actionMoveChatSessionToTop({ session: target });
+        }
+        cachedActions.actionSelectChatSession(target);
+        return waitForSelectedSession(target.type, target.id);
+      } catch (_) {}
+    }
     if (cachedActions && typeof cachedActions.actionMoveChatSessionToTop === 'function') {
       try {
-        var s = window.store.getState();
-        var sl = (s.messages && s.messages.sessionList) || [];
-        var sessions =
-          sl.length > 0 ? sl : (s.messages && s.messages.sessions) || [];
-        var sid = parseInt(sessionId, 10);
-        var sess = null;
-        for (var i = 0; i < sessions.length; i++) {
-          if (sessions[i] && sessions[i].id === sid) { sess = sessions[i]; break; }
-        }
-        if (sess) {
-          cachedActions.actionMoveChatSessionToTop({ session: { type: sess.type, id: sid } });
-          return new Promise(function (resolve, reject) {
-            var att = 0;
-            var t = setInterval(function () {
-              var el = document.querySelector('.messages-chat-session-list-item[data-id="' + sessionId + '"]');
-              if (el) { clearInterval(t); el.click(); resolve(); return; }
-              if (++att >= 15) { clearInterval(t); reject(new Error('session "' + sessionId + '" did not appear in list after moveToTop')); }
-            }, 200);
-          });
+        var fallback = getSessionFromStore(sessType, sessionId);
+        cachedActions.actionMoveChatSessionToTop({ session: fallback });
+        return new Promise(function (resolve, reject) {
+          var att = 0;
+          var t = setInterval(function () {
+            var el = document.querySelector('.messages-chat-session-list-item[data-id="' + sessionId + '"]');
+            if (el) {
+              clearInterval(t);
+              el.click();
+              waitForSelectedSession(sessType, sessionId).then(resolve).catch(resolve);
+              return;
+            }
+            if (++att >= 15) {
+              clearInterval(t);
+              reject(new Error('session "' + sessionId + '" did not appear in list after moveToTop'));
+            }
+          }, 200);
+        });
+      } catch (_) {}
+    }
+    // Existing contacts may not have a rendered chat row yet.
+    if (typeNormalized(sessType) === 'buddy') {
+      try {
+        var info = window.store.getState().contact;
+        var buddies = info.buddyList || [];
+        for (var j = 0; j < buddies.length; j++) {
+          if (String(buddies[j].id) === String(sessionId)) {
+            return Promise.reject(new Error('session "' + sessionKeyNormalized(sessType, sessionId) + '" is a contact but not in chat list yet'));
+          }
         }
       } catch (_) {}
     }
-    return Promise.reject(new Error('session "' + sessionId + '" not in chat list. Use add_seatalk_contact first for new contacts.'));
+    return Promise.reject(new Error('session "' + sessionKeyNormalized(sessType, sessionId) + '" not in chat list. Use add_seatalk_contact first for new contacts.'));
   }
 
   function tryCache() {
@@ -422,5 +486,5 @@
   getContactService().catch(function () {});
   getRecallService().catch(function () {});
 
-  console.log('[seatalk-send] ready v7');
+  console.log('[seatalk-send] ready v10');
 })();

@@ -6,6 +6,48 @@
 
 ---
 
+## v3.6.12 -- 2026-04-24 -- `fix`: 补齐 MCP 元数据工具并收口 Cookie 刷新弹窗
+
+**提交者**: Codex / 仓库维护者
+**Commit Type**: fix（PATCH **3.6.11 → 3.6.12**）
+
+### 变更说明
+
+**presto-query**
+
+- 新增 **`search_presto_tables`**，通过 DataStudio metadata search 按关键字找表，替代 Agent 生成 `information_schema.tables LIKE`。
+- 新增 **`get_presto_table_metadata`**，读取 DataMap / DataStudio 元数据，返回表描述、HDFS 路径、大小、Owner/PIC、分区字段与字段列表，替代 `DESCRIBE` / `SHOW`。
+- 新增 **`preview_presto_table_data`** 与 **`get_presto_column_distinct_values`**，默认要求分区过滤，避免 Agent 直接扫大表或全表 `GROUP BY`。
+- 新增 **`review_presto_sql`**、**`explain_presto_sql`** 与 **`execute_datastudio_adhoc_query`**；`query_presto` 会拦截 `DESCRIBE` / `SHOW` / `information_schema` 搜表 SQL 并给出正确 MCP 工具建议。
+
+**datastudio-mcp**
+
+- 新增 **`search_datastudio_assets`**，支持按项目、路径搜索 DataStudio asset，可选扫描文件内容。
+- 新增 **`read_datastudio_asset`**，按 `assetId` 读取 SQL / Shell / Python 内容与基础元数据。
+- Cookie 缓存默认目录从相对 `.config` 改为 **`~/.spx_helper/datastudio-mcp/.config`**，并支持 **`DATASTUDIO_MCP_CONFIG_DIR`** 覆盖，避免 Codex / Cursor MCP 进程 cwd 只读时报错。
+
+**chrome-auth / SeaTalk Agent**
+
+- **chrome-auth**：CDP 静默 SSO 刷新失败时默认返回诊断，不再自动 `open` Chrome 或执行 AppleScript；如需旧兜底行为，显式设置 **`CHROME_AUTH_ALLOW_BROWSER_OPEN=1`**。
+- **datastudio-mcp**：普通读取 Cookie 不再误传 `auth_failed=True`，只有真实收到 401/403 后才触发强制 SSO 刷新。
+- **seatalk-agent**：`seatalk-send` 注入脚本增强远距离私聊会话选择，优先使用 SeaTalk 内部 action 选中目标会话，并按会话类型与 id 校验发送目标。
+
+**文档**
+
+- 更新 **`README.md`**、**`docs/guides/MCP_TOOLS.md`**、**`docs/guides/SEATALK_AGENT.md`**、**`docs/guides/CHROME_EXTENSION.md`**、**`mcp-tools/presto-query/README.md`**、**`mcp-tools/datastudio-mcp/README.md`** 与 **`mcp-tools/chrome-auth/README.md`**，同步新工具、认证刷新行为、配置目录与 3.6.12 版本号。
+
+### 测试项
+
+- MCP 实测：`search_presto_tables(keyword="fleet_order", schema="spx_datamart")` 返回 97 个匹配。
+- MCP 实测：`get_presto_table_metadata("spx_datamart.dwd_spx_fleet_order_di_id")` 返回表描述、技术 PIC、`grass_date` 分区字段和字段列表。
+- MCP 实测：`preview_presto_table_data("spx_datamart.dwd_spx_fleet_order_di_id")` 无分区过滤时正确拒绝预览大分区表。
+- MCP 实测：`query_presto("DESCRIBE ...")` 与 `information_schema.tables LIKE` 被拦截并提示改用新元数据工具。
+- MCP 实测：`execute_datastudio_adhoc_query("SELECT 1 AS ok")` 与 `explain_presto_sql("SELECT 1 AS ok")` 成功。
+- MCP 实测：`search_datastudio_assets("fleet_order", project_code="spx_datamart", path="//Manual Tasks/")` 与 `read_datastudio_asset(asset_id=11490895)` 成功。
+- `python3 -m py_compile` 覆盖 chrome-auth、datastudio-mcp、presto-query 变更文件。
+- `git diff --check` 覆盖本次变更文件。
+- `npm run verify:hooks`
+
 ## v3.6.11 -- 2026-04-24 -- `fix`: 修复 Codex Desktop 本地 MCP 启动链路
 
 **提交者**: Codex / 仓库维护者
