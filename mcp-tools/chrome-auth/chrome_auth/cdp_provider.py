@@ -18,6 +18,13 @@ logger = logging.getLogger("chrome_auth.cdp")
 
 DEFAULT_CDP_PORTS = [9222, 19222]
 _HEADER_LISTEN_TIMEOUT = 10  # seconds
+_AUTH_BROWSER_REQUIRED_DOMAINS = (
+    "datasuite.shopee.io",
+    "data-infra.shopee.io",
+    "keyhole.data-infra.shopee.io",
+    "grafana.idata.shopeemobile.com",
+)
+_DATASUITE_REQUIRED_CDP_COOKIE = "DATA-SUITE-AUTH-userToken-v4"
 
 # Domains that support silent SSO refresh via CDP navigation
 _SSO_REFRESH_DOMAINS = (
@@ -72,12 +79,19 @@ def probe_cdp_connectivity(cdp_port: Optional[int] = None) -> Dict[str, Any]:
             ordered.append(p)
 
     reachable: List[int] = []
+    port_browser: Dict[int, str] = {}
+    auth_skipped: Dict[int, str] = {}
     errors: Dict[int, str] = {}
     for p in ordered:
         try:
             resp = http_requests.get(f"http://127.0.0.1:{p}/json", timeout=2)
             if resp.status_code == 200:
                 reachable.append(p)
+                browser = _cdp_browser_name(p)
+                if browser:
+                    port_browser[p] = browser
+                if not _is_usable_auth_cdp_port(p):
+                    auth_skipped[p] = browser or "unknown CDP product"
             else:
                 errors[p] = f"HTTP {resp.status_code}"
         except Exception as e:
@@ -87,6 +101,8 @@ def probe_cdp_connectivity(cdp_port: Optional[int] = None) -> Dict[str, Any]:
         "env_chrome_cdp_port": env_port or "(未设置)",
         "ports_probe_order": ordered,
         "reachable_ports": reachable,
+        "port_browser": port_browser,
+        "auth_skipped_ports": auth_skipped,
         "per_port_error": errors,
     }
 
@@ -128,6 +144,53 @@ def _list_pages(port: int) -> List[Dict[str, Any]]:
     resp = http_requests.get(f"http://127.0.0.1:{port}/json", timeout=5)
     resp.raise_for_status()
     return resp.json()
+
+
+def _cdp_browser_name(port: int) -> str:
+    """Return the CDP product string from /json/version, if available."""
+    try:
+        resp = http_requests.get(f"http://127.0.0.1:{port}/json/version", timeout=2)
+        if resp.status_code != 200:
+            return ""
+        data = resp.json()
+        return str(data.get("Browser") or data.get("User-Agent") or "")
+    except Exception:
+        return ""
+
+
+def _requires_real_browser_cdp(url_pattern: str) -> bool:
+    """Auth domains must use a real browser profile, not SeaTalk/Electron CDP proxies."""
+    p = (url_pattern or "").strip().lower()
+    return any(domain in p or p in domain for domain in _AUTH_BROWSER_REQUIRED_DOMAINS)
+
+
+def _is_usable_auth_cdp_port(port: int) -> bool:
+    """True when a CDP port looks like Chrome/Chromium rather than an app proxy."""
+    product = _cdp_browser_name(port).lower()
+    if not product:
+        return False
+    if "seatalk" in product or "cdp-proxy" in product or "electron" in product:
+        return False
+    return "chrome" in product or "chromium" in product or "headlesschrome" in product
+
+
+def _cdp_ports_for_auth(url_pattern: str, cdp_port: Optional[int]) -> List[int]:
+    """Reachable CDP ports, excluding app CDP proxies for DataSuite-style auth domains."""
+    ports = _list_reachable_cdp_ports(cdp_port)
+    if not _requires_real_browser_cdp(url_pattern):
+        return ports
+    usable: List[int] = []
+    for port in ports:
+        if _is_usable_auth_cdp_port(port):
+            usable.append(port)
+        else:
+            logger.info(
+                "Skipping CDP port %d for %s auth: product=%s",
+                port,
+                url_pattern,
+                _cdp_browser_name(port) or "unknown",
+            )
+    return usable
 
 
 def _find_page(port: int, url_pattern: str) -> Optional[Dict[str, Any]]:
@@ -294,12 +357,15 @@ def get_cdp_cookies(
         if cached is not None:
             return cached
 
-    ports = _list_reachable_cdp_ports(cdp_port)
+    ports = _cdp_ports_for_auth(url_pattern, cdp_port)
     if not ports:
-        logger.warning("No CDP port reachable for cookie read")
+        logger.warning("No usable CDP port reachable for cookie read")
         return {}
 
     urls = _cookie_urls_for_pattern(url_pattern)
+    require_datasuite_key = "datasuite.shopee.io" in (url_pattern or "").lower()
+    best_partial: Dict[str, str] = {}
+    best_partial_expires: Optional[float] = None
 
     for port in ports:
         page = _pick_page_for_cookie_read(port, url_pattern)
@@ -321,6 +387,18 @@ def get_cdp_cookies(
                     cookie_expires.append(exp)
             if cookies:
                 min_expires = min(cookie_expires) if cookie_expires else None
+                if require_datasuite_key and _DATASUITE_REQUIRED_CDP_COOKIE not in cookies:
+                    if not best_partial or len(cookies) > len(best_partial):
+                        best_partial = cookies
+                        best_partial_expires = min_expires
+                    logger.info(
+                        "CDP port %d returned %d cookies for %s but not %s; trying next port",
+                        port,
+                        len(cookies),
+                        url_pattern,
+                        _DATASUITE_REQUIRED_CDP_COOKIE,
+                    )
+                    continue
                 effective_ttl = _effective_ttl(min_expires, ttl)
                 cache.set(cache_key, cookies, effective_ttl)
                 expiry_key = f"cdp_cookie_expires:{url_pattern}"
@@ -338,6 +416,19 @@ def get_cdp_cookies(
         except Exception as e:
             logger.warning("CDP Network.getCookies failed on port %d: %s", port, e)
             continue
+
+    if best_partial:
+        effective_ttl = _effective_ttl(best_partial_expires, ttl)
+        cache.set(cache_key, best_partial, effective_ttl)
+        expiry_key = f"cdp_cookie_expires:{url_pattern}"
+        if best_partial_expires is not None:
+            cache.set(expiry_key, best_partial_expires, effective_ttl)
+        logger.info(
+            "Returning partial CDP cookies for %s after all usable ports missed %s",
+            url_pattern,
+            _DATASUITE_REQUIRED_CDP_COOKIE,
+        )
+        return best_partial
 
     return {}
 
@@ -549,10 +640,10 @@ def _try_cdp_refresh(
     cdp_port: Optional[int] = None,
     timeout: float = 15,
 ) -> bool:
-    """Try to refresh session via CDP on every reachable port (Chrome 9222 preferred over Electron 19222)."""
-    ports = _list_reachable_cdp_ports(cdp_port)
+    """Try to refresh session via usable browser CDP ports, skipping app proxies for auth domains."""
+    ports = _cdp_ports_for_auth(url, cdp_port)
     if not ports:
-        logger.debug("_try_cdp_refresh: no CDP port reachable")
+        logger.debug("_try_cdp_refresh: no usable CDP port reachable")
         return False
 
     for port in ports:

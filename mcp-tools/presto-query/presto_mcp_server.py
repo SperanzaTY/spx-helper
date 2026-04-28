@@ -94,9 +94,11 @@ def _classify_sql(sql: str) -> Tuple[str, Optional[str]]:
 def _normalize_idc(idc: str) -> str:
     """将用户输入的 IDC 标识规范化为 DataSuite API 所需的值。"""
     normalized = (idc or DEFAULT_IDC or 'sg').strip().lower()
-    if normalized not in {'sg', 'us'}:
-        raise ValueError("idc 仅支持 `sg` 或 `us`，默认 `sg`")
-    return normalized.upper()
+    if normalized in {'sg', 'singapore', ''}:
+        return "SG"
+    if normalized in {'us', 'useast', 'us-east', 'useast1'}:
+        return "USEast"
+    raise ValueError("idc 仅支持 `sg` 或 `us`/`USEast`，默认 `sg`")
 
 
 def _normalize_metadata_idc(idc: str) -> Tuple[str, str]:
@@ -697,7 +699,7 @@ async def preview_presto_table_data(
         partition_filter: 分区过滤条件片段，例如 `grass_date = '2026-04-24'`
         where_filter: 额外过滤条件片段，例如 `display_status = 1`
         limit: 返回行数，默认 10，最大 100
-        idc: IDC，支持 `sg` 或 `us`
+        idc: IDC，支持 `sg` 或 `us`/`USEast`
         require_partition_filter: 分区表是否强制要求 partition_filter，默认 True
     """
     try:
@@ -748,7 +750,7 @@ async def get_presto_column_distinct_values(
         partition_filter: 分区过滤条件片段，例如 `grass_date = '2026-04-24'`
         where_filter: 额外过滤条件片段
         limit: Top N，默认 20，最大 100
-        idc: IDC，支持 `sg` 或 `us`
+        idc: IDC，支持 `sg` 或 `us`/`USEast`
         require_partition_filter: 分区表是否强制要求 partition_filter，默认 True
     """
     try:
@@ -936,7 +938,7 @@ async def query_presto(
         sql: 要执行的 SQL 查询语句（必须是只读的 SELECT 语句）
         username: 用户名（默认使用配置的用户名）
         queue: Presto 队列名称，szsc-adhoc 或 szsc-scheduled（默认 szsc-adhoc）
-        idc: IDC 集群，支持传 `sg` 或 `us`（默认 `sg`）
+        idc: IDC 集群，支持传 `sg` 或 `us`/`USEast`（默认 `sg`）
         max_rows: 最多返回行数（默认 100，最大 2000）
         cell_max_len: 表格展示时每个单元格最大字符数；**0 表示不截断**（适合 sink/source 长 JSON）；
             设为 50–120 可缩短 MCP 文本体积。默认 0。
@@ -1097,7 +1099,7 @@ async def query_presto(
 
         output = f"✅ 查询成功\n\n"
         output += f"Job ID: {job_id}\n"
-        output += f"IDC: {normalized_idc.lower()}\n"
+        output += f"IDC: {normalized_idc}\n"
         if sql_stmt_type:
             output += f"SQL 类型: {sql_stmt_type}\n"
         output += f"{sql_block}\n"

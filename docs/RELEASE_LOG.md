@@ -6,6 +6,38 @@
 
 ---
 
+## v3.6.14 -- 2026-04-28 -- `fix`: 修复 DataSuite 认证 CDP 选择与 Presto USEast 查询
+
+**提交者**: Codex / 仓库维护者
+**Commit Type**: fix（PATCH **3.6.13 → 3.6.14**）
+
+### 变更说明
+
+**chrome-auth**
+
+- DataSuite / Keyhole / Grafana 等认证域会读取 `/json/version` 校验 CDP 产品名，只使用 Chrome / Chromium / HeadlessChrome 端口。
+- 跳过 `SeaTalk/CDP-Proxy`、Electron 等非 Chrome CDP，避免把 SeaTalk Agent 的 `19222` 当成 DataSuite 登录浏览器去静默 SSO 刷新。
+- 401 诊断新增 CDP 产品名与被跳过端口说明，能明确指出 `19222=SeaTalk/CDP-Proxy` 不共享 Chrome 的 DataSuite 登录态。
+
+**presto-query**
+
+- `query_presto` / `execute_datastudio_adhoc_query` 的 `idc` 参数统一支持 `sg` / `us` / `USEast`。
+- `us`、`USEast`、`us-east`、`useast1` 均规范化为 DataSuite Personal SQL API 使用的 `USEast`，与元数据工具保持一致。
+
+**文档**
+
+- 更新 **`README.md`**、**`docs/guides/MCP_TOOLS.md`**、**`docs/guides/CHROME_EXTENSION.md`**、**`mcp-tools/chrome-auth/README.md`** 与 **`mcp-tools/presto-query/README.md`**，同步认证诊断、CDP 端口选择和 USEast 参数说明。
+
+### 测试项
+
+- `PYTHONPATH=mcp-tools/chrome-auth python3 -m unittest discover -s mcp-tools/chrome-auth/tests -v`
+- `.mcp-venvs/arm64-py3.12/bin/python3 -m unittest discover -s mcp-tools/presto-query/tests -v`
+- `python3 -m py_compile mcp-tools/chrome-auth/chrome_auth/*.py`
+- `.mcp-venvs/arm64-py3.12/bin/python3 -m py_compile mcp-tools/presto-query/presto_mcp_server.py`
+- 真实 19222 场景验证：仅 `19222=SeaTalk/CDP-Proxy` 可达时，DataSuite refresh 返回 `False`，SeaTalk target 数量不增加。
+- `git diff --check`
+- `npm run verify:hooks`
+
 ## v3.6.13 -- 2026-04-24 -- `feat`: SeaTalk Agent 增加 MCP 状态面板
 
 **提交者**: Codex / 仓库维护者

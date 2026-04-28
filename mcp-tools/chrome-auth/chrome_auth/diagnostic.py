@@ -98,6 +98,8 @@ def format_auth_troubleshoot(
     env_p = probe["env_chrome_cdp_port"]
     reach = probe["reachable_ports"]
     order = probe["ports_probe_order"]
+    port_browser = probe.get("port_browser") or {}
+    auth_skipped = probe.get("auth_skipped_ports") or {}
 
     blocks: list[str] = []
     blocks.append(
@@ -107,8 +109,19 @@ def format_auth_troubleshoot(
     )
     if reach:
         blocks.append(
-            f"[环境] 当前可达 CDP 端口: {reach}（静默刷新与 Network.getCookies 使用这些端口）"
+            f"[环境] 当前可达 CDP 端口: {reach}（DataSuite 认证只会使用其中的 Chrome / Chromium 端口）"
         )
+        if port_browser:
+            blocks.append(
+                "[环境] CDP 产品: "
+                + ", ".join(f"{p}={name}" for p, name in sorted(port_browser.items()))
+            )
+        if auth_skipped:
+            blocks.append(
+                "[环境] 已跳过不适合 DataSuite 认证的 CDP 端口: "
+                + ", ".join(f"{p}={name}" for p, name in sorted(auth_skipped.items()))
+                + "。这些通常是 SeaTalk/Electron 代理，不共享你在 Chrome 里的 DataSuite 登录态。"
+            )
     else:
         blocks.append(
             "[环境] 未发现可达 CDP（127.0.0.1 上常见调试端口 /json 无响应）。"

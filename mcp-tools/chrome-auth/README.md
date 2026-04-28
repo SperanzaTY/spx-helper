@@ -128,7 +128,7 @@ class AuthResult:
 
 刷新链路（按安静程度优先）：
 
-1. **CDP**：对每个可达调试端口依次创建 **CDP `hidden` 目标**（不出现在标签栏，避免 Chrome 抢前台），再 `Page.navigate` 到续期 URL，成功后 `Target.closeTarget`。若当前 Chrome 版本不支持 `hidden`，会降级为普通新标签（可能短暂激活窗口）。请尽量用 **Chrome** 带 `--remote-debugging-port=9222` 启动，并设置 `CHROME_CDP_PORT=9222`，避免只连到 SeaTalk 等 Electron 端口时与 Chrome Cookie 罐不一致。`data-infra` / Keyhole 相关域的续期导航指向 **Keyhole 站点根**（`https://keyhole.data-infra.shopee.io/`），不会再去打开 `https://data-infra.shopee.io/` 根路径（该地址通常不是你要看的 Flink 页）。
+1. **CDP**：对每个可达调试端口依次创建 **CDP `hidden` 目标**（不出现在标签栏，避免 Chrome 抢前台），再 `Page.navigate` 到续期 URL，成功后 `Target.closeTarget`。若当前 Chrome 版本不支持 `hidden`，会降级为普通新标签（可能短暂激活窗口）。DataSuite / Keyhole / Grafana 等认证域会跳过 `SeaTalk/CDP-Proxy`、Electron 等非 Chrome CDP，避免把 SeaTalk 的 `19222` 当成 DataSuite 登录浏览器。请尽量用 **Chrome** 带 `--remote-debugging-port=9222` 启动，并设置 `CHROME_CDP_PORT=9222`。`data-infra` / Keyhole 相关域的续期导航指向 **Keyhole 站点根**（`https://keyhole.data-infra.shopee.io/`），不会再去打开 `https://data-infra.shopee.io/` 根路径（该地址通常不是你要看的 Flink 页）。
 2. **默认不再打开浏览器窗口**：如果 CDP 静默刷新失败，`chrome-auth` 会返回刷新失败并让 MCP 输出诊断，不会自动 `open` Chrome 或跑 AppleScript。
 3. **可选浏览器兜底**：若确实需要旧行为，可设置 `CHROME_AUTH_ALLOW_BROWSER_OPEN=1`。此时会先用 macOS `open -g -a "Google Chrome" <url>` 后台打开页面，再按需使用 AppleScript。可用 `CHROME_AUTH_BROWSER_APP` 指定浏览器名（如 `Chromium`），也可用 `CHROME_AUTH_DISABLE_OPEN_G=1` / `CHROME_AUTH_DISABLE_APPLESCRIPT=1` 细分关闭。
 
@@ -136,7 +136,7 @@ class AuthResult:
 
 **DataSuite 域名**（`datasuite.shopee.io`）会按顺序尝试多个落地页：`/scheduler/` → `/` → `/flink/`，避免单一入口在部分网络下无法完成续期。
 
-401 时 MCP 会通过 **`format_auth_troubleshoot`** 输出结构化说明（`CHROME_CDP_PORT`、可达 CDP 端口、本次静默刷新是否成功、关键 Cookie 是否齐全），便于区分「未连上 CDP」与「会话已彻底失效需人工登录」。
+401 时 MCP 会通过 **`format_auth_troubleshoot`** 输出结构化说明（`CHROME_CDP_PORT`、可达 CDP 端口、CDP 产品名、被跳过的非 Chrome 端口、本次静默刷新是否成功、关键 Cookie 是否齐全），便于区分「未连上 Chrome CDP」「误连 SeaTalk 19222」与「会话已彻底失效需人工登录」。
 
 ### `invalidate_domain(domain)`
 
@@ -152,7 +152,7 @@ invalidate_domain("datasuite.shopee.io")  # 清除该域名的全部缓存
 
 通过 CDP `Network.getCookies` 获取**当前调试端口对应浏览器**里、对目标站点生效的 Cookie。
 
-- **多端口**：会依次尝试环境变量 `CHROME_CDP_PORT`（若设置）、再 `9222`、再 `19222` 等可达端口。
+- **多端口**：会依次尝试环境变量 `CHROME_CDP_PORT`（若设置）、再 `9222`、再 `19222` 等可达端口。DataSuite / Keyhole / Grafana 认证域会先校验 `/json/version` 的产品名，只使用 Chrome / Chromium / HeadlessChrome 端口，跳过 SeaTalk / Electron 代理端口。
 - **无需已打开目标站标签页**：若无 URL 含 `datasuite.shopee.io` 的标签，仍会使用任意可调试页面，并对 `https://datasuite.shopee.io/` 请求 Cookie。
 - **与 Chrome 一致**：DataSuite 登录若在 **Google Chrome** 里完成，而 CDP 只连在 **SeaTalk / 其它 Electron（如 19222）** 上，则两套进程 Cookie 罐不同，**仍拿不到** `DATA-SUITE-AUTH-userToken-v4`。请对 **Chrome** 使用 `--remote-debugging-port=9222` 启动（或设置 `CHROME_CDP_PORT` 指向 Chrome 的调试端口），再在本机 Chrome 中登录 DataSuite。
 
@@ -366,7 +366,7 @@ cookies = get_cookies("app.example.com", parent_domain="example.com")
 
 3. **401 自动重试** — 建议在 MCP 的 HTTP 请求层实现 401 自动重试（参考上面的 `_request` 示例），遇到 401 时用 `force=True` 重新获取 Cookie。
 
-4. **CDP 端口** — 自动检测 `9222` 和 `19222`。也可通过环境变量 `CHROME_CDP_PORT` 指定，或在 API 调用时传 `cdp_port` 参数。
+4. **CDP 端口** — 自动检测 `9222` 和 `19222`。DataSuite 认证会跳过 SeaTalk / Electron 代理端口；也可通过环境变量 `CHROME_CDP_PORT` 指定真实 Chrome 调试端口，或在 API 调用时传 `cdp_port` 参数。
 
 5. **CDP Origin 策略** — Chrome 较新版本默认拒绝来自非白名单 Origin 的 WebSocket 连接（返回 403 Forbidden）。`cdp_provider` 使用 `suppress_origin=True` 跳过 Origin 检查。如果你用 `--remote-debugging-port` 启动 Chrome，建议同时加上 `--remote-allow-origins=*` 参数。
 
