@@ -6,6 +6,26 @@
 
 ---
 
+## v3.6.15 -- 2026-04-28 -- `feat`: 新增 SPX 迁移催促与 SQL 建议 Skill
+
+**提交者**: Codex / 仓库维护者
+**Commit Type**: feat（PATCH **3.6.14 → 3.6.15**）
+
+### 变更说明
+
+**Skills**
+
+- 新增 **`spx-migration-push`** skill，用于从 GSheet 跟进 SPX mart 迁移 owner、读取 SeaTalk 回复、验证真实迁移状态，并生成 owner 级别迁移建议。
+- Skill 流程支持跨 mart 空间读取 DataStudio 线上资产：用户任务 SQL 从 owner project 读取，新表逻辑从 `spx_datamart` 读取，DataStudio 查找失败时回退到 Scheduler latest successful SQL。
+- 新增迁移建议模板与 deterministic SQL 分析脚本，覆盖旧表匹配、before/after snippet、常见字段/分区差异 notes。
+- 沉淀 `df -> di` incremental 语义差异、fleet order 替换、`dim_spx_station_{cid}` 到 `dim_spx_network_station_{cid}` 等迁移案例。
+
+### 测试项
+
+- `python3` 校验 `spx-migration-push/SKILL.md` frontmatter、引用文件与脚本文件存在。
+- `python3 .agents/skills/spx-migration-push/scripts/analyze_sql_migration.py ...` 验证旧表识别、替换 snippet 与 station migration notes。
+- `npm run verify:hooks`
+
 ## v3.6.14 -- 2026-04-28 -- `fix`: 修复 DataSuite 认证 CDP 选择与 Presto USEast 查询
 
 **提交者**: Codex / 仓库维护者
