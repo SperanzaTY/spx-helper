@@ -70,12 +70,16 @@ Codex repo-scoped skills 位于 `.agents/skills/`，当前已建立入口：
 - `seatalk-troubleshoot`
 - `flink-alert-triage`
 - `release-publish`
+- `mcp-capability-build`
+- `spx-migration-push`
 
 这批 skill 当前采用更接近 Codex 原生的结构：
 
 - `SKILL.md` 只保留触发条件、主流程和关键约束
 - 深入材料放在各 skill 自己的 `references/` 下按需加载
 - 原先 `.cursor/skills/` 中的长工作流会按需整理成更适合 Codex 上下文预算的版本
+
+其中 `spx-migration-push` 面向 SPX mart 迁移推进：它会从 GSheet 定位待迁移 task，读取 SeaTalk 回复，查询 Scheduler / Presto 真实迁移状态，并按 owner project 与 `spx_datamart` 分别读取 DataStudio 线上资产，生成 task-specific 的迁移 SQL 建议和跟进文案。
 
 需要注意：
 

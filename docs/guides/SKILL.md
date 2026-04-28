@@ -28,6 +28,7 @@ Skill（指令层）     →  定义"怎么做"     → .cursor/skills/<name>/SK
 | **seatalk-troubleshoot** | SeaTalk Agent 故障排查（10 阶段系统化排查：进程 → 多进程冲突 → CDP → 注入 → ACP → Remote → 功能 → UI → Agent 重启 → 日志） | 无外部依赖 |
 | **release-publish** | 发版流程规范（含 `npm run verify:hooks` → 版本号 → 日志 → 文档联动 → CDP 验证 → 群通知 → `npm run push:release`：GitLab 成功后再同步 GitHub 并投递通知） | 无外部依赖 |
 | **mcp-capability-build** | 面向 SPX Helper 框架的 MCP 新能力建设流程：先审现状，再用 CDP/真实接口证实页面能力，并复用 `chrome-auth` 的 Cookie 读取、静默 SSO 刷新、401 诊断与真环境 smoke；适合 DataMap/Datastudio/Scheduler/Flink 这类 DataSuite 能力下沉到 MCP | `chrome-auth` 体系、目标站点登录态、必要时 Chrome CDP |
+| **spx-migration-push** | SPX mart 迁移推进流程：从 GSheet 定位 owner/task，读取 SeaTalk 回复，查询真实迁移状态，跨 mart 空间读取 DataStudio 线上资产，并生成 old-table → new-table 的 task-specific SQL 迁移建议和 owner-facing 跟进文案 | google-sheets, seatalk-reader, scheduler-query, presto-query, datastudio-mcp, datamap-query |
 
 排查 ClickHouse 时若 Cursor Agent 调 `query_ck` 参数为空，可改用 MCP 工具 **`query_ck_bundle`**（单参 JSON 字符串），详见 `mcp-tools/ck-query/README.md` 与 `spx-bug-trace` 的 `tools-reference.md`。
 
@@ -48,6 +49,8 @@ Skill（指令层）     →  定义"怎么做"     → .cursor/skills/<name>/SK
 **v3.6.6**：`spx-bug-trace` 的 repo-scoped 版本补强两类约束：一是 **实时 CK 缺单实体** 在确认 source fact / DIM 已有数据后，应优先切到 **Flink app 健康度排查**，不要继续停留在线上 SQL 猜测；二是 **非简单问题的最终产物必须是过程文档**，保留关键 SQL、MCP 调用、空结果检查、代码路径，以及准备同步到 Confluence 前的本地 Markdown 过程记录。与此同时，Codex 侧文档补充了 **`.cursor/skills` 不会自动成为当前 Codex 会话可用 skill**、repo-scoped 入口以 `.agents/skills/` 为准，以及需要时安装到 `~/.codex/skills/` 的边界说明。
 
 **v3.6.6（repo-scoped skill 补充）**：`spx-bug-trace` 的 Codex 入口新增 `references/sinks.md`，把本地过程文档命名、Confluence 标题前缀（`FM-` / `MM-` / `LM-`）以及 Google Sheets `app问题整理` / `坑点` 的写回约束显式抽成 reference，避免 Codex 只读精简入口时漏掉这些硬规则。
+
+**spx-migration-push**：新增 repo-scoped skill 说明文档入口。该 skill 用于 SPX mart 迁移催促、SeaTalk 回复处理、真实迁移状态验证，以及结合 GSheet / Scheduler / DataStudio / Presto 元数据生成迁移 SQL 建议；DataStudio 读取策略要求 owner 任务 SQL 从 owner project 读取，新表逻辑从 `spx_datamart` 读取。
 
 **双副本同步**：`flink-alert-triage` 在仓库中为 `.cursor/skills/flink-alert-triage/SKILL.md`，与开发者本机主副本 `~/.cursor/skills/flink-alert-triage/SKILL.md` 内容应对齐；更新 skill 后请 `cp` 同步另一侧。  
 Alarm Bot 用的 **`alarm-bot-prompt.md`** 同目录存放，修改后也请同步到 `~/.cursor/skills/flink-alert-triage/alarm-bot-prompt.md`，便于本机与仓库一致。
@@ -113,9 +116,10 @@ cp -r .cursor/skills/<skill-name> ~/.cursor/skills/
 ## 贡献新 Skill
 
 1. 在 `.cursor/skills/` 下创建新目录，包含 `SKILL.md`（必须）
-2. 在 `SKILL.md` 中说明用途、步骤、依赖 MCP
-3. 更新本文档的 Skill 列表
-4. 通过 MR 提交
+2. Codex repo-scoped skill 在 `.agents/skills/<skill>/` 下创建，按需拆分 `references/`、`scripts/`、`agents/openai.yaml`
+3. 在 `SKILL.md` 中说明用途、步骤、依赖 MCP
+4. 更新本文档的 Skill 列表
+5. 通过 MR 提交
 
 ---
 
