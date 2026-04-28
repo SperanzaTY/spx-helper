@@ -1,0 +1,4 @@
+interface:
+  display_name: "SPX Migration Push"
+  short_description: "Analyze and follow up SPX migrations"
+  default_prompt: "Use $spx-migration-push to analyze pending SPX mart migration tasks and draft owner follow-ups."
